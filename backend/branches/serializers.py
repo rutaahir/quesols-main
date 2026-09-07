@@ -13,9 +13,10 @@ class BranchSerializer(serializers.ModelSerializer):
 
     def get_enabled_methods(self, obj):
         try:
-            return [int(m) for m in obj.queue_methods.filter(is_enabled=True).values_list("method", flat=True)]
+            methods = [int(m) for m in obj.queue_methods.filter(is_enabled=True).values_list("method", flat=True)]
+            return methods if methods else [1, 2, 3, 4]
         except Exception:
-            return [1, 2]
+            return [1, 2, 3, 4]
 
     def validate(self, data):
         # Generate unique slug within the company if not provided

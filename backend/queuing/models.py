@@ -15,6 +15,13 @@ class Desk(BaseModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="offline")
     is_active = models.BooleanField(default=True)
     is_online_booking_desk = models.BooleanField(default=False)
+    current_operator = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="active_desk_sessions"
+    )
 
     objects = TenantManager()
     all_objects = models.Manager()
@@ -93,6 +100,10 @@ class TokenSequence(BaseModel):
 
     @classmethod
     def get_next_sequence_number(cls, branch):
+        return cls.get_unique_token_number(branch, prefix="")
+
+    @classmethod
+    def get_unique_token_number(cls, branch, prefix=""):
         from django.db import transaction
         from django.utils import timezone
         today = timezone.now().date()
@@ -103,9 +114,18 @@ class TokenSequence(BaseModel):
                 defaults={"last_number": 0}
             )
             seq = cls.objects.select_for_update().get(id=seq.id)
-            seq.last_number += 1
-            seq.save(update_fields=["last_number"])
-            return seq.last_number
+
+            # Lazy import to avoid circular dependency
+            from queuing.models import Ticket
+
+            while True:
+                seq.last_number += 1
+                clean_prefix = (prefix or "").strip()
+                candidate = f"{clean_prefix}{seq.last_number:03d}" if clean_prefix else f"{seq.last_number:03d}"
+                exists = Ticket.objects.filter(branch=branch, token_number=candidate, created_at__date=today).exists()
+                if not exists:
+                    seq.save(update_fields=["last_number"])
+                    return candidate
 
 class QueueMethod(BaseModel):
     METHOD_CHOICES = [
@@ -194,6 +214,9 @@ class Ticket(BaseModel):
     served_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     served_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="served_tickets")
+    feedback_rating = models.IntegerField(null=True, blank=True)
+    feedback_text = models.TextField(null=True, blank=True)
+    feedback_submitted_at = models.DateTimeField(null=True, blank=True)
 
     objects = TenantManager()
     all_objects = models.Manager()

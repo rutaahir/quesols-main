@@ -47,11 +47,19 @@ export function ConsoleShell({
 
   return (
     <div className="flex min-h-screen bg-surface">
+      {/* Mobile Menu Backdrop */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-xs lg:hidden transition-opacity"
+        />
+      )}
+
       {/* Mobile Menu Toggle Button */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed top-4 left-4 z-40 rounded-xl border border-border/80 bg-background p-2 shadow-md hover:bg-accent transition-all lg:hidden"
+          className="fixed top-4 left-4 z-40 rounded-xl border border-border/80 bg-background/90 backdrop-blur-md p-2.5 shadow-md hover:bg-accent transition-all lg:hidden"
           aria-label="Open menu"
         >
           <Menu className="h-5 w-5 text-foreground" />
@@ -61,48 +69,47 @@ export function ConsoleShell({
       {/* Sidebar Navigation */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 shrink-0 border-r border-border bg-background transition-transform duration-300 lg:static lg:translate-x-0 flex flex-col justify-between h-screen",
-          open ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 left-0 z-50 w-64 shrink-0 border-r border-border/80 bg-white dark:bg-slate-900 transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:translate-x-0 flex flex-col justify-between shadow-xs",
+          open ? "translate-x-0 shadow-2xl" : "-translate-x-full",
         )}
       >
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex h-16 items-center gap-2.5 border-b border-border px-5 shrink-0">
+          <div className="flex h-16 items-center gap-2.5 border-b border-border/60 px-5 shrink-0">
             <Logo size={32} />
-            <button className="ml-auto lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu">
+            <button className="ml-auto lg:hidden rounded-lg p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" onClick={() => setOpen(false)} aria-label="Close menu">
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          <div className="px-3 py-4 flex-1 overflow-y-auto pb-4">
-            <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground select-none">
-              {session ? ROLE_LABEL[session.role] : "Console"}
+          <div className="px-3 py-4 flex-1 overflow-y-auto pb-4 space-y-1">
+            <div className="px-2 pb-2 text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground/70 select-none">
+              {session ? ROLE_LABEL[session.role] : "Console Navigation"}
             </div>
             <nav className="grid gap-1">
-              {nav.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    onNavigate(item.id);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
-                    active === item.id
-                      ? "text-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  {active === item.id ? (
-                    <motion.span
-                      layoutId="console-nav"
-                      className="absolute inset-0 rounded-xl bg-accent"
-                      transition={{ type: "spring", stiffness: 380, damping: 32 }}
-                    />
-                  ) : null}
-                  <item.icon className="relative h-4 w-4 shrink-0" />
-                  <span className="relative truncate">{item.label}</span>
-                </button>
-              ))}
+              {nav.map((item) => {
+                const isActive = active === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      onNavigate(item.id);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm transition-all group",
+                      isActive
+                        ? "bg-primary/10 text-primary font-bold shadow-xs"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground font-semibold"
+                    )}
+                  >
+                    {isActive && (
+                      <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
+                    )}
+                    <item.icon className={cn("h-4 w-4 shrink-0 transition-transform group-hover:scale-110", isActive ? "text-primary" : "text-muted-foreground")} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
             </nav>
           </div>
         </div>
@@ -232,8 +239,8 @@ export function ConsoleShell({
       ) : null}
 
       <div className="min-w-0 flex-1 flex flex-col">
-        {/* Main Content Area: Now full screen width */}
-        <main className="w-full px-6 py-6 sm:px-8 sm:py-8 max-w-none flex-1">
+        {/* Main Content Area: Compact padding */}
+        <main className="w-full px-4 py-3 sm:px-6 sm:py-4 max-w-none flex-1">
           {children}
         </main>
       </div>

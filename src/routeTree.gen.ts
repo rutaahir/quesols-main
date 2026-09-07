@@ -13,7 +13,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompanySlugRouteImport } from './routes/$companySlug'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AppRouteImport } from './routes/app'
-import { Route as BookRouteImport } from './routes/book'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LiveDemoRouteImport } from './routes/live-demo'
@@ -22,12 +21,17 @@ import { Route as PartnershipsRouteImport } from './routes/partnerships'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as ServicesRouteImport } from './routes/services'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as CompanySlugIndexRouteImport } from './routes/$companySlug.index'
+import { Route as CompanySlugAdminRouteImport } from './routes/$companySlug.admin'
 import { Route as CompanySlugLoginRouteImport } from './routes/$companySlug.login'
-import { Route as DisplayBranchIdRouteImport } from './routes/display.$branchId'
-import { Route as KioskBranchIdRouteImport } from './routes/kiosk.$branchId'
-import { Route as KotBranchIdRouteImport } from './routes/kot.$branchId'
-import { Route as QBranchIdRouteImport } from './routes/q.$branchId'
+import { Route as FeedbackTrackingCodeRouteImport } from './routes/feedback.$trackingCode'
 import { Route as TTicketIdRouteImport } from './routes/t.$ticketId'
+import { Route as CompanySlugBranchesBranchSlugRouteImport } from './routes/$companySlug.branches.$branchSlug'
+import { Route as CompanySlugBranchesBranchSlugIndexRouteImport } from './routes/$companySlug.branches.$branchSlug.index'
+import { Route as CompanySlugBranchesBranchSlugDisplayRouteImport } from './routes/$companySlug.branches.$branchSlug.display'
+import { Route as CompanySlugBranchesBranchSlugJoinRouteImport } from './routes/$companySlug.branches.$branchSlug.join'
+import { Route as CompanySlugBranchesBranchSlugKioskRouteImport } from './routes/$companySlug.branches.$branchSlug.kiosk'
+import { Route as CompanySlugBranchesBranchSlugKotRouteImport } from './routes/$companySlug.branches.$branchSlug.kot'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,11 +51,6 @@ const AboutRoute = AboutRouteImport.update({
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BookRoute = BookRouteImport.update({
-  id: '/book',
-  path: '/book',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactRoute = ContactRouteImport.update({
@@ -94,29 +93,24 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CompanySlugIndexRoute = CompanySlugIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CompanySlugRoute,
+} as any)
+const CompanySlugAdminRoute = CompanySlugAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => CompanySlugRoute,
+} as any)
 const CompanySlugLoginRoute = CompanySlugLoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => CompanySlugRoute,
 } as any)
-const DisplayBranchIdRoute = DisplayBranchIdRouteImport.update({
-  id: '/display/$branchId',
-  path: '/display/$branchId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KioskBranchIdRoute = KioskBranchIdRouteImport.update({
-  id: '/kiosk/$branchId',
-  path: '/kiosk/$branchId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KotBranchIdRoute = KotBranchIdRouteImport.update({
-  id: '/kot/$branchId',
-  path: '/kot/$branchId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QBranchIdRoute = QBranchIdRouteImport.update({
-  id: '/q/$branchId',
-  path: '/q/$branchId',
+const FeedbackTrackingCodeRoute = FeedbackTrackingCodeRouteImport.update({
+  id: '/feedback/$trackingCode',
+  path: '/feedback/$trackingCode',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TTicketIdRoute = TTicketIdRouteImport.update({
@@ -124,13 +118,48 @@ const TTicketIdRoute = TTicketIdRouteImport.update({
   path: '/t/$ticketId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CompanySlugBranchesBranchSlugRoute =
+  CompanySlugBranchesBranchSlugRouteImport.update({
+    id: '/branches/$branchSlug',
+    path: '/branches/$branchSlug',
+    getParentRoute: () => CompanySlugRoute,
+  } as any)
+const CompanySlugBranchesBranchSlugIndexRoute =
+  CompanySlugBranchesBranchSlugIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => CompanySlugBranchesBranchSlugRoute,
+  } as any)
+const CompanySlugBranchesBranchSlugDisplayRoute =
+  CompanySlugBranchesBranchSlugDisplayRouteImport.update({
+    id: '/display',
+    path: '/display',
+    getParentRoute: () => CompanySlugBranchesBranchSlugRoute,
+  } as any)
+const CompanySlugBranchesBranchSlugJoinRoute =
+  CompanySlugBranchesBranchSlugJoinRouteImport.update({
+    id: '/join',
+    path: '/join',
+    getParentRoute: () => CompanySlugBranchesBranchSlugRoute,
+  } as any)
+const CompanySlugBranchesBranchSlugKioskRoute =
+  CompanySlugBranchesBranchSlugKioskRouteImport.update({
+    id: '/kiosk',
+    path: '/kiosk',
+    getParentRoute: () => CompanySlugBranchesBranchSlugRoute,
+  } as any)
+const CompanySlugBranchesBranchSlugKotRoute =
+  CompanySlugBranchesBranchSlugKotRouteImport.update({
+    id: '/kot',
+    path: '/kot',
+    getParentRoute: () => CompanySlugBranchesBranchSlugRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$companySlug': typeof CompanySlugRouteWithChildren
   '/about': typeof AboutRoute
   '/app': typeof AppRoute
-  '/book': typeof BookRoute
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/live-demo': typeof LiveDemoRoute
@@ -139,19 +168,22 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/services': typeof ServicesRoute
   '/signup': typeof SignupRoute
+  '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
-  '/display/$branchId': typeof DisplayBranchIdRoute
-  '/kiosk/$branchId': typeof KioskBranchIdRoute
-  '/kot/$branchId': typeof KotBranchIdRoute
-  '/q/$branchId': typeof QBranchIdRoute
+  '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
+  '/$companySlug/': typeof CompanySlugIndexRoute
+  '/$companySlug/branches/$branchSlug': typeof CompanySlugBranchesBranchSlugRouteWithChildren
+  '/$companySlug/branches/$branchSlug/display': typeof CompanySlugBranchesBranchSlugDisplayRoute
+  '/$companySlug/branches/$branchSlug/join': typeof CompanySlugBranchesBranchSlugJoinRoute
+  '/$companySlug/branches/$branchSlug/kiosk': typeof CompanySlugBranchesBranchSlugKioskRoute
+  '/$companySlug/branches/$branchSlug/kot': typeof CompanySlugBranchesBranchSlugKotRoute
+  '/$companySlug/branches/$branchSlug/': typeof CompanySlugBranchesBranchSlugIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/$companySlug': typeof CompanySlugRouteWithChildren
   '/about': typeof AboutRoute
   '/app': typeof AppRoute
-  '/book': typeof BookRoute
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/live-demo': typeof LiveDemoRoute
@@ -160,12 +192,16 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/services': typeof ServicesRoute
   '/signup': typeof SignupRoute
+  '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
-  '/display/$branchId': typeof DisplayBranchIdRoute
-  '/kiosk/$branchId': typeof KioskBranchIdRoute
-  '/kot/$branchId': typeof KotBranchIdRoute
-  '/q/$branchId': typeof QBranchIdRoute
+  '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
+  '/$companySlug': typeof CompanySlugIndexRoute
+  '/$companySlug/branches/$branchSlug/display': typeof CompanySlugBranchesBranchSlugDisplayRoute
+  '/$companySlug/branches/$branchSlug/join': typeof CompanySlugBranchesBranchSlugJoinRoute
+  '/$companySlug/branches/$branchSlug/kiosk': typeof CompanySlugBranchesBranchSlugKioskRoute
+  '/$companySlug/branches/$branchSlug/kot': typeof CompanySlugBranchesBranchSlugKotRoute
+  '/$companySlug/branches/$branchSlug': typeof CompanySlugBranchesBranchSlugIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -173,7 +209,6 @@ export interface FileRoutesById {
   '/$companySlug': typeof CompanySlugRouteWithChildren
   '/about': typeof AboutRoute
   '/app': typeof AppRoute
-  '/book': typeof BookRoute
   '/contact': typeof ContactRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/live-demo': typeof LiveDemoRoute
@@ -182,12 +217,17 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/services': typeof ServicesRoute
   '/signup': typeof SignupRoute
+  '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
-  '/display/$branchId': typeof DisplayBranchIdRoute
-  '/kiosk/$branchId': typeof KioskBranchIdRoute
-  '/kot/$branchId': typeof KotBranchIdRoute
-  '/q/$branchId': typeof QBranchIdRoute
+  '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
+  '/$companySlug/': typeof CompanySlugIndexRoute
+  '/$companySlug/branches/$branchSlug': typeof CompanySlugBranchesBranchSlugRouteWithChildren
+  '/$companySlug/branches/$branchSlug/display': typeof CompanySlugBranchesBranchSlugDisplayRoute
+  '/$companySlug/branches/$branchSlug/join': typeof CompanySlugBranchesBranchSlugJoinRoute
+  '/$companySlug/branches/$branchSlug/kiosk': typeof CompanySlugBranchesBranchSlugKioskRoute
+  '/$companySlug/branches/$branchSlug/kot': typeof CompanySlugBranchesBranchSlugKotRoute
+  '/$companySlug/branches/$branchSlug/': typeof CompanySlugBranchesBranchSlugIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -196,7 +236,6 @@ export interface FileRouteTypes {
     | '/$companySlug'
     | '/about'
     | '/app'
-    | '/book'
     | '/contact'
     | '/forgot-password'
     | '/live-demo'
@@ -205,19 +244,22 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/services'
     | '/signup'
+    | '/$companySlug/admin'
     | '/$companySlug/login'
-    | '/display/$branchId'
-    | '/kiosk/$branchId'
-    | '/kot/$branchId'
-    | '/q/$branchId'
+    | '/feedback/$trackingCode'
     | '/t/$ticketId'
+    | '/$companySlug/'
+    | '/$companySlug/branches/$branchSlug'
+    | '/$companySlug/branches/$branchSlug/display'
+    | '/$companySlug/branches/$branchSlug/join'
+    | '/$companySlug/branches/$branchSlug/kiosk'
+    | '/$companySlug/branches/$branchSlug/kot'
+    | '/$companySlug/branches/$branchSlug/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/$companySlug'
     | '/about'
     | '/app'
-    | '/book'
     | '/contact'
     | '/forgot-password'
     | '/live-demo'
@@ -226,19 +268,22 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/services'
     | '/signup'
+    | '/$companySlug/admin'
     | '/$companySlug/login'
-    | '/display/$branchId'
-    | '/kiosk/$branchId'
-    | '/kot/$branchId'
-    | '/q/$branchId'
+    | '/feedback/$trackingCode'
     | '/t/$ticketId'
+    | '/$companySlug'
+    | '/$companySlug/branches/$branchSlug/display'
+    | '/$companySlug/branches/$branchSlug/join'
+    | '/$companySlug/branches/$branchSlug/kiosk'
+    | '/$companySlug/branches/$branchSlug/kot'
+    | '/$companySlug/branches/$branchSlug'
   id:
     | '__root__'
     | '/'
     | '/$companySlug'
     | '/about'
     | '/app'
-    | '/book'
     | '/contact'
     | '/forgot-password'
     | '/live-demo'
@@ -247,12 +292,17 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/services'
     | '/signup'
+    | '/$companySlug/admin'
     | '/$companySlug/login'
-    | '/display/$branchId'
-    | '/kiosk/$branchId'
-    | '/kot/$branchId'
-    | '/q/$branchId'
+    | '/feedback/$trackingCode'
     | '/t/$ticketId'
+    | '/$companySlug/'
+    | '/$companySlug/branches/$branchSlug'
+    | '/$companySlug/branches/$branchSlug/display'
+    | '/$companySlug/branches/$branchSlug/join'
+    | '/$companySlug/branches/$branchSlug/kiosk'
+    | '/$companySlug/branches/$branchSlug/kot'
+    | '/$companySlug/branches/$branchSlug/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -260,7 +310,6 @@ export interface RootRouteChildren {
   CompanySlugRoute: typeof CompanySlugRouteWithChildren
   AboutRoute: typeof AboutRoute
   AppRoute: typeof AppRoute
-  BookRoute: typeof BookRoute
   ContactRoute: typeof ContactRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LiveDemoRoute: typeof LiveDemoRoute
@@ -269,10 +318,7 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   ServicesRoute: typeof ServicesRoute
   SignupRoute: typeof SignupRoute
-  DisplayBranchIdRoute: typeof DisplayBranchIdRoute
-  KioskBranchIdRoute: typeof KioskBranchIdRoute
-  KotBranchIdRoute: typeof KotBranchIdRoute
-  QBranchIdRoute: typeof QBranchIdRoute
+  FeedbackTrackingCodeRoute: typeof FeedbackTrackingCodeRoute
   TTicketIdRoute: typeof TTicketIdRoute
 }
 
@@ -304,13 +350,6 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/book': {
-      id: '/book'
-      path: '/book'
-      fullPath: '/book'
-      preLoaderRoute: typeof BookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contact': {
@@ -369,6 +408,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$companySlug/': {
+      id: '/$companySlug/'
+      path: '/'
+      fullPath: '/$companySlug/'
+      preLoaderRoute: typeof CompanySlugIndexRouteImport
+      parentRoute: typeof CompanySlugRoute
+    }
+    '/$companySlug/admin': {
+      id: '/$companySlug/admin'
+      path: '/admin'
+      fullPath: '/$companySlug/admin'
+      preLoaderRoute: typeof CompanySlugAdminRouteImport
+      parentRoute: typeof CompanySlugRoute
+    }
     '/$companySlug/login': {
       id: '/$companySlug/login'
       path: '/login'
@@ -376,32 +429,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompanySlugLoginRouteImport
       parentRoute: typeof CompanySlugRoute
     }
-    '/display/$branchId': {
-      id: '/display/$branchId'
-      path: '/display/$branchId'
-      fullPath: '/display/$branchId'
-      preLoaderRoute: typeof DisplayBranchIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kiosk/$branchId': {
-      id: '/kiosk/$branchId'
-      path: '/kiosk/$branchId'
-      fullPath: '/kiosk/$branchId'
-      preLoaderRoute: typeof KioskBranchIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kot/$branchId': {
-      id: '/kot/$branchId'
-      path: '/kot/$branchId'
-      fullPath: '/kot/$branchId'
-      preLoaderRoute: typeof KotBranchIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/q/$branchId': {
-      id: '/q/$branchId'
-      path: '/q/$branchId'
-      fullPath: '/q/$branchId'
-      preLoaderRoute: typeof QBranchIdRouteImport
+    '/feedback/$trackingCode': {
+      id: '/feedback/$trackingCode'
+      path: '/feedback/$trackingCode'
+      fullPath: '/feedback/$trackingCode'
+      preLoaderRoute: typeof FeedbackTrackingCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/t/$ticketId': {
@@ -411,15 +443,91 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TTicketIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$companySlug/branches/$branchSlug': {
+      id: '/$companySlug/branches/$branchSlug'
+      path: '/branches/$branchSlug'
+      fullPath: '/$companySlug/branches/$branchSlug'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugRouteImport
+      parentRoute: typeof CompanySlugRoute
+    }
+    '/$companySlug/branches/$branchSlug/': {
+      id: '/$companySlug/branches/$branchSlug/'
+      path: '/'
+      fullPath: '/$companySlug/branches/$branchSlug/'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugIndexRouteImport
+      parentRoute: typeof CompanySlugBranchesBranchSlugRoute
+    }
+    '/$companySlug/branches/$branchSlug/display': {
+      id: '/$companySlug/branches/$branchSlug/display'
+      path: '/display'
+      fullPath: '/$companySlug/branches/$branchSlug/display'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugDisplayRouteImport
+      parentRoute: typeof CompanySlugBranchesBranchSlugRoute
+    }
+    '/$companySlug/branches/$branchSlug/join': {
+      id: '/$companySlug/branches/$branchSlug/join'
+      path: '/join'
+      fullPath: '/$companySlug/branches/$branchSlug/join'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugJoinRouteImport
+      parentRoute: typeof CompanySlugBranchesBranchSlugRoute
+    }
+    '/$companySlug/branches/$branchSlug/kiosk': {
+      id: '/$companySlug/branches/$branchSlug/kiosk'
+      path: '/kiosk'
+      fullPath: '/$companySlug/branches/$branchSlug/kiosk'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugKioskRouteImport
+      parentRoute: typeof CompanySlugBranchesBranchSlugRoute
+    }
+    '/$companySlug/branches/$branchSlug/kot': {
+      id: '/$companySlug/branches/$branchSlug/kot'
+      path: '/kot'
+      fullPath: '/$companySlug/branches/$branchSlug/kot'
+      preLoaderRoute: typeof CompanySlugBranchesBranchSlugKotRouteImport
+      parentRoute: typeof CompanySlugBranchesBranchSlugRoute
+    }
   }
 }
 
+interface CompanySlugBranchesBranchSlugRouteChildren {
+  CompanySlugBranchesBranchSlugDisplayRoute: typeof CompanySlugBranchesBranchSlugDisplayRoute
+  CompanySlugBranchesBranchSlugJoinRoute: typeof CompanySlugBranchesBranchSlugJoinRoute
+  CompanySlugBranchesBranchSlugKioskRoute: typeof CompanySlugBranchesBranchSlugKioskRoute
+  CompanySlugBranchesBranchSlugKotRoute: typeof CompanySlugBranchesBranchSlugKotRoute
+  CompanySlugBranchesBranchSlugIndexRoute: typeof CompanySlugBranchesBranchSlugIndexRoute
+}
+
+const CompanySlugBranchesBranchSlugRouteChildren: CompanySlugBranchesBranchSlugRouteChildren =
+  {
+    CompanySlugBranchesBranchSlugDisplayRoute:
+      CompanySlugBranchesBranchSlugDisplayRoute,
+    CompanySlugBranchesBranchSlugJoinRoute:
+      CompanySlugBranchesBranchSlugJoinRoute,
+    CompanySlugBranchesBranchSlugKioskRoute:
+      CompanySlugBranchesBranchSlugKioskRoute,
+    CompanySlugBranchesBranchSlugKotRoute:
+      CompanySlugBranchesBranchSlugKotRoute,
+    CompanySlugBranchesBranchSlugIndexRoute:
+      CompanySlugBranchesBranchSlugIndexRoute,
+  }
+
+const CompanySlugBranchesBranchSlugRouteWithChildren =
+  CompanySlugBranchesBranchSlugRoute._addFileChildren(
+    CompanySlugBranchesBranchSlugRouteChildren,
+  )
+
 interface CompanySlugRouteChildren {
+  CompanySlugAdminRoute: typeof CompanySlugAdminRoute
   CompanySlugLoginRoute: typeof CompanySlugLoginRoute
+  CompanySlugIndexRoute: typeof CompanySlugIndexRoute
+  CompanySlugBranchesBranchSlugRoute: typeof CompanySlugBranchesBranchSlugRouteWithChildren
 }
 
 const CompanySlugRouteChildren: CompanySlugRouteChildren = {
+  CompanySlugAdminRoute: CompanySlugAdminRoute,
   CompanySlugLoginRoute: CompanySlugLoginRoute,
+  CompanySlugIndexRoute: CompanySlugIndexRoute,
+  CompanySlugBranchesBranchSlugRoute:
+    CompanySlugBranchesBranchSlugRouteWithChildren,
 }
 
 const CompanySlugRouteWithChildren = CompanySlugRoute._addFileChildren(
@@ -431,7 +539,6 @@ const rootRouteChildren: RootRouteChildren = {
   CompanySlugRoute: CompanySlugRouteWithChildren,
   AboutRoute: AboutRoute,
   AppRoute: AppRoute,
-  BookRoute: BookRoute,
   ContactRoute: ContactRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LiveDemoRoute: LiveDemoRoute,
@@ -440,10 +547,7 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   ServicesRoute: ServicesRoute,
   SignupRoute: SignupRoute,
-  DisplayBranchIdRoute: DisplayBranchIdRoute,
-  KioskBranchIdRoute: KioskBranchIdRoute,
-  KotBranchIdRoute: KotBranchIdRoute,
-  QBranchIdRoute: QBranchIdRoute,
+  FeedbackTrackingCodeRoute: FeedbackTrackingCodeRoute,
   TTicketIdRoute: TTicketIdRoute,
 }
 export const routeTree = rootRouteImport

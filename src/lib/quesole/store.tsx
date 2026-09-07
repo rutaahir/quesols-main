@@ -51,28 +51,9 @@ import type {
   PriceChangeLog,
   Kiosk,
 } from "./types";
+import { getApiUrl, getWsUrl } from "../api-config";
 
-const formatUrl = (url: string) => {
-  let clean = url.trim().replace(/\/$/, "");
-  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
-    clean = `https://${clean}`;
-  }
-  return clean;
-};
-
-const getApiBase = () => {
-  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) {
-    return formatUrl(import.meta.env.VITE_API_URL);
-  }
-  if (typeof process !== "undefined" && process.env?.VITE_API_URL) {
-    return formatUrl(process.env.VITE_API_URL);
-  }
-  return typeof window !== "undefined" 
-    ? `http://${window.location.hostname}:8000` 
-    : "http://localhost:8000";
-};
-
-const API_BASE = getApiBase();
+const API_BASE = getApiUrl("");
 
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
   const headers = new Headers(options.headers || {});
@@ -110,9 +91,23 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
         localStorage.removeItem("quesole.session");
         localStorage.removeItem("quesole.access_token");
         localStorage.removeItem("quesole.refresh_token");
-        window.location.href = "/login";
+        const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
+        const isProtected = currentPath.startsWith("/app") || currentPath.includes("/admin");
+        if (typeof window !== "undefined" && isProtected) {
+          window.location.href = "/login";
+        }
         throw new Error("Session expired. Please sign in again.");
       }
+    } else {
+      localStorage.removeItem("quesole.session");
+      localStorage.removeItem("quesole.access_token");
+      localStorage.removeItem("quesole.refresh_token");
+      const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
+      const isProtected = currentPath.startsWith("/app") || currentPath.includes("/admin");
+      if (typeof window !== "undefined" && isProtected) {
+        window.location.href = "/login";
+      }
+      throw new Error("Session expired. Please sign in again.");
     }
   }
   
@@ -176,7 +171,7 @@ interface Ctx {
   session: Session | null;
   simulating: boolean;
   tick: number;
-  signIn: (email: string, password: string) => Promise<Session>;
+  signIn: (email: string, password: string, companySlug?: string) => Promise<Session>;
   signOut: () => Promise<void>;
   setSession: (patch: Partial<Session>) => void;
   setSimulating: (on: boolean) => void;
@@ -187,7 +182,8 @@ interface Ctx {
     setTicketStatus: (ticketId: string, status: Ticket["status"]) => Promise<void>;
     transferTicket: (ticketId: string, deskId: string) => Promise<void>;
     createDesk: (input: { branchId: string; name: string }) => Promise<string>;
-    updateDesk: (deskId: string, input: { name?: string; label?: string; isActive?: boolean; serviceIds?: string[]; assignedStaffId?: string | null; isOnlineBookingDesk?: boolean }) => Promise<void>;
+    updateDesk: (deskId: string, input: { name?: string; label?: string; isActive?: boolean; serviceIds?: string[]; assignedStaffId?: string | null; assignedStaffIds?: string[]; isOnlineBookingDesk?: boolean }) => Promise<void>;
+    assignStaffToDesk: (userId: string, deskId: string | null) => Promise<void>;
     toggleDeskStatus: (deskId: string, isActive: boolean) => Promise<void>;
     deleteDesk: (deskId: string) => Promise<void>;
     createService: (input: { branchId: string; name: string; prefix?: string; estServiceMinutes?: number }) => Promise<string>;
@@ -458,7 +454,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           city: b.city,
           address: b.address || "",
           method: b.method || 1,
-          enabledMethods: b.enabled_methods || [1, 2],
+          enabledMethods: (b.enabled_methods && b.enabled_methods.length > 0) ? b.enabled_methods.map(Number) : (b.enabledMethods && b.enabledMethods.length > 0 ? b.enabledMethods.map(Number) : [1, 2, 3, 4]),
           openHours: b.operating_hours_summary || "09:00 - 17:00",
           deskIds: (b.desks || []).map((d: any) => String(d.id || d)),
           serviceIds: (b.services || []).map((s: any) => String(s.id || s)),
@@ -479,7 +475,10 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           label: d.name || d.label || "",
           serviceIds: [],
           staffId: d.staff_id ? String(d.staff_id) : null,
-          status: d.is_active ? (d.staff_id ? "open" : "offline") : "offline",
+          staffIds: Array.isArray(d.staff_ids) ? d.staff_ids.map(String) : (d.staff_id ? [String(d.staff_id)] : []),
+          currentOperatorId: d.current_operator ? String(d.current_operator) : null,
+          currentOperatorEmail: d.current_operator_email || null,
+          status: d.is_active ? (d.current_operator ? "open" : (d.staff_id || (d.staff_ids && d.staff_ids.length > 0) ? "paused" : "offline")) : "offline",
           isActive: Boolean(d.is_active),
           isOnlineBookingDesk: Boolean(d.is_online_booking_desk)
         })),
@@ -492,7 +491,12 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           isActive: Boolean(s.is_active)
         })),
         staff: (Array.isArray(usersData) ? usersData : []).filter((u: any) => u.role !== "super_admin" && u.role !== "company_admin").map((u: any) => {
-          const assignedDesk = (Array.isArray(desksData) ? desksData : []).find((d: any) => String(d.staff_id) === String(u.id));
+          const assignedDesk = (Array.isArray(desksData) ? desksData : []).find((d: any) => {
+            if (Array.isArray(d.staff_ids) && d.staff_ids.length > 0) {
+              return d.staff_ids.map(String).includes(String(u.id));
+            }
+            return String(d.staff_id) === String(u.id);
+          });
           return {
             id: String(u.id),
             companyId: String(u.company),
@@ -513,13 +517,27 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           deskId: t.desk ? (typeof t.desk === "object" ? String(t.desk.id) : String(t.desk)) : null,
           predictedDeskId: t.predicted_desk ? (typeof t.predicted_desk === "object" ? String(t.predicted_desk.id) : String(t.predicted_desk)) : null,
           number: t.token_number,
+          token_number: t.token_number,
           customerName: t.customer_name || "Guest",
+          customer_name: t.customer_name || "Guest",
+          customer_phone: t.customer_phone || t.contact || "",
+          customer_email: t.customer_email || "",
+          service_name: t.service_name || (t.service && typeof t.service === "object" ? t.service.name : ""),
+          desk_name: t.desk_name || (t.desk && typeof t.desk === "object" ? t.desk.name : ""),
           contact: t.customer_phone || "",
           note: t.message || "",
+          message: t.message || "",
           status: t.status,
-          joinedAt: new Date(t.created_at).getTime(),
+          created_at: t.created_at,
+          joinedAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
           calledAt: t.called_at ? new Date(t.called_at).getTime() : undefined,
-          servedAt: t.served_at ? new Date(t.served_at).getTime() : undefined
+          called_at: t.called_at,
+          servedAt: t.served_at ? new Date(t.served_at).getTime() : undefined,
+          served_at: t.served_at,
+          feedback_rating: t.feedback_rating,
+          feedback_text: t.feedback_text,
+          feedback_submitted_at: t.feedback_submitted_at,
+          tracking_code: t.tracking_code,
         })),
         appointments: [],
         alertRules: [],
@@ -634,7 +652,10 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
 
   // Load data initially when session is established
   useEffect(() => {
-    loadData();
+    const token = typeof window !== "undefined" ? localStorage.getItem("quesole.access_token") : null;
+    if (session || token) {
+      loadData();
+    }
   }, [session, loadData]);
 
   // WebSocket Live Updates Connection
@@ -643,10 +664,8 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
 
     const clientType = session.role === "operator" || session.role === "branch_admin" || session.role === "company_admin" ? "staff" : "public";
     const token = localStorage.getItem("quesole.access_token");
-    
-    const wsProtocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsHost = getApiBase().replace(/^https?:\/\//, "");
-    const wsUrl = `${wsProtocol}//${wsHost}/ws/branch/${session.branchId}/${clientType}/${clientType === "staff" ? `?token=${token}` : ""}`;
+    // Connect over our ASGI path
+    const wsUrl = getWsUrl(`/ws/branch/${session.branchId}/${clientType}/${clientType === "staff" ? `?token=${token}` : ""}`);
     const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
@@ -688,11 +707,11 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
     };
   }, [session]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, companySlug?: string) => {
     try {
       const data = await apiFetch("/api/auth/login/", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, company_slug: companySlug }),
       });
       
       const access = data.access;
@@ -721,6 +740,16 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
   }, [persist]);
 
   const signOut = useCallback(async () => {
+    if (session?.deskId) {
+      try {
+        await apiFetch(`/api/desks/${session.deskId}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "offline" }),
+        }).catch(() => {});
+      } catch (err) {
+        console.warn("Failed to release desk on logout:", err);
+      }
+    }
     const refreshToken = localStorage.getItem("quesole.refresh_token");
     if (refreshToken) {
       try {
@@ -735,7 +764,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("quesole.access_token");
     localStorage.removeItem("quesole.refresh_token");
     persist(null);
-  }, [persist]);
+  }, [session, persist]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -1093,8 +1122,15 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         return String(res.id);
       },
 
-      async updateDesk(deskId: string, input: { name?: string; label?: string; isActive?: boolean; serviceIds?: string[]; assignedStaffId?: string | null; isOnlineBookingDesk?: boolean }) {
+      async updateDesk(deskId: string, input: { name?: string; label?: string; isActive?: boolean; serviceIds?: string[]; assignedStaffId?: string | null; assignedStaffIds?: string[]; isOnlineBookingDesk?: boolean }) {
         const nameToUpdate = input.name || input.label;
+        
+        let targetStaffIds: string[] | undefined = undefined;
+        if (input.assignedStaffIds !== undefined) {
+          targetStaffIds = input.assignedStaffIds.map(String);
+        } else if (input.assignedStaffId !== undefined) {
+          targetStaffIds = input.assignedStaffId ? [String(input.assignedStaffId)] : [];
+        }
         
         setState((prev) => ({
           ...prev,
@@ -1104,14 +1140,15 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
                   ...d,
                   label: nameToUpdate !== undefined ? nameToUpdate : d.label,
                   isActive: input.isActive !== undefined ? input.isActive : d.isActive,
-                  staffId: input.assignedStaffId !== undefined ? input.assignedStaffId : d.staffId,
+                  staffId: targetStaffIds !== undefined ? (targetStaffIds[0] || null) : d.staffId,
+                  staffIds: targetStaffIds !== undefined ? targetStaffIds : d.staffIds,
                   isOnlineBookingDesk: input.isOnlineBookingDesk !== undefined ? input.isOnlineBookingDesk : d.isOnlineBookingDesk,
                 } as Desk)
               : d
           ),
-          staff: input.assignedStaffId !== undefined
+          staff: targetStaffIds !== undefined
             ? prev.staff.map((st) => {
-                if (String(st.id) === String(input.assignedStaffId)) {
+                if (targetStaffIds!.includes(String(st.id))) {
                   return { ...st, deskId: String(deskId) };
                 } else if (String(st.deskId) === String(deskId)) {
                   return { ...st, deskId: null };
@@ -1138,39 +1175,85 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           }).catch((err) => console.warn("Failed to patch desk:", err));
         }
 
-        // Persist Desk Staff Assignment to Database
-        if (input.assignedStaffId !== undefined) {
+        // Persist Desk Staff Assignments to Database
+        if (targetStaffIds !== undefined) {
           try {
-            const assignments = await apiFetch("/api/desk-staff-assignments/").catch(() => []);
-            const toDelete = assignments.filter((a: any) =>
-              String(a.desk) === String(deskId) || (input.assignedStaffId && String(a.user) === String(input.assignedStaffId))
-            );
+            const allAssignments = await apiFetch("/api/desk-staff-assignments/").catch(() => []);
+            const currentDeskAssignments = allAssignments.filter((a: any) => String(a.desk) === String(deskId));
+
+            const toDelete = allAssignments.filter((a: any) => {
+              const isUserInNewList = targetStaffIds!.includes(String(a.user));
+              const isCurrentDesk = String(a.desk) === String(deskId);
+
+              if (isCurrentDesk && !isUserInNewList) {
+                return true; // Unassigned from this desk
+              }
+              if (!isCurrentDesk && isUserInNewList) {
+                return true; // Enforce 1 desk per staff
+              }
+              return false;
+            });
+
             await Promise.all(toDelete.map((a: any) =>
               apiFetch(`/api/desk-staff-assignments/${a.id}/`, { method: "DELETE" }).catch(() => {})
             ));
 
-            if (input.assignedStaffId) {
-              const now = new Date().toISOString();
-              const end = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
-              await apiFetch("/api/desk-staff-assignments/", {
-                method: "POST",
-                body: JSON.stringify({
-                  desk: deskId,
-                  user: input.assignedStaffId,
-                  shift_start: now,
-                  shift_end: end,
-                  is_active: true
-                })
-              });
+            const now = new Date().toISOString();
+            const end = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
+
+            for (const uId of targetStaffIds) {
+              const alreadyAssigned = currentDeskAssignments.some((a: any) => String(a.user) === String(uId));
+              if (!alreadyAssigned) {
+                await apiFetch("/api/desk-staff-assignments/", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    desk: deskId,
+                    user: uId,
+                    shift_start: now,
+                    shift_end: end,
+                    is_active: true
+                  })
+                }).catch(console.error);
+              }
             }
           } catch (err) {
-            console.error("Failed to update desk staff assignment in DB:", err);
+            console.error("Failed to update desk staff assignments in DB:", err);
           }
         }
 
         if (input.serviceIds !== undefined) {
           await actions.updateDeskServices(deskId, input.serviceIds);
         } else {
+          await loadData();
+        }
+      },
+
+      async assignStaffToDesk(userId: string, deskId: string | null) {
+        try {
+          const allAssignments = await apiFetch("/api/desk-staff-assignments/").catch(() => []);
+          const userAssignments = allAssignments.filter((a: any) => String(a.user) === String(userId));
+
+          await Promise.all(userAssignments.map((a: any) =>
+            apiFetch(`/api/desk-staff-assignments/${a.id}/`, { method: "DELETE" }).catch(() => {})
+          ));
+
+          if (deskId) {
+            const now = new Date().toISOString();
+            const end = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
+            await apiFetch("/api/desk-staff-assignments/", {
+              method: "POST",
+              body: JSON.stringify({
+                desk: deskId,
+                user: userId,
+                shift_start: now,
+                shift_end: end,
+                is_active: true,
+              }),
+            }).catch(console.error);
+          }
+        } catch (err) {
+          console.error("Failed to assign staff to desk:", err);
+        } finally {
           await loadData();
         }
       },
@@ -1524,6 +1607,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         enabledNotificationChannels?: string[];
         companySlug?: string;
         website?: string;
+        hpField?: string;
       }) {
         if (input.simulateFailure) {
           throw new Error("Simulated Payment Gateway Authorization Failed. Please check card credentials and retry.");
@@ -1554,6 +1638,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
             enabled_notification_channels: input.enabledNotificationChannels,
             slug: input.companySlug,
             website: input.website,
+            hp_field: input.hpField,
           })
         });
 
@@ -1634,18 +1719,24 @@ export function branchesOf(state: QuesoleState, companyId: string) {
   return state.branches.filter((b) => String(b.companyId) === String(companyId));
 }
 
-export function ticketsOf(state: QuesoleState, branchId: string) {
-  return state.tickets.filter((t) => String(t.branchId) === String(branchId));
+export function ticketsOf(ticketsOrState: QuesoleState | Ticket[] | any, branchOrServiceId?: string) {
+  if (!ticketsOrState) return [];
+  const list: Ticket[] = Array.isArray(ticketsOrState)
+    ? ticketsOrState
+    : (Array.isArray(ticketsOrState.tickets) ? ticketsOrState.tickets : []);
+
+  if (!branchOrServiceId) return list;
+  return list.filter((t) => String(t.branchId) === String(branchOrServiceId) || String(t.serviceId) === String(branchOrServiceId));
 }
 
-export function waitingOf(state: QuesoleState, branchId: string) {
-  return ticketsOf(state, branchId)
+export function waitingOf(ticketsOrState: QuesoleState | Ticket[] | any, branchOrServiceId?: string) {
+  return ticketsOf(ticketsOrState, branchOrServiceId)
     .filter((t) => t.status === "waiting")
-    .sort((a, b) => a.joinedAt - b.joinedAt);
+    .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 }
 
-export function servingOf(state: QuesoleState, branchId: string) {
-  return ticketsOf(state, branchId).filter((t) => t.status === "serving");
+export function servingOf(ticketsOrState: QuesoleState | Ticket[] | any, branchOrServiceId?: string) {
+  return ticketsOf(ticketsOrState, branchOrServiceId).filter((t) => t.status === "serving");
 }
 
 export function branchStats(state: QuesoleState, branchId: string) {
@@ -1708,7 +1799,11 @@ export function planOf(id: string) {
 }
 
 export function positionOf(state: QuesoleState, ticketId: string) {
-  const ticket = state.tickets.find((t) => String(t.id) === String(ticketId));
+  const ticket = state.tickets.find(
+    (t) =>
+      String(t.id) === String(ticketId) ||
+      String((t as any).tracking_code || (t as any).trackingCode) === String(ticketId)
+  );
   if (!ticket) return null;
   const ahead = state.tickets.filter(
     (t) =>
@@ -1735,10 +1830,13 @@ export function isNoServiceMode(companyId: string, allocations: CompanyPlanAlloc
   return alloc.purchased_qty === 0;
 }
 
-export function calculateBranchReadiness(branch: Branch, state: QuesoleState): {
+export function calculateBranchReadiness(branch: Branch | null | undefined, state: QuesoleState): {
   score: number;
   steps: { label: string; done: boolean; required: boolean }[];
 } {
+  if (!branch) {
+    return { score: 0, steps: [] };
+  }
   const branchServices = state.services.filter((s) => String(s.branchId) === String(branch.id));
   const branchDesks = state.desks.filter((d) => String(d.branchId) === String(branch.id));
   const branchStaff = state.staff.filter((st) => String(st.branchId) === String(branch.id));

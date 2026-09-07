@@ -70,7 +70,7 @@ const NAV: Record<string, NavItem[]> = {
 };
 
 function ConsolePage() {
-  const { session } = useQuesole();
+  const { session, state } = useQuesole();
   const navigate = useNavigate();
   const role = session?.role ?? "company_admin";
   const nav = NAV[role] ?? NAV["company_admin"]!;
@@ -79,10 +79,31 @@ function ConsolePage() {
   useEffect(() => {
     if (!session) {
       void navigate({ to: "/login" });
+      return;
     }
-  }, [session, navigate]);
 
-  if (!session) {
+    if (session.role === "super_admin") {
+      return;
+    }
+
+    const company = state.companies.find((c) => String(c.id) === String(session.companyId));
+    const branch = state.branches.find((b) => String(b.id) === String(session.branchId));
+
+    if (session.role === "company_admin" && company?.slug) {
+      void navigate({ to: "/$companySlug/admin", params: { companySlug: company.slug } });
+    } else if (
+      (session.role === "branch_admin" || session.role === "operator") &&
+      company?.slug &&
+      branch?.slug
+    ) {
+      void navigate({
+        to: "/$companySlug/branches/$branchSlug",
+        params: { companySlug: company.slug, branchSlug: branch.slug },
+      });
+    }
+  }, [session, state.companies, state.branches, navigate]);
+
+  if (!session || session.role !== "super_admin") {
     return null;
   }
 

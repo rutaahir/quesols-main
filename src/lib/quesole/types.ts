@@ -78,6 +78,9 @@ export interface Desk {
   label: string;
   serviceIds: string[];
   staffId: string | null;
+  staffIds?: string[];
+  currentOperatorId?: string | null;
+  currentOperatorEmail?: string | null;
   status: "open" | "paused" | "offline";
   isActive?: boolean | undefined;
   isOnlineBookingDesk?: boolean;

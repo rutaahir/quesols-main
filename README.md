@@ -422,3 +422,22 @@ npm i
 npm run dev
 ```
 # quesoles
+
+## Local/LAN Development with HTTPS
+
+To test the Geolocation-based walk-in queue check-in on real mobile devices over your local Wi-Fi, the frontend dev server must be run over **HTTPS**. Modern browsers block geolocation requests completely on plain HTTP except on `localhost`.
+
+We have configured Vite to automatically run in HTTPS mode using `@vitejs/plugin-basic-ssl` and set up API proxy rules in `vite.config.ts`.
+
+### How to run:
+1. **Start the environment** as usual using:
+   ```powershell
+   ./start.ps1
+   ```
+2. **Access the Frontend**:
+   Navigate to the secure URL shown in your terminal:
+   - On your local PC: `https://localhost:8080`
+   - On a mobile phone or other device on your local Wi-Fi network: `https://<your-lan-ip>:8080`
+3. **Accept the Certificate Warning**:
+   Since the development SSL certificate is self-signed, your browser will display a warning ("Your connection is not private"). Click **Advanced** and select **Proceed to... (unsafe)** to open the page. Geolocation will now prompt and work correctly on your mobile browser.
+

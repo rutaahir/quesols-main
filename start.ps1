@@ -19,6 +19,7 @@ Write-Host "Starting Vite Frontend..." -ForegroundColor Cyan
 Start-Process -FilePath "powershell.exe" -ArgumentList "-NoExit", "-Command", "npm.cmd run dev"
 
 Write-Host "All services launched successfully!" -ForegroundColor Green
-Write-Host "  -> Frontend: http://localhost:8080 (or http://192.168.31.228:8080)" -ForegroundColor Green
-Write-Host "  -> Backend: http://localhost:8000" -ForegroundColor Green
+Write-Host "  -> Frontend: https://localhost:8080 (or https://<your-lan-ip>:8080)" -ForegroundColor Green
+Write-Host "  -> Backend API (Proxied through Frontend in Dev): https://localhost:8080/api/" -ForegroundColor Green
+Write-Host "  -> Direct Backend Server: http://localhost:8000" -ForegroundColor Green
 Write-Host "  -> phpMyAdmin: http://localhost:9090/phpmyadmin/" -ForegroundColor Green

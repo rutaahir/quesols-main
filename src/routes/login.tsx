@@ -173,7 +173,7 @@ function ThemeToggle() {
 }
 
 function LoginPage() {
-  const { signIn } = useQuesole();
+  const { signIn, state } = useQuesole();
   const navigate = useNavigate();
   const [email, setEmail] = useState("rhea.mehta@apollocare.in");
   const [password, setPassword] = useState("admin123");
@@ -214,9 +214,28 @@ function LoginPage() {
     setLoading(true);
     
     try {
-      await signIn(email, password);
+      const sessionData = await signIn(email, password);
       toast.success("Signed in", { description: "Welcome back to your operations console." });
-      void navigate({ to: "/app" });
+      
+      const company = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
+      const branch = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
+      
+      if (sessionData.role === "super_admin") {
+        void navigate({ to: "/app" });
+      } else if (sessionData.role === "company_admin" && company?.slug) {
+        void navigate({ to: "/$companySlug/admin", params: { companySlug: company.slug } });
+      } else if (
+        (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
+        company?.slug &&
+        branch?.slug
+      ) {
+        void navigate({
+          to: "/$companySlug/branches/$branchSlug",
+          params: { companySlug: company.slug, branchSlug: branch.slug },
+        });
+      } else {
+        void navigate({ to: "/app" });
+      }
     } catch (err: any) {
       setError(err?.message || "Invalid email or password.");
       toast.error("Sign in failed", { description: err?.message || "Please check your credentials." });
@@ -226,7 +245,7 @@ function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-hidden">
+    <div className="grid h-screen max-h-screen lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-hidden">
       
       <style>{`
         @keyframes borderRotate {
@@ -249,9 +268,9 @@ function LoginPage() {
         }
       `}</style>
 
-      <div className="relative flex flex-col justify-center px-6 py-12 sm:px-12 lg:px-20 xl:px-24 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19]">
+      <div className="relative flex flex-col justify-center px-6 py-6 sm:px-12 lg:px-16 xl:px-20 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] h-full overflow-y-auto">
         
-        <div className="absolute top-8 right-8 z-30">
+        <div className="absolute top-6 right-6 z-30">
           <ThemeToggle />
         </div>
 
@@ -261,7 +280,7 @@ function LoginPage() {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="w-full max-w-md mx-auto relative space-y-10"
+          className="w-full max-w-md mx-auto relative space-y-6 my-auto py-4"
         >
           <motion.div variants={itemVariants}>
             <Link to="/" className="inline-flex items-center gap-3 hover:opacity-80 transition-opacity">
@@ -401,7 +420,7 @@ function LoginPage() {
       </div>
 
       {/* Right Panel: Video & Showcase (55%) */}
-      <div className="relative hidden lg:block overflow-hidden bg-[#0B0F19]">
+      <div className="relative hidden lg:block overflow-hidden bg-[#0B0F19] h-full">
         <video 
           autoPlay 
           loop 
@@ -409,7 +428,7 @@ function LoginPage() {
           playsInline 
           preload="auto"
           poster="/login-poster.jpg"
-          className="absolute inset-0 h-full w-full object-cover opacity-40 scale-110 translate-y-4"
+          className="absolute inset-0 h-full w-full object-cover opacity-40"
         >
           <source src={loginVideo} type="video/mp4" />
         </video>

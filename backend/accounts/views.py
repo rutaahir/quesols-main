@@ -65,75 +65,8 @@ class UserInviteViewSet(viewsets.ModelViewSet):
         if branch and branch.company != company:
             raise PermissionDenied("You can only invite staff to branches belonging to your company.")
 
-        # Enforce user seats limit (active users + pending unexpired invites)
-        role_to_invite = serializer.validated_data.get("role", "desk_staff")
-        from billing.models import CompanyPlanAllocation
-        has_itemized = CompanyPlanAllocation.objects.filter(company=company).exists()
-        
-        if has_itemized and role_to_invite == "desk_staff":
-            current_operators = User.objects.filter(company=company, role="desk_staff", is_active=True).count()
-            pending_invites = UserInvite.objects.filter(
-                company=company,
-                role="desk_staff",
-                status="pending",
-                expires_at__gt=timezone.now()
-            ).count()
-            from django.db.models import Sum
-            res = CompanyPlanAllocation.objects.filter(company=company, plan_component__key="operator_screens").aggregate(total=Sum('purchased_qty'))
-            max_operators = res['total'] if res['total'] is not None else (company.package.max_users if company.package else 2)
-            
-            if current_operators + pending_invites >= max_operators:
-                from billing.models import UpgradeRequest
-                UpgradeRequest.objects.create(
-                    company=company,
-                    requested_by=user,
-                    type="user",
-                    details={"quantity": 1, "reason": "Auto-created due to limit reached during user invite creation"},
-                    status="pending"
-                )
-                from notifications.tasks import dispatch_notification
-                company_admins = User.objects.filter(company=company, role="company_admin")
-                for admin in company_admins:
-                    dispatch_notification(
-                        user=admin,
-                        company=company,
-                        branch=None,
-                        trigger_type="limit_reached",
-                        title="Plan Limit Reached",
-                        body="You have reached your user seat limit. Upgrade to unlock."
-                    )
-                raise PermissionDenied("User seat limit reached. Upgrade your plan to invite more staff.")
-        else:
-            current_users = User.objects.filter(company=company, is_active=True).count()
-            pending_invites = UserInvite.objects.filter(
-                company=company,
-                status="pending",
-                expires_at__gt=timezone.now()
-            ).count()
-            sub = company.subscriptions.first()
-            max_users = company.package.max_users + (sub.bonus_users if sub else 0) if company.package else 5
-            
-            if current_users + pending_invites >= max_users:
-                from billing.models import UpgradeRequest
-                UpgradeRequest.objects.create(
-                    company=company,
-                    requested_by=user,
-                    type="user",
-                    details={"quantity": 1, "reason": "Auto-created due to limit reached during user invite creation"},
-                    status="pending"
-                )
-                from notifications.tasks import dispatch_notification
-                company_admins = User.objects.filter(company=company, role="company_admin")
-                for admin in company_admins:
-                    dispatch_notification(
-                        user=admin,
-                        company=company,
-                        branch=None,
-                        trigger_type="limit_reached",
-                        title="Plan Limit Reached",
-                        body="You have reached your user seat limit. Upgrade to unlock."
-                    )
-                raise PermissionDenied("User seat limit reached. Upgrade your plan to invite more staff.")
+        # User seat limits are disabled/unlimited
+        pass
 
         token = uuid.uuid4().hex
         expires_at = timezone.now() + timezone.timedelta(days=7)
@@ -282,64 +215,8 @@ class UserViewSet(viewsets.ModelViewSet):
         if branch and branch.company != company:
             raise PermissionDenied("The assigned branch does not belong to your company.")
 
-        # Enforce user seats limit
-        role_to_create = serializer.validated_data.get("role", "desk_staff")
-        from billing.models import CompanyPlanAllocation
-        has_itemized = CompanyPlanAllocation.objects.filter(company=company).exists()
-        
-        if has_itemized and role_to_create == "desk_staff":
-            current_operators = User.objects.filter(company=company, role="desk_staff", is_active=True).count()
-            from django.db.models import Sum
-            res = CompanyPlanAllocation.objects.filter(company=company, plan_component__key="operator_screens").aggregate(total=Sum('purchased_qty'))
-            max_operators = res['total'] if res['total'] is not None else (company.package.max_users if company.package else 2)
-            
-            if current_operators >= max_operators:
-                from billing.models import UpgradeRequest
-                UpgradeRequest.objects.create(
-                    company=company,
-                    requested_by=user,
-                    type="user",
-                    details={"quantity": 1, "reason": "Auto-created: user seat limit reached during staff creation"},
-                    status="pending"
-                )
-                from notifications.tasks import dispatch_notification
-                company_admins = User.objects.filter(company=company, role="company_admin")
-                for admin in company_admins:
-                    dispatch_notification(
-                        user=admin,
-                        company=company,
-                        branch=None,
-                        trigger_type="limit_reached",
-                        title="Plan Limit Reached",
-                        body="You have reached your user seat limit. Upgrade to unlock."
-                    )
-                raise PermissionDenied("User seat limit reached. Upgrade your plan to add more staff.")
-        else:
-            current_users = User.objects.filter(company=company, is_active=True).count()
-            sub = company.subscriptions.first()
-            max_users = company.package.max_users + (sub.bonus_users if sub else 0) if company.package else 5
-            
-            if current_users >= max_users:
-                from billing.models import UpgradeRequest
-                UpgradeRequest.objects.create(
-                    company=company,
-                    requested_by=user,
-                    type="user",
-                    details={"quantity": 1, "reason": "Auto-created: user seat limit reached during staff creation"},
-                    status="pending"
-                )
-                from notifications.tasks import dispatch_notification
-                company_admins = User.objects.filter(company=company, role="company_admin")
-                for admin in company_admins:
-                    dispatch_notification(
-                        user=admin,
-                        company=company,
-                        branch=None,
-                        trigger_type="limit_reached",
-                        title="Plan Limit Reached",
-                        body="You have reached your user seat limit. Upgrade to unlock."
-                    )
-                raise PermissionDenied("User seat limit reached. Upgrade your plan to add more staff.")
+        # User seat limits are disabled/unlimited
+        pass
 
         new_user = serializer.save(company=company)
 

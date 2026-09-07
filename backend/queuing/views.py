@@ -101,7 +101,7 @@ class DeskViewSet(viewsets.ModelViewSet):
     serializer_class = DeskSerializer
 
     def get_permissions(self):
-        if self.action in ["create", "update", "partial_update", "destroy"]:
+        if self.action in ["create", "destroy"]:
             return [IsBranchAdminOnly()]
         return [IsDeskStaff()]
 
@@ -156,6 +156,23 @@ class DeskViewSet(viewsets.ModelViewSet):
             object_id=desk.id,
             changes=serializer.data
         )
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        instance = self.get_object()
+        
+        status = self.request.data.get("status")
+        if status == "open":
+            # Check if desk is already open by someone else
+            if instance.current_operator and instance.current_operator != user:
+                op_name = instance.current_operator.get_full_name() or instance.current_operator.email
+                raise ValidationError(f"Desk '{instance.name}' is currently active and logged in by operator '{op_name}'. Only 1 operator can log into this desk at a time. Please wait for '{op_name}' to log out before opening this desk.")
+            serializer.validated_data["current_operator"] = user
+        elif status in ["paused", "offline"]:
+            if instance.current_operator == user:
+                serializer.validated_data["current_operator"] = None
+
+        serializer.save()
 
     def perform_destroy(self, instance):
         log_audit(
@@ -409,9 +426,25 @@ class QrCodeGenerateView(APIView):
             if not method:
                 return Response({"error": "Method number is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Generate SVG QR Code (pure python - does not require Pillow)
-            url_target = f"/book?branchId={branch_id}&method={method}"
-            
+            from branches.models import Branch
+            try:
+                branch = Branch.all_objects.get(id=branch_id)
+            except Branch.DoesNotExist:
+                return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            company_slug = branch.company.slug
+            branch_slug = branch.slug
+
+            # Map method to the correct route based on the TARGET URL SCHEME
+            if method == "1":
+                url_target = f"/{company_slug}/branches/{branch_slug}/join"
+            elif method == "2":
+                url_target = f"/{company_slug}/branches/{branch_slug}/kiosk"
+            elif method == "3":
+                url_target = f"/{company_slug}/branches/{branch_slug}/display"
+            else:
+                url_target = f"/{company_slug}"
+
             # Setup pure python SvgImage backend
             qr = qrcode.QRCode(
                 version=1,
@@ -445,12 +478,6 @@ class QrCodeGenerateView(APIView):
                 f.write(svg_data)
                 
             image_url = f"/media/{svg_filename}"
-            
-            from branches.models import Branch
-            try:
-                branch = Branch.objects.get(id=branch_id)
-            except Branch.DoesNotExist:
-                return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
 
             # Save QrCode record
             qr_obj, _ = QrCode.objects.update_or_create(
@@ -680,13 +707,8 @@ class PublicJoinQueueView(APIView):
         try:
             with transaction.atomic():
                 from queuing.models import TokenSequence
-                next_seq = TokenSequence.get_next_sequence_number(branch)
-                
-                if numbering_style == "prefix" and service:
-                    prefix = service.prefix or "A"
-                    token_number = f"{prefix}{next_seq:03d}"
-                else:
-                    token_number = f"{next_seq:03d}"
+                prefix = (service.prefix or "A") if (numbering_style == "prefix" and service) else ""
+                token_number = TokenSequence.get_unique_token_number(branch, prefix=prefix)
 
                 ticket = Ticket.objects.create(
                     branch_id=branch_id,
@@ -913,13 +935,8 @@ class ManualTicketIssueView(APIView):
 
         with transaction.atomic():
             from queuing.models import TokenSequence
-            next_seq = TokenSequence.get_next_sequence_number(branch)
-            
-            if not no_service and service:
-                prefix = service.prefix if service else "A"
-                token_number = f"{prefix}{next_seq:03d}"
-            else:
-                token_number = f"{next_seq:03d}"
+            prefix = service.prefix if (not no_service and service and service.prefix) else ""
+            token_number = TokenSequence.get_unique_token_number(branch, prefix=prefix)
 
             ticket = Ticket.objects.create(
                 branch_id=branch_id,
@@ -990,6 +1007,8 @@ class TicketViewSet(viewsets.ModelViewSet):
                 return Response({"message": "No visitors waiting in queue."}, status=status.HTTP_200_OK)
 
             broadcast_queue_update(desk.branch.id, next_ticket)
+            from display.utils import broadcast_call_next_to_displays
+            broadcast_call_next_to_displays(next_ticket, desk)
             return Response(TicketSerializer(next_ticket).data, status=status.HTTP_200_OK)
 
         except ValidationError as ve:
@@ -1014,6 +1033,9 @@ class TicketViewSet(viewsets.ModelViewSet):
                     ticket.called_at = timezone.now()
                     ticket.save()
                     action_tag = "ticket_recalled"
+                    from display.utils import broadcast_call_next_to_displays
+                    if ticket.desk:
+                        broadcast_call_next_to_displays(ticket, ticket.desk)
 
                 elif act == "serve":
                     ticket.status = "serving"
@@ -1033,7 +1055,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                     ticket.save()
                     action_tag = "ticket_skipped"
 
-                elif act == "hold":
+                elif act in ["hold", "escalate"]:
                     ticket.status = "hold"
                     ticket.save()
                     action_tag = "ticket_held"
@@ -1065,8 +1087,89 @@ class TicketViewSet(viewsets.ModelViewSet):
 
                 broadcast_queue_update(ticket.branch.id, ticket)
 
+                # Send email to customer, operator, admin, rutaahir855@gmail.com & socialbuzz31@gmail.com on Resolved or Escalated
+                if act in ["complete", "hold", "escalate"]:
+                    notes = request.data.get("notes") or request.data.get("note") or ""
+                    disposition = "resolved" if act == "complete" else "escalated"
+                    t_id = ticket.id
+                    a_id = request.user.id if request.user and request.user.is_authenticated else None
+                    try:
+                        from queuing.services.email_notifications import dispatch_disposition_email_async
+                        dispatch_disposition_email_async(
+                            ticket_id=t_id,
+                            disposition=disposition,
+                            actor_id=a_id,
+                            notes=notes
+                        )
+                    except Exception as email_err:
+                        import logging
+                        logging.getLogger(__name__).error(f"Failed to dispatch disposition email: {email_err}")
+
             return Response(TicketSerializer(ticket).data, status=status.HTTP_200_OK)
 
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PublicTicketFeedbackView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PublicBurstThrottle]
+
+    def get(self, request, tracking_code):
+        ticket = Ticket.all_objects.filter(tracking_code=tracking_code).first()
+        if not ticket:
+            ticket = Ticket.all_objects.filter(id=tracking_code).first()
+        if not ticket:
+            return Response({"error": "Ticket not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        desk_name = ticket.desk.name if ticket.desk else "Counter Desk"
+        branch_name = ticket.branch.name if ticket.branch else "Branch Office"
+        service_name = ticket.service.name if ticket.service else "General Service"
+        company_name = ticket.company.name if ticket.company else "Company"
+        company_logo = getattr(ticket.company, "logo_url", None) if ticket.company else None
+
+        return Response({
+            "id": ticket.id,
+            "tracking_code": ticket.tracking_code,
+            "token_number": ticket.token_number,
+            "customer_name": ticket.customer_name,
+            "customer_email": ticket.customer_email or "",
+            "status": ticket.status,
+            "desk_name": desk_name,
+            "branch_name": branch_name,
+            "company_name": company_name,
+            "company_logo": company_logo,
+            "service_name": service_name,
+            "feedback_rating": ticket.feedback_rating,
+            "feedback_text": ticket.feedback_text,
+            "feedback_submitted_at": ticket.feedback_submitted_at,
+        })
+
+    def post(self, request, tracking_code):
+        ticket = Ticket.all_objects.filter(tracking_code=tracking_code).first()
+        if not ticket:
+            ticket = Ticket.all_objects.filter(id=tracking_code).first()
+        if not ticket:
+            return Response({"error": "Ticket not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        rating = request.data.get("rating") or request.data.get("feedback_rating")
+        feedback_text = request.data.get("feedback_text") or request.data.get("message") or request.data.get("reply") or ""
+
+        try:
+            if rating:
+                ticket.feedback_rating = int(rating)
+            ticket.feedback_text = str(feedback_text).strip()
+            ticket.feedback_submitted_at = timezone.now()
+            ticket.save(update_fields=["feedback_rating", "feedback_text", "feedback_submitted_at"])
+
+            # Broadcast update via WebSocket to update Operator & Branch Admin consoles live
+            broadcast_queue_update(ticket.branch.id, ticket)
+
+            return Response({
+                "message": "Feedback and reply message submitted successfully!",
+                "feedback_rating": ticket.feedback_rating,
+                "feedback_text": ticket.feedback_text,
+                "feedback_submitted_at": ticket.feedback_submitted_at
+            }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1076,12 +1179,12 @@ class PublicTrackingView(APIView):
 
     def get(self, request, tracking_code):
         try:
-            ticket = Ticket.objects.get(tracking_code=tracking_code)
+            ticket = Ticket.all_objects.get(tracking_code=tracking_code)
         except Ticket.DoesNotExist:
             return Response({"error": "Ticket not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Calculate position ahead in queue
-        position = Ticket.objects.filter(
+        position = Ticket.all_objects.filter(
             branch=ticket.branch,
             service=ticket.service,
             status__in=["waiting", "called"],
@@ -1122,9 +1225,12 @@ class PublicTicketDetailView(APIView):
     throttle_classes = [PublicBurstThrottle]
 
     def get(self, request, ticket_id):
-        try:
-            ticket = Ticket.objects.get(id=ticket_id)
-        except (Ticket.DoesNotExist, ValueError):
+        from django.db.models import Q
+        ticket = Ticket.objects.filter(
+            Q(tracking_code=ticket_id) | Q(id=ticket_id if str(ticket_id).isdigit() else -1)
+        ).first()
+
+        if not ticket:
             return Response({"error": "Ticket not found."}, status=status.HTTP_404_NOT_FOUND)
 
         ahead = Ticket.objects.filter(
@@ -1139,22 +1245,24 @@ class PublicTicketDetailView(APIView):
 
         return Response({
             "id": str(ticket.id),
+            "tracking_code": ticket.tracking_code,
             "branchId": str(ticket.branch.id),
+            "companyId": str(ticket.company.id) if ticket.company else "",
             "serviceId": str(ticket.service.id) if ticket.service else "",
+            "serviceName": ticket.service.name if ticket.service else "General Service",
+            "branchName": ticket.branch.name if ticket.branch else "",
             "deskId": str(ticket.desk.id) if ticket.desk else None,
+            "deskLabel": ticket.desk.name if ticket.desk else None,
             "number": ticket.token_number,
             "customerName": ticket.customer_name or "Guest",
             "contact": ticket.customer_phone or "",
             "note": ticket.message or "",
             "status": ticket.status,
-            "joinedAt": int(ticket.created_at.timestamp() * 1000),
-            "calledAt": int(ticket.called_at.timestamp() * 1000) if ticket.called_at else None,
-            "servedAt": int(ticket.served_at.timestamp() * 1000) if ticket.served_at else None,
             "ahead": ahead,
             "eta": eta,
-            "serviceName": ticket.service.name if ticket.service else "General",
-            "branchName": ticket.branch.name if ticket.branch else "",
-            "deskLabel": ticket.desk.name if ticket.desk else None,
+            "joinedAt": int(ticket.created_at.timestamp() * 1000) if ticket.created_at else 0,
+            "calledAt": int(ticket.called_at.timestamp() * 1000) if ticket.called_at else None,
+            "servedAt": int(ticket.served_at.timestamp() * 1000) if ticket.served_at else None,
         }, status=status.HTTP_200_OK)
 
 class PublicDisplayView(APIView):

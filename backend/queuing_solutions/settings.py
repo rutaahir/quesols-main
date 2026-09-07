@@ -66,16 +66,16 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Core threadlocal user middleware
     "core.middleware.ThreadLocalUserMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
@@ -101,37 +101,18 @@ WSGI_APPLICATION = "queuing_solutions.wsgi.application"
 ASGI_APPLICATION = "queuing_solutions.asgi.application"
 
 # Database Configuration (MySQL/MariaDB parsing)
-_db_host = os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST")
-_db_user = os.getenv("MYSQLUSER") or os.getenv("MYSQL_USER")
-_db_pass = os.getenv("MYSQLPASSWORD") or os.getenv("MYSQL_PASSWORD")
-_db_name = os.getenv("MYSQLDATABASE") or os.getenv("MYSQL_DATABASE")
-_db_port = os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT")
-
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("MYSQL_URL") or os.getenv("MYSQLURL") or os.getenv("MYSQLPRIVATEURL") or os.getenv("MYSQLPUBLICURL") or ""
-
-if DATABASE_URL:
-    urllib.parse.uses_netloc.append("mysql")
-    url = urllib.parse.urlparse(DATABASE_URL)
-    db_name = url.path[1:] if (url.path and url.path != "/") else (_db_name or "railway")
-    db_user = url.username or _db_user or "root"
-    db_pass = urllib.parse.unquote(url.password) if url.password else (_db_pass or "")
-    db_host = url.hostname or _db_host or "127.0.0.1"
-    db_port = int(url.port or _db_port or 3306)
-else:
-    db_name = _db_name or "queuing_solutions"
-    db_user = _db_user or "root"
-    db_pass = _db_pass or ""
-    db_host = _db_host or "127.0.0.1"
-    db_port = int(_db_port or 3306)
+DATABASE_URL = os.getenv("DATABASE_URL", "mysql://root@127.0.0.1:3306/queuing_solutions")
+urllib.parse.uses_netloc.append("mysql")
+url = urllib.parse.urlparse(DATABASE_URL)
 
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": db_name,
-        "USER": db_user,
-        "PASSWORD": db_pass,
-        "HOST": db_host,
-        "PORT": db_port,
+        "NAME": url.path[1:],
+        "USER": url.username,
+        "PASSWORD": urllib.parse.unquote(url.password) if url.password else "",
+        "HOST": url.hostname,
+        "PORT": url.port or 3306,
         "OPTIONS": {
             "charset": "utf8mb4",
         },
@@ -196,19 +177,27 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
+# Email Configuration (SMTP Gmail)
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "socialbuzz31@gmail.com")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "mxykeikdwbxdqmwc")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Quesoles Queue Management <socialbuzz31@gmail.com>")
+
 # CORS configuration
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if os.getenv("CORS_ALLOWED_ORIGINS") else []
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOW_ALL_ORIGINS = True
 
-# Security Headers & TLS enforcement behind reverse proxy (Railway)
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-USE_X_FORWARDED_HOST = True
-
+# Security Headers & TLS enforcement
 if not DEBUG:
-    SECURE_SSL_REDIRECT = False  # Railway edge proxy handles SSL redirection automatically
+    SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    # Note: SECURE_BROWSER_XSS_FILTER is inert on Django 5.x/modern browsers but kept for legacy compliance
     SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = "DENY"
     SESSION_COOKIE_SECURE = True
@@ -293,7 +282,6 @@ LOCALE_PATHS = [
 
 
 STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Celery Configuration Options
@@ -375,7 +363,7 @@ if 'test' in sys.argv or 'pytest' in sys.modules:
 
 
 # Email backend configuration for email alert triggers (console backend for testing and local dev)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 
 # Dynamic tax settings
 GST_PERCENT = 18.0

@@ -7,7 +7,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 from core.views import healthz, ContactSubmissionView, DemoRequestView, PartnershipRequestView
 from accounts.views import CustomTokenObtainPairView, LogoutView, UserInviteViewSet, InviteAcceptView, UserViewSet
-from companies.views import CompanyRegistrationView, CompanyViewSet, CheckSlugView
+from companies.views import CompanyRegistrationView, CompanyViewSet, CheckSlugView, CompanyBySlugView, BranchBySlugView
 from branches.views import BranchViewSet
 from billing.views import PackageViewSet, UpgradeRequestViewSet
 from audit.views import AuditLogViewSet
@@ -27,6 +27,7 @@ from queuing.views import (
     PublicDisplayView,
     PublicTicketCancelView,
     PublicTicketDetailView,
+    PublicTicketFeedbackView,
     KotMessageTemplateViewSet,
     KotNotificationLogViewSet
 )
@@ -76,6 +77,8 @@ urlpatterns = [
     # Onboarding & Invites
     path("api/companies/register/", CompanyRegistrationView.as_view(), name="company_register"),
     path("api/companies/check-slug/", CheckSlugView.as_view(), name="company_check_slug"),
+    path("api/companies/by-slug/<str:company_slug>/", CompanyBySlugView.as_view(), name="company_by_slug"),
+    path("api/companies/<str:company_slug>/branches/by-slug/<str:branch_slug>/", BranchBySlugView.as_view(), name="branch_by_slug"),
     path("api/invites/accept/", InviteAcceptView.as_view(), name="invite_accept"),
     path("api/contact/", ContactSubmissionView.as_view(), name="contact_submit"),
     path("api/demo-request/", DemoRequestView.as_view(), name="demo_request_submit"),
@@ -90,6 +93,7 @@ urlpatterns = [
     path("api/public/ticket/<str:ticket_id>/", PublicTicketDetailView.as_view(), name="public_ticket_detail"),
     path("api/public/display/<str:branch_id>/", PublicDisplayView.as_view(), name="public_display"),
     path("api/public/tickets/<str:tracking_code>/cancel/", PublicTicketCancelView.as_view(), name="public_ticket_cancel"),
+    path("api/public/tickets/<str:tracking_code>/feedback/", PublicTicketFeedbackView.as_view(), name="public_ticket_feedback"),
     
     # Phase 3 reporting actions
     path("api/reports/trends/", ReportTrendsView.as_view(), name="report_trends"),
@@ -99,5 +103,6 @@ urlpatterns = [
     path("api/billing/", include("billing.urls")),
     path("api/", include("appointments.urls")),
     path("api/", include("kot.urls")),
+    path("api/", include("display.urls")),
     path("api/", include(router.urls)),
 ]

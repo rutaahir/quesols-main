@@ -1,7 +1,23 @@
+import re
+from django.core.exceptions import ValidationError
 from django.db import models
 from core.models import BaseModel
 
 from encrypted_model_fields.fields import EncryptedCharField
+
+RESERVED_SLUGS = {
+    "about", "app", "book", "contact", "display", "forgot-password",
+    "kiosk", "kot", "live-demo", "login", "partnerships", "pricing",
+    "q", "services", "signup", "t", "admin", "healthz", "api", "static", "media"
+}
+
+def validate_company_slug(value):
+    if not value:
+        return
+    if not re.match(r'^[a-z0-9]+(?:-[a-z0-9]+)*$', value):
+        raise ValidationError("Slug must be lowercase and contain only letters, numbers, and hyphens.")
+    if value in RESERVED_SLUGS:
+        raise ValidationError(f"'{value}' is a reserved word and cannot be used as a slug.")
 
 class Company(BaseModel):
     STATUS_CHOICES = [
@@ -33,7 +49,7 @@ class Company(BaseModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     onboarding_status = models.CharField(max_length=30, choices=ONBOARDING_STATUS_CHOICES, default="active")
     package = models.ForeignKey("billing.Package", on_delete=models.SET_NULL, null=True, blank=True, related_name="companies")
-    slug = models.SlugField(max_length=255, unique=True, null=True, blank=True)
+    slug = models.SlugField(max_length=255, unique=True, null=True, blank=True, validators=[validate_company_slug])
     solution = models.CharField(max_length=50, default="ONSITE_ONLINE")
 
     def save(self, *args, **kwargs):
@@ -42,12 +58,21 @@ class Company(BaseModel):
             base_slug = slugify(self.name)
             if not base_slug:
                 base_slug = "company"
+            
             slug = base_slug
+            # Handle reserved words in auto-generation
+            if slug in RESERVED_SLUGS:
+                slug = f"{slug}-co"
+                
             counter = 1
             while Company.objects.filter(slug=slug).exclude(id=self.id).exists():
                 slug = f"{base_slug}-{counter}"
                 counter += 1
             self.slug = slug
+        else:
+            self.slug = self.slug.lower().strip()
+            validate_company_slug(self.slug)
+            
         super().save(*args, **kwargs)
 
     def __str__(self):

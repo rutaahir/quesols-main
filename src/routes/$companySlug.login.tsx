@@ -175,7 +175,7 @@ function ThemeToggle() {
 
 function CompanyLoginPage() {
   const { companySlug } = Route.useParams();
-  const { signIn } = useQuesole();
+  const { signIn, state } = useQuesole();
   const navigate = useNavigate();
 
   const [company, setCompany] = useState<any | null>(null);
@@ -196,21 +196,23 @@ function CompanyLoginPage() {
   useEffect(() => {
     const fetchCompanyData = async () => {
       try {
-        const data = await apiFetch(`/api/public/company/${companySlug}/`);
+        const data = await apiFetch(`/api/companies/by-slug/${companySlug}/`);
         setCompany(data);
       } catch (err: any) {
         console.error("Failed to resolve corporate portal:", err);
-        setCompanyError(err.message || "This corporate portal is not available.");
+        setCompanyError(err?.message || "This corporate portal is not available.");
       } finally {
         setIsLoadingCompany(false);
       }
     };
-    fetchCompanyData();
+    if (companySlug) {
+      fetchCompanyData();
+    }
   }, [companySlug]);
 
-  const primaryColor = company?.booking_config?.primary_color || "#7C3AED";
-  const portalName = company?.booking_config?.portal_name || companySlug.toUpperCase();
-  const logoUrl = company?.booking_config?.logo_url;
+  const primaryColor = company?.booking_config?.primary_color || company?.brand_colors?.primary || "#7C3AED";
+  const portalName = company?.name || company?.booking_config?.portal_name || (companySlug ? companySlug.toUpperCase() : "PORTAL");
+  const logoUrl = company?.logo_url || company?.booking_config?.logo_url;
 
   async function submit(e?: React.FormEvent) {
     if (e) e.preventDefault();
@@ -241,9 +243,28 @@ function CompanyLoginPage() {
     setLoading(true);
     
     try {
-      await signIn(email, password);
+      const sessionData = await signIn(email, password, companySlug);
       toast.success("Signed in successfully", { description: `Welcome back to the ${portalName} console.` });
-      void navigate({ to: "/app" });
+      
+      const companyObj = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
+      const branchObj = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
+      
+      if (sessionData.role === "super_admin") {
+        void navigate({ to: "/app" });
+      } else if (sessionData.role === "company_admin" && companyObj?.slug) {
+        void navigate({ to: "/$companySlug/admin", params: { companySlug: companyObj.slug } });
+      } else if (
+        (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
+        companyObj?.slug &&
+        branchObj?.slug
+      ) {
+        void navigate({
+          to: "/$companySlug/branches/$branchSlug",
+          params: { companySlug: companyObj.slug, branchSlug: branchObj.slug },
+        });
+      } else {
+        void navigate({ to: "/app" });
+      }
     } catch (err: any) {
       setError(err?.message || "Invalid email or password.");
       toast.error("Sign in failed", { description: err?.message || "Please check your credentials." });

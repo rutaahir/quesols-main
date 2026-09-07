@@ -91,6 +91,8 @@ class Package(BaseModel):
     max_branches = models.IntegerField()
     max_users = models.IntegerField()
     max_kiosks = models.IntegerField(default=0)
+    max_displays = models.IntegerField(default=0)
+    max_kot_terminals = models.IntegerField(default=0)
     price_monthly = models.DecimalField(max_digits=10, decimal_places=2)
     price_yearly = models.DecimalField(max_digits=10, decimal_places=2)
     feature_flags = models.JSONField(default=dict, blank=True)

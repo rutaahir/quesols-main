@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useQuesole, calculateBranchReadiness, branchStats, isNoServiceMode, apiFetch, planOf } from "@/lib/quesole/store";
+import { apiFetch, planOf, useQuesole, branchStats, isNoServiceMode, calculateBranchReadiness } from "@/lib/quesole/store";
 import { cn } from "@/lib/utils";
+import { DisplayTerminalsManager } from "@/components/console/display-terminals-manager";
 
 const tabVariants = {
   initial: { opacity: 0, y: 6 },
@@ -30,7 +31,7 @@ export function BranchDesksServicesManager({
 }) {
   const { state, actions, session, refresh } = useQuesole();
   const isBranchAdmin = session?.role === "branch_admin";
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "kiosks" | "online_booking" | "kot">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "kiosks" | "displays" | "online_booking" | "kot">("overview");
   const [searchServicesQuery, setSearchServicesQuery] = useState("");
   const [searchDesksQuery, setSearchDesksQuery] = useState("");
   const [searchStaffQuery, setSearchStaffQuery] = useState("");
@@ -48,6 +49,13 @@ export function BranchDesksServicesManager({
   const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
   const companyId = company?.id || "";
   const isMethod4Unlocked = planOf(company?.plan ?? "starter").methods.includes(4) || branch?.channel_type === "ONLINE_ONLY" || branch?.channel_type === "HYBRID";
+
+  const companySlug = company?.slug || "";
+  const branchSlug = branch?.slug || "";
+  const joinUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/join` : `/q/${branch?.id || branchId}`;
+  const kioskUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/kiosk` : `/kiosk/${branch?.id || branchId}`;
+  const displayUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/display` : `/${companySlug}/branches/${branchSlug}/display`;
+  const kotUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/kot` : `/kot/${branch?.id || branchId}`;
 
   useEffect(() => {
     if (branch?.channel_type === "ONLINE_ONLY" && ["desks", "staff", "kiosks"].includes(activeTab)) {
@@ -186,7 +194,7 @@ export function BranchDesksServicesManager({
   const [newDeskActive, setNewDeskActive] = useState(true);
   const [newDeskOnlineBooking, setNewDeskOnlineBooking] = useState(false);
   const [newDeskServices, setNewDeskServices] = useState<string[]>([]);
-  const [newDeskStaffId, setNewDeskStaffId] = useState<string | null>(null);
+  const [newDeskStaffIds, setNewDeskStaffIds] = useState<string[]>([]);
   const [isCreatingDesk, setIsCreatingDesk] = useState(false);
 
   // Edit branch state
@@ -204,7 +212,7 @@ export function BranchDesksServicesManager({
   const [editDeskActive, setEditDeskActive] = useState(true);
   const [editDeskOnlineBooking, setEditDeskOnlineBooking] = useState(false);
   const [editDeskServices, setEditDeskServices] = useState<string[]>([]);
-  const [editDeskStaffId, setEditDeskStaffId] = useState<string | null>(null);
+  const [editDeskStaffIds, setEditDeskStaffIds] = useState<string[]>([]);
   const [isSavingDesk, setIsSavingDesk] = useState(false);
 
   const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false);
@@ -269,7 +277,7 @@ export function BranchDesksServicesManager({
       setNewDeskActive(true);
       setNewDeskOnlineBooking(false);
       setNewDeskServices(branchServices.map((s) => s.id));
-      setNewDeskStaffId(null);
+      setNewDeskStaffIds([]);
       setIsAddDeskModalOpen(true);
     }
   };
@@ -314,7 +322,7 @@ export function BranchDesksServicesManager({
         label: newDeskName.trim(),
         isActive: newDeskActive,
         serviceIds: newDeskServices,
-        assignedStaffId: newDeskStaffId,
+        assignedStaffIds: newDeskStaffIds,
         isOnlineBookingDesk: newDeskOnlineBooking,
       });
       toast.success(`Desk "${newDeskName}" created successfully!`);
@@ -343,18 +351,16 @@ export function BranchDesksServicesManager({
       .filter((ds) => ds.deskId === desk.id)
       .map((ds) => ds.serviceId);
 
-    const currentAssignedStaff = branchStaff.find((st, index) => {
-      if (st.deskId) return String(st.deskId) === String(desk.id);
-      const deskIndex = branchDesks.findIndex((bd) => bd.id === desk.id);
-      return index === deskIndex;
-    });
+    const assignedStaffIds = branchStaff
+      .filter((st) => String(st.deskId) === String(desk.id))
+      .map((st) => st.id);
 
     setEditingDesk(desk);
     setEditDeskName(desk.label || desk.name || "");
     setEditDeskActive(desk.isActive ?? true);
     setEditDeskOnlineBooking(desk.isOnlineBookingDesk ?? false);
     setEditDeskServices(deskServicesIds);
-    setEditDeskStaffId(currentAssignedStaff ? currentAssignedStaff.id : null);
+    setEditDeskStaffIds(assignedStaffIds);
   };
 
   const handleSaveDesk = async (e: React.FormEvent) => {
@@ -367,7 +373,7 @@ export function BranchDesksServicesManager({
         label: editDeskName.trim(),
         isActive: editDeskActive,
         serviceIds: editDeskServices,
-        assignedStaffId: editDeskStaffId,
+        assignedStaffIds: editDeskStaffIds,
         isOnlineBookingDesk: editDeskOnlineBooking,
       });
       toast.success(`Desk "${editDeskName}" saved successfully!`);
@@ -565,7 +571,7 @@ export function BranchDesksServicesManager({
       const newUserId = res?.id || state.staff.find((st) => st.email.toLowerCase() === emailStr.toLowerCase())?.id;
 
       if (targetDeskId && newUserId) {
-        await actions.updateDesk(targetDeskId, { assignedStaffId: newUserId });
+        await actions.assignStaffToDesk(newUserId, targetDeskId);
         await actions.updateUserServices(newUserId, targetServices);
       }
 
@@ -610,13 +616,13 @@ export function BranchDesksServicesManager({
       });
 
       if (editStaffRole === "desk_staff" && editStaffDeskId) {
-        await actions.updateDesk(editStaffDeskId, { assignedStaffId: editingStaff.id });
+        await actions.assignStaffToDesk(editingStaff.id, editStaffDeskId);
         const deskServices = state.deskServices
           .filter((ds) => ds.deskId === editStaffDeskId)
           .map((ds) => ds.serviceId);
         await actions.updateUserServices(editingStaff.id, deskServices);
       } else if (editingStaff.deskId) {
-        await actions.updateDesk(editingStaff.deskId, { assignedStaffId: null });
+        await actions.assignStaffToDesk(editingStaff.id, null);
         await actions.updateUserServices(editingStaff.id, []);
       }
 
@@ -656,83 +662,92 @@ export function BranchDesksServicesManager({
     }
   };
 
+  if (!branch) {
+    return (
+      <div className="panel p-8 text-center space-y-4 my-8">
+        <h3 className="font-display text-lg font-bold text-foreground">Branch Loading or Not Found</h3>
+        <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+          The requested branch details could not be found or are being initialized.
+        </p>
+        {onBack && (
+          <div className="pt-2">
+            <Button variant="outline" size="sm" onClick={onBack} className="font-bold text-xs">
+              ← Return to Branches List
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const readinessGlobal = calculateBranchReadiness(branch, state);
   const isSetupCompleteGlobal = readinessGlobal.score === 100;
 
   return (
     <div className="grid gap-6 pb-16">
-      {/* Top Navigation Row (Mockup Style) */}
-      <div className="flex items-center justify-between border-b border-border/40 pb-4 mb-2 z-10 relative">
-        <div className="flex items-center gap-3">
+      {/* Top Header Bar (Streamlined & Compact) */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-border/40 pb-3 z-10 relative">
+        <div className="flex items-center gap-2.5 flex-wrap">
           {onBack && (
             <button
               onClick={onBack}
-              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-foreground rounded-full h-8 w-8 flex items-center justify-center p-0 shadow-sm transition-all shrink-0"
+              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-foreground rounded-full h-8 w-8 flex items-center justify-center p-0 shadow-xs transition-all shrink-0"
               title="Back to Branches"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
           )}
-          <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 border border-border/40 px-3 py-1.5 rounded-full text-xs font-bold text-foreground select-none">
+          <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 border border-border/40 px-2.5 py-1 rounded-full text-xs font-bold text-foreground select-none shrink-0">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             {branch.name}
             <Check className="h-3.5 w-3.5 text-emerald-500 ml-0.5" />
           </span>
-        </div>
-
-        {/* Notifications and Profile User Avatar on the Right */}
-        <div className="flex items-center gap-4">
-          <button className="relative h-9 w-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-border/40 flex items-center justify-center text-foreground hover:bg-accent transition-all">
-            <Bell className="h-4 w-4" />
-            <span className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] font-black shadow-md border border-white">
-              2
-            </span>
-          </button>
-          
-          <div className="flex items-center gap-2.5 p-1 px-2.5 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl border border-border/40">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 font-bold text-xs shrink-0 select-none">
-              {session?.name ? session.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "US"}
-            </div>
-            <div className="text-left hidden sm:block">
-              <div className="text-xs font-black text-foreground leading-none">{session?.name || "User"}</div>
-              <div className="text-[9px] text-muted-foreground mt-1 leading-none font-bold uppercase tracking-wider">
-                {session?.role === "company_admin" ? "Company Admin" : "Branch Admin"}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Title & Action Buttons Row */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 z-10 relative">
-        <div className="space-y-1">
-          <h1 className="font-display text-2xl font-black tracking-tight text-foreground">
-            Branch Operations & Staff Setup
+          <h1 className="font-display text-lg sm:text-xl font-black tracking-tight text-foreground ml-1">
+            Branch Operations
           </h1>
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-            Configure services, desks, staff, kiosks and queue settings to ensure smooth and efficient branch operations.
-          </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Right side: Actions, Notifications & Profile Avatar */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
           {purchasedQRs > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => setIsQrModalOpen(true)}
-              className="h-8 gap-1.5 text-xs font-bold border-border/80 bg-white dark:bg-slate-900 shadow-sm"
+              className="h-8 gap-1.5 text-xs font-bold border-border/80 bg-white dark:bg-slate-900 shadow-2xs"
             >
-              <QrCode className="h-3.5 w-3.5" /> Branch QR & Links
+              <QrCode className="h-3.5 w-3.5" /> Branch QR &amp; Links
             </Button>
           )}
           <Button
             variant="brand"
             size="sm"
-            onClick={() => window.open(`/display/${branch.id}`, "_blank")}
-            className="h-8 gap-1.5 text-xs font-bold shadow-md shadow-brand/10"
+            onClick={() => window.open(displayUrl, "_blank")}
+            className="h-8 gap-1.5 text-xs font-bold shadow-xs shadow-brand/10"
           >
             <Layers className="h-3.5 w-3.5" /> Open Live Display
           </Button>
+
+          <div className="h-4 w-px bg-border/60 mx-0.5 hidden sm:block" />
+
+          <button className="relative h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-800 border border-border/40 flex items-center justify-center text-foreground hover:bg-accent transition-all shrink-0">
+            <Bell className="h-3.5 w-3.5" />
+            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] font-black shadow-xs border border-white">
+              2
+            </span>
+          </button>
+          
+          <div className="flex items-center gap-2 p-0.5 px-2 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl border border-border/40 shrink-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] shrink-0 select-none">
+              {session?.name ? session.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "US"}
+            </div>
+            <div className="text-left hidden md:block">
+              <div className="text-xs font-black text-foreground leading-none">{session?.name || "User"}</div>
+              <div className="text-[9px] text-muted-foreground mt-0.5 leading-none font-bold uppercase tracking-wider">
+                {session?.role === "company_admin" ? "Company Admin" : "Branch Admin"}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -809,6 +824,19 @@ export function BranchDesksServicesManager({
             <Monitor className="h-3.5 w-3.5" /> Kiosks
           </button>
         )}
+        {branch?.channel_type !== "ONLINE_ONLY" && (
+          <button
+            onClick={() => setActiveTab("displays")}
+            className={cn(
+              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
+              activeTab === "displays"
+                ? "border-primary text-primary font-black"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Layers className="h-3.5 w-3.5" /> Live Displays
+          </button>
+        )}
         {branch?.channel_type !== "ONSITE_ONLY" && (
           <button
             onClick={() => setActiveTab("online_booking")}
@@ -838,76 +866,90 @@ export function BranchDesksServicesManager({
         )}
       </div>
 
-      {/* Stat Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 z-10 relative">
-        {/* Stat Card 1: Waiting Visitors */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-          <div className="flex items-center gap-4">
-            <span className="h-11 w-11 rounded-2xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
-              <Users className="h-5 w-5" />
-            </span>
-            <div>
-              <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Waiting Visitors</span>
-              <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).waiting}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Live in queue</span>
+      {/* Stat Cards Grid (Overview Tab Only) */}
+      {activeTab === "overview" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 z-10 relative">
+          {/* Stat Card 1: Waiting Visitors */}
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
+            <div className="flex items-center gap-4">
+              <span className="h-11 w-11 rounded-2xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
+                <Users className="h-5 w-5" />
+              </span>
+              <div>
+                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Waiting Visitors</span>
+                <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).waiting}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Live in queue</span>
+              </div>
             </div>
+            <svg className="w-16 h-8 text-indigo-500" viewBox="0 0 100 30" fill="none">
+              <path d="M0 25 Q15 10 30 20 T60 10 T90 25 T100 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-          <svg className="w-16 h-8 text-indigo-500" viewBox="0 0 100 30" fill="none">
-            <path d="M0 25 Q15 10 30 20 T60 10 T90 25 T100 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
 
-        {/* Stat Card 2: Served Today */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-          <div className="flex items-center gap-4">
-            <span className="h-11 w-11 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-              <Check className="h-5 w-5" />
-            </span>
-            <div>
-              <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Served Today</span>
-              <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).served}</span>
-              <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">+12% vs yesterday</span>
+          {/* Stat Card 2: Served Today */}
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
+            <div className="flex items-center gap-4">
+              <span className="h-11 w-11 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
+                <Check className="h-5 w-5" />
+              </span>
+              <div>
+                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Served Today</span>
+                <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).served}</span>
+                <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">+12% vs yesterday</span>
+              </div>
             </div>
+            <svg className="w-16 h-8 text-blue-500" viewBox="0 0 100 30" fill="none">
+              <path d="M0 20 Q20 5 40 25 T80 15 T100 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-          <svg className="w-16 h-8 text-blue-500" viewBox="0 0 100 30" fill="none">
-            <path d="M0 20 Q20 5 40 25 T80 15 T100 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
 
-        {/* Stat Card 3: Active Services */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-          <div className="flex items-center gap-4">
-            <span className="h-11 w-11 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-              <Layers className="h-5 w-5" />
-            </span>
-            <div>
-              <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Active Services</span>
-              <span className="text-2xl font-black text-foreground block mt-0.5">{branchServices.length}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Across all counters</span>
+          {/* Stat Card 3: Active Services */}
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
+            <div className="flex items-center gap-4">
+              <span className="h-11 w-11 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                <Layers className="h-5 w-5" />
+              </span>
+              <div>
+                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Active Services</span>
+                <span className="text-2xl font-black text-foreground block mt-0.5">{branchServices.length}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Across all counters</span>
+              </div>
             </div>
+            <svg className="w-16 h-8 text-emerald-500" viewBox="0 0 100 30" fill="none">
+              <path d="M0 25 Q20 15 40 20 T80 10 T100 15" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-          <svg className="w-16 h-8 text-emerald-500" viewBox="0 0 100 30" fill="none">
-            <path d="M0 25 Q20 15 40 20 T80 10 T100 15" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
 
-        {/* Stat Card 4: Operator Desks */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-          <div className="flex items-center gap-4">
-            <span className="h-11 w-11 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-              <Monitor className="h-5 w-5" />
-            </span>
-            <div>
-              <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Operator Desks</span>
-              <span className="text-2xl font-black text-foreground block mt-0.5">{branchDesks.length}</span>
-              <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Active & ready</span>
+          {/* Stat Card 4: Operator Desks */}
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
+            <div className="flex items-center gap-4">
+              <span className="h-11 w-11 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                <Monitor className="h-5 w-5" />
+              </span>
+              <div>
+                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Operator Desks</span>
+                <span className="text-2xl font-black text-foreground block mt-0.5">{branchDesks.length}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Active & ready</span>
+              </div>
             </div>
+            <svg className="w-16 h-8 text-amber-500" viewBox="0 0 100 30" fill="none">
+              <path d="M0 15 Q25 25 50 15 T100 20" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-          <svg className="w-16 h-8 text-amber-500" viewBox="0 0 100 30" fill="none">
-            <path d="M0 15 Q25 25 50 15 T100 20" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
         </div>
-      </div>
+      )}
+
+      {/* Live Displays Tab Content */}
+      {activeTab === "displays" && (
+        <div className="z-10 relative">
+          <DisplayTerminalsManager
+            branchId={branch.id}
+            branchDesks={branchDesks}
+            companySlug={companySlug}
+            branchSlug={branchSlug}
+          />
+        </div>
+      )}
 
       {/* Overview Tab Content */}
       {activeTab === "overview" && (
@@ -919,7 +961,98 @@ export function BranchDesksServicesManager({
             const firstIncompleteIdx = readiness.steps.findIndex((s) => !s.done);
             
             return (
-              <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 flex flex-col lg:flex-row justify-between gap-6 hover:shadow-medium transition-all">
+              <div className="space-y-6">
+                {/* Live Customer Query Resolutions & Feedback Monitor */}
+                <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border/40 pb-4">
+                    <div className="space-y-1">
+                      <h3 className="font-display text-sm font-black text-foreground flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 text-primary" /> Live Customer Query Status &amp; Reply Monitor
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Automated email updates dispatched on ticket resolution/escalation, including customer rating reviews and reply messages.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                      Auto SMTP Dispatched
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(() => {
+                      const handledTickets = state.tickets.filter(
+                        (t) => String(t.branchId) === String(branch.id) && (t.status === "served" || t.status === "hold" || (t as any).feedback_text)
+                      ).sort((a: any, b: any) => {
+                        const timeA = new Date(a.feedback_submitted_at || a.called_at || a.served_at || a.created_at || a.createdAt || 0).getTime();
+                        const timeB = new Date(b.feedback_submitted_at || b.called_at || b.served_at || b.created_at || b.createdAt || 0).getTime();
+                        return timeB - timeA;
+                      });
+
+                      if (handledTickets.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-xs text-muted-foreground bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-border/60">
+                            No customer query updates yet today. When operators resolve or escalate tickets, emails are automatically sent to <strong className="text-foreground">rutaahir855@gmail.com</strong> (and visitor email), and customer replies will display here live.
+                          </div>
+                        );
+                      }
+
+                      return handledTickets.slice(0, 6).map((t: any) => (
+                        <div
+                          key={t.id}
+                          className="rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-800/30 p-4 space-y-2 hover:border-primary/40 transition-all"
+                        >
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-base font-black text-primary px-2.5 py-1 rounded-xl bg-primary/10 border border-primary/20">
+                                {t.token_number || t.number}
+                              </span>
+                              <div>
+                                <span className="font-extrabold text-sm text-foreground block">{t.customer_name || t.customerName}</span>
+                                <span className="text-[10px] text-muted-foreground block font-medium">
+                                  Sent to: {t.customer_email || "rutaahir855@gmail.com"}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {t.status === "served" ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                  <Check className="h-3.5 w-3.5" /> Resolved
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                  <AlertTriangle className="h-3.5 w-3.5" /> Escalated
+                                </span>
+                              )}
+
+                              {t.feedback_rating && (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" /> {t.feedback_rating}/5
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {t.feedback_text ? (
+                            <div className="bg-white dark:bg-slate-900 border border-primary/20 rounded-xl p-3 text-xs text-foreground space-y-1 mt-1">
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+                                <span>💬 Customer Reply Message</span>
+                                {t.feedback_submitted_at && <span>{new Date(t.feedback_submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                              </div>
+                              <p className="italic font-semibold text-slate-800 dark:text-slate-200">"{t.feedback_text}"</p>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-muted-foreground italic pt-1 flex items-center justify-between">
+                              <span>Status email delivered via Gmail SMTP. Awaiting customer rating &amp; reply message...</span>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 flex flex-col lg:flex-row justify-between gap-6 hover:shadow-medium transition-all">
                 <div className="flex-1 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="font-display text-sm font-black flex items-center gap-2 text-foreground">
@@ -993,8 +1126,9 @@ export function BranchDesksServicesManager({
                   </div>
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          );
+        })()}
 
           {/* Active Queue Methods Section */}
           <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 hover:shadow-medium transition-all">
@@ -2223,7 +2357,7 @@ export function BranchDesksServicesManager({
                         <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Kiosk Link</span>
                         <div className="flex items-center gap-2">
                           <a
-                            href={`/kiosk/${branch.slug || branch.id}`}
+                            href={kioskUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-primary hover:underline font-bold flex items-center gap-1"
@@ -2233,7 +2367,7 @@ export function BranchDesksServicesManager({
                           </a>
                           <button
                             onClick={() => {
-                              const url = `${window.location.origin}/kiosk/${branch.slug || branch.id}`;
+                              const url = `${window.location.origin}${kioskUrl}`;
                               navigator.clipboard.writeText(url);
                               toast.success("Kiosk URL copied to clipboard!");
                             }}
@@ -2475,19 +2609,18 @@ export function BranchDesksServicesManager({
                           .filter((ds) => ds.deskId === d.id)
                           .map((ds) => ds.serviceId);
 
-                        const currentAssignedCount = state.staff.filter((st) => st.deskId === d.id).length;
+                        const currentAssignedCount = state.staff.filter((st) => String(st.deskId) === String(d.id)).length;
                         const isSelected = selectedExistingDeskId === d.id;
-
-                        const isAssigned = currentAssignedCount > 0;
 
                         return (
                           <div
                             key={d.id}
-                            onClick={() => !isAssigned && setSelectedExistingDeskId(d.id)}
+                            onClick={() => setSelectedExistingDeskId(d.id)}
                             className={cn(
-                              "rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3",
-                              isAssigned ? "opacity-50 cursor-not-allowed border-dashed bg-muted/30" : "cursor-pointer",
-                              isSelected ? "border-brand bg-brand/10 text-brand font-semibold ring-1 ring-brand" : (!isAssigned && "border-border/80 bg-accent/20 hover:border-foreground")
+                              "rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3 cursor-pointer",
+                              isSelected
+                                ? "border-brand bg-brand/10 text-brand font-semibold ring-1 ring-brand"
+                                : "border-border/80 bg-accent/20 hover:border-foreground"
                             )}
                           >
                             <div className="space-y-1 overflow-hidden">
@@ -2496,12 +2629,13 @@ export function BranchDesksServicesManager({
                                   type="radio"
                                   name="deskSelect"
                                   checked={isSelected}
-                                  disabled={isAssigned}
-                                  onChange={() => !isAssigned && setSelectedExistingDeskId(d.id)}
+                                  onChange={() => setSelectedExistingDeskId(d.id)}
                                   className="accent-brand"
                                 />
                                 <span className="font-bold text-foreground">{d.label}</span>
-                                <span className="text-[10px] text-muted-foreground">({currentAssignedCount} Staff assigned)</span>
+                                <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-800">
+                                  {currentAssignedCount} Staff assigned
+                                </span>
                               </div>
                               {!noService && (
                                 <div className="flex flex-wrap gap-1 pt-0.5">
@@ -2759,23 +2893,27 @@ export function BranchDesksServicesManager({
                         .filter((ds) => ds.deskId === d.id)
                         .map((ds) => ds.serviceId);
 
-                      const otherAssignedCount = state.staff.filter((st) => st.deskId === d.id && st.id !== editingStaff.id).length;
-                      const isAssigned = otherAssignedCount > 0;
+                      const otherAssignedCount = state.staff.filter((st) => String(st.deskId) === String(d.id) && st.id !== editingStaff.id).length;
 
                       return (
                         <button
                           type="button"
                           key={d.id}
-                          disabled={isAssigned}
-                          onClick={() => !isAssigned && setEditStaffDeskId(d.id)}
+                          onClick={() => setEditStaffDeskId(d.id)}
                           className={cn(
-                            "w-full flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all",
-                            isAssigned ? "opacity-50 cursor-not-allowed border-dashed bg-muted/30" : "cursor-pointer",
-                            isSelected ? "border-brand bg-brand/15 text-brand font-bold ring-1 ring-brand" : (!isAssigned && "border-border/60 bg-background text-muted-foreground hover:border-foreground")
+                            "w-full flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all cursor-pointer",
+                            isSelected ? "border-brand bg-brand/15 text-brand font-bold ring-1 ring-brand" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
                           )}
                         >
                           <div>
-                            <div className="font-bold text-foreground">{d.label}</div>
+                            <div className="font-bold text-foreground flex items-center gap-2">
+                              <span>{d.label}</span>
+                              {otherAssignedCount > 0 && (
+                                <span className="text-[9px] text-muted-foreground font-normal">
+                                  ({otherAssignedCount} other staff assigned)
+                                </span>
+                              )}
+                            </div>
                             {!noService && (
                               <div className="flex flex-wrap gap-1 mt-0.5">
                                 {deskServiceIds.map((sId) => {
@@ -2919,27 +3057,27 @@ export function BranchDesksServicesManager({
                 </div>
               )}
 
-              {/* Assigned Operator Staff (Strictly 1 Staff per Desk) */}
+              {/* Assigned Operator Staff (Multiple Staff per Desk allowed) */}
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                  <span>Assigned Operator Staff</span>
+                  <span>Assigned Operator Staff ({newDeskStaffIds.length} Selected)</span>
                   <span className="text-[10px] text-brand font-normal">1 Desk per Staff</span>
                 </Label>
                 <div className="mt-1.5 grid grid-cols-2 gap-2 max-h-36 overflow-y-auto rounded-xl border border-border/80 bg-accent/20 p-2.5">
                   <button
                     type="button"
-                    onClick={() => setNewDeskStaffId(null)}
+                    onClick={() => setNewDeskStaffIds([])}
                     className={cn(
                       "flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all col-span-2",
-                      newDeskStaffId === null ? "border-amber-500/50 bg-amber-500/10 text-amber-600 font-bold" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
+                      newDeskStaffIds.length === 0 ? "border-amber-500/50 bg-amber-500/10 text-amber-600 font-bold" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
                     )}
                   >
                     <span>⚠️ Unassigned (No staff operator)</span>
-                    {newDeskStaffId === null && <Check className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
+                    {newDeskStaffIds.length === 0 && <Check className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
                   </button>
 
                   {branchStaff.map((st) => {
-                    const isSelected = newDeskStaffId === st.id;
+                    const isSelected = newDeskStaffIds.includes(st.id);
                     const otherDeskAssigned = state.desks.find(
                       (d) => branchStaff.some((s) => s.id === st.id && s.deskId === d.id)
                     );
@@ -2949,7 +3087,9 @@ export function BranchDesksServicesManager({
                         type="button"
                         key={st.id}
                         onClick={() => {
-                          setNewDeskStaffId(isSelected ? null : st.id);
+                          setNewDeskStaffIds((prev) =>
+                            isSelected ? prev.filter((id) => id !== st.id) : [...prev, st.id]
+                          );
                         }}
                         className={cn(
                           "flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all",
@@ -3104,27 +3244,27 @@ export function BranchDesksServicesManager({
                 </div>
               )}
 
-              {/* Assigned Operator Staff (Strictly 1 Staff per Desk) */}
+              {/* Assigned Operator Staff (Multiple Staff per Desk allowed) */}
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                  <span>Assigned Operator Staff</span>
+                  <span>Assigned Operator Staff ({editDeskStaffIds.length} Selected)</span>
                   <span className="text-[10px] text-brand font-normal">1 Desk per Staff</span>
                 </Label>
                 <div className="mt-1.5 grid grid-cols-2 gap-2 max-h-36 overflow-y-auto rounded-xl border border-border/80 bg-accent/20 p-2.5">
                   <button
                     type="button"
-                    onClick={() => setEditDeskStaffId(null)}
+                    onClick={() => setEditDeskStaffIds([])}
                     className={cn(
                       "flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all col-span-2",
-                      editDeskStaffId === null ? "border-amber-500/50 bg-amber-500/10 text-amber-600 font-bold" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
+                      editDeskStaffIds.length === 0 ? "border-amber-500/50 bg-amber-500/10 text-amber-600 font-bold" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
                     )}
                   >
                     <span>⚠️ Unassigned (No staff operator)</span>
-                    {editDeskStaffId === null && <Check className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
+                    {editDeskStaffIds.length === 0 && <Check className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
                   </button>
 
                   {branchStaff.map((st) => {
-                    const isSelected = editDeskStaffId === st.id;
+                    const isSelected = editDeskStaffIds.includes(st.id);
                     const otherDeskAssigned = state.desks.find(
                       (otherD) => otherD.id !== editingDesk.id && branchStaff.some(s => s.id === st.id && s.deskId === otherD.id)
                     );
@@ -3134,7 +3274,9 @@ export function BranchDesksServicesManager({
                         type="button"
                         key={st.id}
                         onClick={() => {
-                          setEditDeskStaffId(isSelected ? null : st.id);
+                          setEditDeskStaffIds((prev) =>
+                            isSelected ? prev.filter((id) => id !== st.id) : [...prev, st.id]
+                          );
                         }}
                         className={cn(
                           "flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all",
@@ -3392,148 +3534,126 @@ export function BranchDesksServicesManager({
         </div>
       )}
 
-      {/* Modal: Branch QR Code & Links */}
+      {/* Modal: Branch Entrance QR Code */}
       {isQrModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <QrCode className="h-5 w-5 text-brand" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-white dark:bg-slate-900 p-6 shadow-2xl space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-border/60 pb-3.5">
+              <div className="flex items-center gap-3">
+                <span className="h-10 w-10 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shrink-0">
+                  <QrCode className="h-5 w-5" />
+                </span>
                 <div>
-                  <h3 className="text-base font-bold">{branch.name} — QR Code</h3>
-                  <p className="text-[10px] text-muted-foreground">{branch.city || "Branch Location"}</p>
+                  <h3 className="text-base font-extrabold text-foreground">{branch.name} — QR Code</h3>
+                  <p className="text-[11px] text-muted-foreground font-medium">{branch.city || "Branch Location"} · Customer Entrance Check-In</p>
                 </div>
               </div>
-              <button onClick={() => setIsQrModalOpen(false)} className="text-muted-foreground hover:text-foreground font-bold">
+              <button
+                onClick={() => setIsQrModalOpen(false)}
+                className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-muted-foreground hover:text-foreground flex items-center justify-center font-bold text-sm transition-all"
+              >
                 ✕
               </button>
             </div>
 
-            <div className="flex flex-col items-center justify-center p-4 rounded-xl border border-border/80 bg-accent/20 space-y-3">
-              {/* Generated QR Code Canvas / Image */}
-              <div className="p-3 bg-white rounded-xl shadow-md border border-border flex flex-col items-center">
+            {/* QR Code Container */}
+            <div className="flex flex-col items-center justify-center p-5 rounded-2xl border border-border/80 bg-slate-50/80 dark:bg-slate-900/60 space-y-3">
+              <div className="p-4 bg-white rounded-2xl shadow-lg border border-slate-200 flex flex-col items-center">
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                    `${typeof window !== "undefined" ? window.location.origin : ""}/q/${branch.id}`
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+                    `${typeof window !== "undefined" ? window.location.origin : ""}${joinUrl}`
                   )}`}
                   alt={`QR Code for ${branch.name}`}
-                  className="h-44 w-44 object-contain rounded-lg"
+                  className="h-48 w-48 object-contain rounded-xl"
                 />
-                <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mt-2">
-                  SCAN TO JOIN QUEUE
+                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] mt-3 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
+                  SCAN WITH PHONE TO JOIN QUEUE
                 </span>
               </div>
-              <p className="text-[11px] text-center text-muted-foreground">
-                Display or print this QR code at your branch entrance for walk-in customer self-checkin.
+              <p className="text-xs text-center text-muted-foreground leading-relaxed px-2 font-medium">
+                Display or print this QR code at your entrance so walk-in visitors can scan and get a digital token on their smartphones.
               </p>
             </div>
 
-            {/* Direct Links and Copy Actions */}
-            <div className="space-y-2">
-              <div>
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Customer Queue Web App URL</Label>
-                <div className="flex items-center gap-2 mt-1">
-                  <Input
-                    readOnly
-                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/q/${branch.id}`}
-                    className="h-8 text-xs font-mono text-muted-foreground bg-accent/30 rounded-lg"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/q/${branch.id}`);
-                      toast.success("Customer Queue URL copied to clipboard!");
-                    }}
-                    className="h-8 shrink-0 text-xs font-semibold gap-1"
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => window.open(`/q/${branch.id}`, "_blank")}
-                    className="h-8 shrink-0 p-2"
-                    title="Open Queue Page"
-                  >
-                    <ExternalLink className="h-4 w-4 text-brand" />
-                  </Button>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Branch Kiosk Check-In Display URL</Label>
-                <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5 font-medium">
-                  This is the shared terminal for this branch — customers select their check-in method (QR, Kiosk, or KOT delivery) here based on what's enabled.
-                </p>
-                <div className="flex items-center gap-2 mt-1">
-                  <Input
-                    readOnly
-                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/kiosk/${branch.id}`}
-                    className="h-8 text-xs font-mono text-muted-foreground bg-accent/30 rounded-lg"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/kiosk/${branch.id}`);
-                      toast.success("Branch Kiosk URL copied to clipboard!");
-                    }}
-                    className="h-8 shrink-0 text-xs font-semibold gap-1"
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => window.open(`/kiosk/${branch.id}`, "_blank")}
-                    className="h-8 shrink-0 p-2"
-                    title="Open Kiosk Terminal"
-                  >
-                    <ExternalLink className="h-4 w-4 text-brand" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Live Display Board URL — for branch TV */}
-              <div>
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Live Display Board URL
-                  <span className="ml-2 rounded-full bg-violet-500/15 px-2 py-0.5 text-[9px] font-bold text-violet-400 uppercase tracking-wider">TV Screen</span>
-                </Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">Open this URL on a TV or monitor mounted in your waiting area. No login required.</p>
-                <div className="flex items-center gap-2">
-                  <Input
-                    readOnly
-                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/display/${branch.id}`}
-                    className="h-8 text-xs font-mono text-muted-foreground bg-violet-500/5 border-violet-500/20 rounded-lg"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/display/${branch.id}`);
-                      toast.success("Live Display URL copied to clipboard!");
-                    }}
-                    className="h-8 shrink-0 text-xs font-semibold gap-1 border-violet-500/30 text-violet-500"
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => window.open(`/display/${branch.id}`, "_blank")}
-                    className="h-8 shrink-0 p-2"
-                    title="Open Live Display"
-                  >
-                    <ExternalLink className="h-4 w-4 text-violet-500" />
-                  </Button>
-                </div>
+            {/* Customer Queue Web App URL Field */}
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                Customer Queue Web App URL
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}${joinUrl}`}
+                  className="h-9 text-xs font-mono text-foreground bg-slate-100/70 dark:bg-slate-800/70 border-border/80 rounded-xl"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}${joinUrl}`);
+                    toast.success("Customer Queue URL copied to clipboard!");
+                  }}
+                  className="h-9 shrink-0 text-xs font-bold gap-1.5 rounded-xl border-border/80"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="brand"
+                  onClick={() => window.open(joinUrl, "_blank")}
+                  className="h-9 shrink-0 px-3 text-xs font-bold gap-1 rounded-xl"
+                  title="Open Queue Web App"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Open
+                </Button>
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-border">
-              <Button type="button" variant="outline" onClick={() => setIsQrModalOpen(false)} className="text-xs">
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-border/60">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const printWin = window.open("", "_blank");
+                  if (!printWin) return;
+                  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+                    `${window.location.origin}${joinUrl}`
+                  )}`;
+                  printWin.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Print Entrance QR — ${branch.name}</title>
+                        <style>
+                          body { font-family: sans-serif; text-align: center; padding: 40px; }
+                          .poster { border: 4px solid #4F46E5; border-radius: 24px; padding: 40px; max-w: 450px; margin: 0 auto; }
+                          h1 { font-size: 28px; margin-bottom: 8px; color: #111827; }
+                          p { font-size: 16px; color: #6B7280; margin-bottom: 24px; }
+                          img { width: 260px; height: 260px; }
+                          .badge { background: #EEF2FF; color: #4F46E5; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 14px; margin-top: 16px; display: inline-block; }
+                        </style>
+                      </head>
+                      <body onload="window.print(); window.close();">
+                        <div class="poster">
+                          <h1>${branch.name}</h1>
+                          <p>Welcome! Scan the QR code to join our queue.</p>
+                          <img src="${qrUrl}" alt="QR Code" />
+                          <br />
+                          <div class="badge">SCAN WITH SMARTPHONE CAMERA</div>
+                        </div>
+                      </body>
+                    </html>
+                  `);
+                  printWin.document.close();
+                }}
+                className="h-9 text-xs font-bold gap-1.5 border-border/80"
+              >
+                <Printer className="h-3.5 w-3.5" /> Print Entrance Poster
+              </Button>
+
+              <Button type="button" variant="ghost" onClick={() => setIsQrModalOpen(false)} className="h-9 text-xs font-bold">
                 Close
               </Button>
             </div>
@@ -3916,6 +4036,7 @@ export function OnlineBookingSettingsPanel({ branch, company }: OnlineBookingSet
   const fetchSlots = async () => {
     setIsLoadingSlots(true);
     try {
+      if (!branch?.id) return;
       const data = await apiFetch(`/api/time-slots/?branch=${branch.id}`);
       setTimeSlots(data);
     } catch (err) {
@@ -3929,6 +4050,7 @@ export function OnlineBookingSettingsPanel({ branch, company }: OnlineBookingSet
   const fetchPreview = async (dateStr: string, serviceId?: string) => {
     setIsLoadingPreview(true);
     try {
+      if (!branch?.id) return;
       const serviceParam = serviceId ? `&service_id=${serviceId}` : "";
       const data = await apiFetch(`/api/public/branches/${branch.id}/slots/?date=${dateStr}${serviceParam}`);
       setPreviewSlots(data);
@@ -3942,7 +4064,7 @@ export function OnlineBookingSettingsPanel({ branch, company }: OnlineBookingSet
 
   useEffect(() => {
     fetchSlots();
-  }, [branch.id]);
+  }, [branch?.id]);
 
   useEffect(() => {
     if (previewDates.length > 0) {
@@ -4149,19 +4271,7 @@ export function OnlineBookingSettingsPanel({ branch, company }: OnlineBookingSet
           </button>
         </div>
 
-        {/* 2. WARNING MODAL/BANNER */}
-        {showDeskWarning && (
-          <div className="rounded-xl border border-coral/30 bg-coral/5 p-4 text-xs text-coral flex items-start gap-3 animate-pulse">
-            <AlertTriangle className="h-5 w-5 text-coral shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Operational Warning: No Serving Desks Enabled</p>
-              <p className="mt-1 opacity-90 leading-relaxed">
-                Online bookings are enabled for this branch, but <strong>no operator desks</strong> are configured to handle online bookings. 
-                Go to the <strong>Desks</strong> tab and enable <strong>"Handles Online Bookings"</strong> on at least one desk so operators can serve checked-in customers.
-              </p>
-            </div>
-          </div>
-        )}
+
 
         {isMethod4Enabled && (
           <div className="mt-3 pt-3 border-t border-border/40 space-y-2">
@@ -4775,6 +4885,13 @@ interface KotSettingsPanelProps {
 
 export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   const { state, actions } = useQuesole();
+  const companySlug = company?.slug || "";
+  const branchSlug = branch?.slug || "";
+  const kotUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/kot` : `/kot/${branch?.id}`;
+  
+  const [kotTerminals, setKotTerminals] = useState<any[]>([]);
+  const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
+  const [isAddingTerminal, setIsAddingTerminal] = useState(false);
   const [smsTemplate, setSmsTemplate] = useState<any | null>(null);
   const [whatsappTemplate, setWhatsappTemplate] = useState<any | null>(null);
   const [smsText, setSmsText] = useState("");
@@ -4786,45 +4903,21 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   const isSmsActive = branch.enabledMethods?.map(Number).includes(3) || false;
   const isWhatsappActive = branch.enabledMethods?.map(Number).includes(4) || false;
 
-  const [kioskPin, setKioskPin] = useState("");
-  const [kioskPinConfirm, setKioskPinConfirm] = useState("");
-  const [isSavingKioskPin, setIsSavingKioskPin] = useState(false);
+  const purchasedKotTerminals = branch?.allocations?.kot_terminals?.limit || company?.package?.max_kot_terminals || 1;
 
-  const handleSaveKioskPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!kioskPin) {
-      toast.error("Password cannot be empty.");
-      return;
-    }
-    if (kioskPin.length < 4) {
-      toast.error("Password must be at least 4 characters long.");
-      return;
-    }
-    if (kioskPin !== kioskPinConfirm) {
-      toast.error("Passwords do not match!");
-      return;
-    }
-    setIsSavingKioskPin(true);
+  const fetchKotTerminals = async () => {
     try {
-      await actions.updateBranchDetails(branch.id, {
-        ...branch,
-        name: branch?.name || "",
-        city: branch?.city || "",
-        kioskPasswordHash: kioskPin,
-      } as any);
-      toast.success("KOT Kiosk access password saved successfully!");
-      setKioskPin("");
-      setKioskPinConfirm("");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save KOT Kiosk settings.");
-    } finally {
-      setIsSavingKioskPin(false);
+      const data: any[] = await apiFetch(`/api/kot/terminals/?branch_id=${branch.id}`);
+      setKotTerminals(data);
+    } catch (err) {
+      console.error("Failed to fetch KOT terminals", err);
     }
   };
 
   const fetchKotData = async () => {
     setIsLoading(true);
     try {
+      await fetchKotTerminals();
       const templatesData: any[] = await apiFetch(`/api/kot-message-templates/?branch=${branch.id}`);
       const smsT = templatesData.find((t: any) => t.channel === "sms");
       const waT = templatesData.find((t: any) => t.channel === "whatsapp");
@@ -4848,10 +4941,39 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
     fetchKotData();
   }, [branch.id]);
 
+  const handleRegeneratePin = async (terminalId: string) => {
+    try {
+      await apiFetch(`/api/kot/terminals/${terminalId}/regenerate-pin/`, { method: "POST" });
+      toast.success("KOT Terminal PIN regenerated successfully!");
+      fetchKotTerminals();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to regenerate PIN.");
+    }
+  };
+
+  const handleAddTerminal = async () => {
+    setIsAddingTerminal(true);
+    try {
+      const nextNumber = kotTerminals.length + 1;
+      await apiFetch(`/api/kot/terminals/`, {
+        method: "POST",
+        body: JSON.stringify({
+          branch: branch.id,
+          terminal_identifier: `KOT ${nextNumber}`
+        })
+      });
+      toast.success(`KOT ${nextNumber} terminal created successfully!`);
+      fetchKotTerminals();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create KOT terminal.");
+    } finally {
+      setIsAddingTerminal(false);
+    }
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // 1. Save SMS template
       if (smsTemplate && smsTemplate.id) {
         await apiFetch(`/api/kot-message-templates/${smsTemplate.id}/`, {
           method: "PUT",
@@ -4875,7 +4997,6 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
         setSmsTemplate(newSms);
       }
 
-      // 2. Save WhatsApp template
       if (whatsappTemplate && whatsappTemplate.id) {
         await apiFetch(`/api/kot-message-templates/${whatsappTemplate.id}/`, {
           method: "PUT",
@@ -4899,7 +5020,7 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
         setWhatsappTemplate(newWa);
       }
 
-      toast.success("KOT notification templates saved successfully!");
+      toast.success("Digital Token message templates saved successfully!");
       fetchKotData();
     } catch (err) {
       console.error("Failed to save KOT templates", err);
@@ -4911,158 +5032,156 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
 
   return (
     <div className="space-y-6 mt-6">
-      {/* WhatsApp Mocknotice Alert banner */}
-      {isWhatsappActive && (
-        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/5 p-4 text-xs text-blue-600 dark:text-blue-400 flex items-start gap-3">
-          <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold">WhatsApp Business API Simulator Mode</p>
-            <p className="mt-1 opacity-90 leading-relaxed">
-              WhatsApp Delivery is running in sandbox/simulation mode. No real-world messages are dispatched.
-              Simulated dispatches are logged under <strong>KOT Message Logs</strong> as <strong>"Simulated ✓"</strong>.
-            </p>
-          </div>
-        </div>
-      )}
 
-      {/* Header Description */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+
+      {/* Header Row */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/40 pb-4">
         <div>
-          <h4 className="font-display text-sm font-bold text-foreground flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-primary" /> KOT Notification Center
-          </h4>
+          <h2 className="text-base font-black text-foreground flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            Digital KOT Check-In Terminals ({kotTerminals.length})
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Configure templates and monitor delivery status for virtual queue tickets.
+            This is a link you can share (on a poster, WhatsApp, or SMS) that lets customers check in remotely and get a digital token without needing to visit a kiosk in person.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline"
-            onClick={fetchKotData}
-            disabled={isLoading}
-            className="rounded-xl text-xs font-bold"
-          >
-            Refresh Logs
-          </Button>
-          <Button 
-            onClick={handleSave} 
-            disabled={isSaving}
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-xs text-muted-foreground bg-accent/20 px-3 py-1.5 rounded-lg border border-border/40 font-bold shrink-0">
+            Terminals Allocated: {kotTerminals.filter(t => t.status === "active").length} / {purchasedKotTerminals}
+          </span>
+          <Button
             variant="brand"
-            className="rounded-xl text-xs font-bold shrink-0"
+            size="sm"
+            onClick={handleAddTerminal}
+            disabled={isAddingTerminal || kotTerminals.filter(t => t.status === "active").length >= purchasedKotTerminals}
+            className="h-8 gap-1.5 text-xs font-bold shadow-md shadow-brand/10 shrink-0"
           >
-            {isSaving ? "Saving..." : "Save Templates"}
+            <Plus className="h-3.5 w-3.5" /> Add KOT Terminal
           </Button>
         </div>
       </div>
 
+      {/* KPI Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
+          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">KOT Terminals</span>
+          <span className="text-base font-black text-foreground block mt-0.5">{kotTerminals.length}</span>
+        </div>
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
+          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Online</span>
+          <span className="text-base font-black text-emerald-500 block mt-0.5">{kotTerminals.filter(t => t.is_logged_in).length}</span>
+        </div>
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
+          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Offline</span>
+          <span className="text-base font-black text-muted-foreground block mt-0.5">{kotTerminals.filter(t => !t.is_logged_in).length}</span>
+        </div>
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
+          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Digital Tokens Today</span>
+          <span className="text-base font-black text-primary block mt-0.5">
+            {state.tickets.filter(t => String(t.branchId) === String(branch.id) && (t.channel === "sms" || t.channel === "whatsapp")).length}
+          </span>
+        </div>
+      </div>
+
+      {/* KOT Terminals Grid Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {kotTerminals.map((terminal, idx) => {
+          const isPinVisible = !!visiblePins[terminal.id];
+          return (
+            <div
+              key={terminal.id}
+              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 flex flex-col justify-between space-y-4"
+            >
+              <div className="flex gap-4">
+                {/* Device Icon / Visual */}
+                <div className="h-24 w-16 bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 rounded-xl flex items-center justify-center p-2 shrink-0 text-emerald-600">
+                  <MessageSquare className="h-8 w-8" />
+                </div>
+
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div>
+                    <h3 className="font-black text-sm text-foreground truncate">{terminal.terminal_identifier}</h3>
+                    <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KOT-0{idx + 1}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div>
+                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Status</span>
+                      <span className={cn(
+                        "inline-flex items-center gap-1 font-bold mt-0.5",
+                        terminal.is_logged_in ? "text-emerald-500" : "text-muted-foreground"
+                      )}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full", terminal.is_logged_in ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
+                        {terminal.is_logged_in ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">PIN Code</span>
+                      <div className="flex items-center gap-1.5 mt-0.5 font-mono">
+                        <span>{isPinVisible ? terminal.pin : "••••"}</span>
+                        <button
+                          onClick={() => setVisiblePins(prev => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {isPinVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
+                    <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Check-In Link</span>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={kotUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline font-bold flex items-center gap-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>Open</span>
+                      </a>
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}${kotUrl}`;
+                          navigator.clipboard.writeText(url);
+                          toast.success("KOT Check-In URL copied!");
+                        }}
+                        className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
+                      >
+                        <Copy className="h-3 w-3" />
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRegeneratePin(terminal.id)}
+                  className="h-8 text-xs font-bold"
+                >
+                  Regenerate PIN
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+
+        {kotTerminals.length === 0 && (
+          <div className="col-span-full py-12 text-center text-xs text-muted-foreground font-semibold bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl">
+            No KOT terminals provisioned. Ensure KOT Digital Tokens are allocated in your company plan.
+          </div>
+        )}
+      </div>
+
+      {/* Template Editors & Logs Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Template Editors */}
         <div className="lg:col-span-7 space-y-6">
-          {/* KOT Check-In Settings Card */}
-          <div className="panel p-5 space-y-4 border border-border bg-white dark:bg-slate-900 rounded-3xl">
-            <div className="flex items-center justify-between border-b border-border/20 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                  <MessageSquare className="h-4.5 w-4.5" />
-                </span>
-                <div>
-                  <span className="text-xs font-bold text-foreground block">KOT Check-In Settings</span>
-                  <span className="text-[10px] text-muted-foreground">Manage your dedicated SMS / WhatsApp check-in link and access PIN</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {/* KOT Check-In Link */}
-              <div className="space-y-2">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  KOT Check-In Link
-                </Label>
-                <p className="text-[10px] text-muted-foreground">
-                  Dedicated SMS / WhatsApp check-in screen — customers go straight to the KOT form. Use this for QR posters or shared links for digital token delivery.
-                </p>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <div className="flex-1 flex items-center gap-2 rounded-xl border border-border bg-background px-3.5 py-2 font-mono text-xs select-all text-foreground overflow-x-auto">
-                    {typeof window !== "undefined" ? window.location.origin : ""}/kot/{branch.id}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl h-9 px-3.5 text-xs font-semibold shrink-0 gap-1.5"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`${window.location.origin}/kot/${branch.id}`);
-                        toast.success("KOT Check-In link copied!");
-                      }}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                      Copy Link
-                    </Button>
-                    <Button
-                      variant="brand"
-                      size="sm"
-                      className="rounded-xl h-9 px-3 text-xs font-semibold shrink-0 gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                      onClick={() => window.open(`/kot/${branch.id}`, "_blank")}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Open KOT Screen
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* PIN Config Form */}
-              <form onSubmit={handleSaveKioskPin} className="space-y-3 border-t border-border/20 pt-3">
-                <div className="flex items-center gap-1.5">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                    KOT Screen Access PIN
-                  </Label>
-                  {!branch.kioskPasswordHash && (
-                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[8px] font-bold text-amber-500 uppercase tracking-wider">
-                      Action Required
-                    </span>
-                  )}
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <input
-                      type="password"
-                      value={kioskPin}
-                      onChange={(e) => setKioskPin(e.target.value)}
-                      placeholder="New password/PIN (min 4 chars)"
-                      className="w-full rounded-xl border border-border bg-accent/20 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="password"
-                      value={kioskPinConfirm}
-                      onChange={(e) => setKioskPinConfirm(e.target.value)}
-                      placeholder="Confirm password"
-                      className="w-full rounded-xl border border-border bg-accent/20 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <Button
-                      type="submit"
-                      disabled={isSavingKioskPin}
-                      size="sm"
-                      className="rounded-xl h-9 px-4 text-xs font-bold shrink-0"
-                    >
-                      {isSavingKioskPin ? "Saving..." : "Set PIN"}
-                    </Button>
-                  </div>
-                </div>
-                
-                <div className="rounded-xl border border-blue-500/10 bg-blue-500/5 p-3 text-[10px] text-blue-600 dark:text-blue-400 flex items-start gap-2 leading-relaxed">
-                  <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
-                  <div>
-                    <strong>Kiosk Scope Notice:</strong> This PIN secures the entire branch kiosk touch terminal screen (exit/settings lock) across all queue check-in methods, not just KOT Delivery. Exit is denied by default until a PIN is configured.
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-
           {/* SMS Section */}
           <div className={cn(
             "panel p-5 space-y-4 border border-border/80 rounded-3xl",

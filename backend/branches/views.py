@@ -166,3 +166,54 @@ class BranchViewSet(viewsets.ModelViewSet):
                     "error": "Too many failed attempts. Please try again after 60 seconds."
                 }, status=status.HTTP_429_TOO_MANY_REQUESTS)
             return Response({"verified": False, "error": f"Invalid password. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="kot-session-lock", permission_classes=[AllowAny])
+    def kot_session_lock(self, request, pk=None):
+        branch = self.get_object()
+        session_id = request.data.get("session_id")
+        force_takeover = request.data.get("force_takeover", False)
+        
+        if not session_id:
+            return Response({"error": "Session ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from django.core.cache import cache
+        import time
+        lock_key = f"kot_active_session_{branch.id}"
+        current_lock = cache.get(lock_key)
+        now = time.time()
+        
+        if force_takeover:
+            cache.set(lock_key, {"session_id": session_id, "last_ping": now}, timeout=30)
+            return Response({"acquired": True, "message": "Session lock acquired via takeover.", "session_id": session_id}, status=status.HTTP_200_OK)
+            
+        if current_lock:
+            active_session_id = current_lock.get("session_id")
+            last_ping = current_lock.get("last_ping", 0)
+            
+            if active_session_id == session_id:
+                cache.set(lock_key, {"session_id": session_id, "last_ping": now}, timeout=30)
+                return Response({"acquired": True, "session_id": session_id}, status=status.HTTP_200_OK)
+            elif now - last_ping > 20:
+                cache.set(lock_key, {"session_id": session_id, "last_ping": now}, timeout=30)
+                return Response({"acquired": True, "session_id": session_id}, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "acquired": False,
+                    "error": f"Another device is currently open on this KOT Terminal for {branch.name}. Only 1 active KOT terminal session is permitted at a time.",
+                    "active_session_id": active_session_id
+                }, status=status.HTTP_409_CONFLICT)
+        else:
+            cache.set(lock_key, {"session_id": session_id, "last_ping": now}, timeout=30)
+            return Response({"acquired": True, "session_id": session_id}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="kot-session-release", permission_classes=[AllowAny])
+    def kot_session_release(self, request, pk=None):
+        branch = self.get_object()
+        session_id = request.data.get("session_id")
+        from django.core.cache import cache
+        lock_key = f"kot_active_session_{branch.id}"
+        current_lock = cache.get(lock_key)
+        if current_lock and current_lock.get("session_id") == session_id:
+            cache.delete(lock_key)
+        return Response({"released": True}, status=status.HTTP_200_OK)
+

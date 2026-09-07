@@ -48,9 +48,10 @@ const METHOD_LABEL: Record<QueueMethod, string> = {
 interface CompanyOverviewManagerProps {
   companyId: string;
   setView: (v: string) => void;
+  onSelectBranch?: (branchId: string) => void;
 }
 
-export function CompanyOverviewManager({ companyId, setView }: CompanyOverviewManagerProps) {
+export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: CompanyOverviewManagerProps) {
   const { state, session, actions, simulating, refresh } = useQuesole();
   const company = state.companies.find((c) => String(c.id) === String(companyId));
   if (!company) return <div className="p-8 text-center text-sm text-muted-foreground">Company details not found.</div>;
@@ -662,9 +663,16 @@ export function CompanyOverviewManager({ companyId, setView }: CompanyOverviewMa
                 <div
                   key={b.id}
                   id={`branch-card-${b.id}`}
+                  onClick={() => {
+                    if (onSelectBranch) {
+                      onSelectBranch(b.id);
+                    } else {
+                      setView("branch_desks");
+                    }
+                  }}
                   style={{ animationDelay: `${idx * 100}ms` }}
                   className={cn(
-                    "group relative rounded-2xl border bg-accent/20 p-5 transition-all duration-300 hover:border-brand/50 hover:shadow-md",
+                    "group relative rounded-2xl border bg-accent/20 p-5 transition-all duration-300 hover:border-brand/50 hover:shadow-md cursor-pointer",
                     isHighlighted ? "ring-2 ring-brand border-brand bg-brand/5 scale-[1.01]" : "border-border/60"
                   )}
                 >

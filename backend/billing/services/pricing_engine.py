@@ -78,7 +78,7 @@ class PricingEngine:
         # D. Addons limits and calculations
         for addon_key, qty in addons.items():
             comp = active_components.get(addon_key)
-            if not comp or comp.category != "ADDON":
+            if not comp or comp.category not in ["ADDON", "KIOSK"]:
                 errors[f"addons.{addon_key}"] = ["Invalid or inactive addon component."]
                 continue
 

@@ -84,8 +84,14 @@ export function SiteNav() {
           </>
         )}
         <nav className="flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-2.5 hover:scale-102 transition-transform">
-            <Logo size={22} />
+          <Link to="/" className="flex items-center gap-2.5 hover:scale-105 transition-transform shrink-0">
+            {!scrolled ? (
+              <div className="bg-white rounded-full px-3.5 py-1 flex items-center justify-center shadow-sm border border-slate-200/40">
+                <Logo size={18} />
+              </div>
+            ) : (
+              <Logo size={22} />
+            )}
           </Link>
 
           <div className="hidden items-center gap-1 lg:gap-1.5 md:flex">

@@ -60,10 +60,15 @@ def claim_next_ticket(desk, user):
     if user.company and desk.company != user.company:
         raise PermissionDenied("Operator and Desk must belong to the same company.")
 
-    if not desk.is_active or desk.status == "offline":
+    if desk.current_operator and desk.current_operator != user:
+        if desk.status == "open":
+            raise ValidationError("This desk is already in use by another operator.")
+
+    if not desk.is_active or desk.status == "offline" or desk.current_operator != user:
         desk.is_active = True
         desk.status = "open"
-        desk.save(update_fields=["is_active", "status"])
+        desk.current_operator = user
+        desk.save(update_fields=["is_active", "status", "current_operator"])
 
     no_service = is_no_service_mode(desk.company)
     eligible_service_ids = []

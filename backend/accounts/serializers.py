@@ -16,8 +16,36 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
+        request = self.context.get("request")
+        company_slug = None
+        if request:
+            if hasattr(request, "data") and request.data:
+                company_slug = request.data.get("company_slug")
+            elif hasattr(request, "POST") and request.POST:
+                company_slug = request.POST.get("company_slug")
+
+            if not company_slug:
+                if hasattr(request, "query_params") and request.query_params:
+                    company_slug = request.query_params.get("company_slug")
+                elif hasattr(request, "GET") and request.GET:
+                    company_slug = request.GET.get("company_slug")
+
+            if not company_slug:
+                if hasattr(request, "headers") and request.headers:
+                    company_slug = request.headers.get("X-Company-Slug")
+                elif hasattr(request, "META") and request.META:
+                    company_slug = request.META.get("HTTP_X_COMPANY_SLUG")
+
+        # Let's perform standard authentication first (checks password/credentials)
         data = super().validate(attrs)
         user = self.user
+
+        if company_slug:
+            # Scoping constraint: Staff/Admin users must belong to the resolved company
+            if user.role != "super_admin":
+                if not user.company or user.company.slug != company_slug:
+                    raise serializers.ValidationError("These credentials aren't associated with this company.")
+
         data['user'] = {
             'email': user.email,
             'role': user.role,

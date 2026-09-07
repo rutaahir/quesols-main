@@ -78,3 +78,46 @@ class PublicKioskSerializer(serializers.ModelSerializer):
 
     def get_is_logged_in(self, obj):
         return obj.is_session_active()
+
+
+from kot.models import KotTerminal
+
+class KotTerminalSerializer(serializers.ModelSerializer):
+    is_logged_in = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KotTerminal
+        fields = [
+            "id",
+            "company",
+            "branch",
+            "terminal_identifier",
+            "pin",
+            "status",
+            "session_token",
+            "connected_at",
+            "last_seen",
+            "is_logged_in",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
+
+    def get_is_logged_in(self, obj):
+        return obj.is_session_active()
+
+class PublicKotTerminalSerializer(serializers.ModelSerializer):
+    is_logged_in = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KotTerminal
+        fields = [
+            "id",
+            "terminal_identifier",
+            "status",
+            "is_logged_in",
+        ]
+
+    def get_is_logged_in(self, obj):
+        return obj.is_session_active()
+

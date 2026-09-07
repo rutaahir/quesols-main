@@ -404,3 +404,175 @@ class KioskLogoutView(APIView):
             return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
         except Kiosk.DoesNotExist:
             return Response({"error": "Invalid session or kiosk ID."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+from kot.models import KotTerminal
+from kot.serializers import KotTerminalSerializer, PublicKotTerminalSerializer
+
+class KotTerminalViewSet(viewsets.ModelViewSet):
+    serializer_class = KotTerminalSerializer
+    permission_classes = [IsBranchAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = KotTerminal.objects.none()
+        if getattr(user, "role", None) == "super_admin":
+            qs = KotTerminal.objects.all()
+        elif getattr(user, "role", None) == "branch_admin":
+            qs = KotTerminal.objects.filter(company=user.company, branch_id=user.branch_id)
+        elif hasattr(user, "company") and user.company:
+            qs = KotTerminal.objects.filter(company=user.company)
+
+        branch_id = self.request.query_params.get("branch_id") or self.request.query_params.get("branch")
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        branch = serializer.validated_data.get("branch")
+        if not branch:
+            raise ValidationError("You must specify a branch to create a KOT terminal.")
+        
+        current_count = KotTerminal.objects.filter(branch=branch, status="active").count()
+        
+        from billing.models import CompanyPlanAllocation
+        alloc = CompanyPlanAllocation.objects.filter(
+            company=user.company, branch=branch, plan_component__key="kot_terminals"
+        ).first()
+        if alloc:
+            quota = alloc.purchased_qty
+        else:
+            comp_alloc = CompanyPlanAllocation.objects.filter(
+                company=user.company, branch__isnull=True, plan_component__key="kot_terminals"
+            ).first()
+            quota = comp_alloc.purchased_qty if comp_alloc else getattr(user.company.package, "max_kot_terminals", 1)
+
+        if current_count >= quota:
+            raise ValidationError(f"Plan limit reached: you cannot create more than {quota} active KOT terminals.")
+
+        serializer.save(company=user.company, branch=branch)
+
+    @action(detail=True, methods=["post"], url_path="regenerate-pin")
+    def regenerate_pin(self, request, pk=None):
+        terminal = self.get_object()
+        
+        new_pin = "".join(str(random.randint(0, 9)) for _ in range(4))
+        terminal.pin = new_pin
+        
+        old_token = terminal.session_token
+        terminal.session_token = None
+        terminal.connected_at = None
+        terminal.last_seen = None
+        terminal.save()
+
+        if old_token:
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                try:
+                    async_to_sync(channel_layer.group_send)(
+                        f"kot_{terminal.id}",
+                        {
+                            "type": "kot.force_logout",
+                            "session_token": "evicted_by_admin"
+                        }
+                    )
+                except Exception as e:
+                    print(f"Failed to send force logout broadcast: {e}")
+
+        return Response(KotTerminalSerializer(terminal).data, status=status.HTTP_200_OK)
+
+class PublicKotTerminalListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        branch_id = request.query_params.get("branch_id")
+        if not branch_id:
+            return Response({"error": "branch_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        terminals = KotTerminal.objects.filter(branch_id=branch_id, status="active").order_by("terminal_identifier")
+        return Response(PublicKotTerminalSerializer(terminals, many=True).data, status=status.HTTP_200_OK)
+
+class KotTerminalLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        terminal_id = request.data.get("terminal_id") or request.data.get("kot_id")
+        pin = request.data.get("pin")
+
+        if not terminal_id or not pin:
+            return Response({"error": "terminal_id and pin are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        lockout_key = f"kot_lockout_{terminal_id}"
+        cooldown_key = f"kot_cooldown_{terminal_id}"
+
+        if cache.get(cooldown_key):
+            return Response({
+                "error": "Too many failed attempts. Please try again after 60 seconds."
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        try:
+            terminal = KotTerminal.objects.get(id=terminal_id, status="active")
+        except KotTerminal.DoesNotExist:
+            return Response({"error": "KOT terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+
+        if terminal.pin == pin:
+            cache.delete(lockout_key)
+
+            new_session_token = str(uuid.uuid4())
+            terminal.session_token = new_session_token
+            terminal.connected_at = timezone.now()
+            terminal.last_seen = timezone.now()
+            terminal.save()
+
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                try:
+                    async_to_sync(channel_layer.group_send)(
+                        f"kot_{terminal.id}",
+                        {
+                            "type": "kot.force_logout",
+                            "session_token": new_session_token
+                        }
+                    )
+                except Exception as e:
+                    print(f"Eviction failed: {e}")
+
+            return Response({
+                "session_token": new_session_token,
+                "terminal_id": str(terminal.id),
+                "terminal_identifier": terminal.terminal_identifier,
+            }, status=status.HTTP_200_OK)
+        else:
+            fails = cache.get(lockout_key, 0) + 1
+            cache.set(lockout_key, fails, timeout=300)
+            
+            if fails >= 5:
+                cache.set(cooldown_key, True, timeout=60)
+                cache.delete(lockout_key)
+                return Response({
+                    "error": "Too many failed attempts. Please try again after 60 seconds."
+                }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+            return Response({"error": f"Invalid PIN. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
+
+class KotTerminalLogoutView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        terminal_id = request.data.get("terminal_id") or request.data.get("kot_id")
+        session_token = request.data.get("session_token")
+
+        if not terminal_id or not session_token:
+            return Response({"error": "terminal_id and session_token are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            terminal = KotTerminal.objects.get(id=terminal_id, session_token=session_token)
+            terminal.session_token = None
+            terminal.connected_at = None
+            terminal.last_seen = None
+            terminal.save()
+            return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+        except KotTerminal.DoesNotExist:
+            return Response({"error": "Invalid session or terminal ID."}, status=status.HTTP_400_BAD_REQUEST)
+

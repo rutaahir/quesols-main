@@ -653,3 +653,105 @@ class CheckSlugView(APIView):
         exists = Company.objects.filter(slug=slug).exists()
         return Response({"available": not exists})
 
+
+class CompanyBySlugView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, company_slug):
+        company_slug = company_slug.strip().lower()
+        company = Company.objects.filter(slug=company_slug).first()
+        if not company:
+            return Response({
+                "error_code": "COMPANY_NOT_FOUND",
+                "message": "Company not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if company.status != "active" or company.onboarding_status != "active":
+            return Response({
+                "error_code": "COMPANY_INACTIVE",
+                "message": "This company is currently inactive or suspended.",
+                "status": company.status,
+                "onboarding_status": company.onboarding_status
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Return company details
+        return Response({
+            "id": company.id,
+            "name": company.name,
+            "slug": company.slug,
+            "logo_url": company.logo_url,
+            "tagline": company.tagline,
+            "brand_colors": company.brand_colors,
+            "support_phone": company.support_phone,
+            "support_email": company.support_email,
+            "solution": company.solution,
+            "address": company.address,
+            "city": company.city,
+            "website": company.website
+        }, status=status.HTTP_200_OK)
+
+
+class BranchBySlugView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, company_slug, branch_slug):
+        company_slug = company_slug.strip().lower()
+        branch_slug = branch_slug.strip().lower()
+
+        company = Company.objects.filter(slug=company_slug).first()
+        if not company:
+            return Response({
+                "error_code": "COMPANY_NOT_FOUND",
+                "message": "Company not found."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if company.status != "active" or company.onboarding_status != "active":
+            return Response({
+                "error_code": "COMPANY_INACTIVE",
+                "message": "This company is currently inactive or suspended.",
+                "status": company.status,
+                "onboarding_status": company.onboarding_status
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        from branches.models import Branch
+        branch = Branch.all_objects.filter(company=company, slug=branch_slug).first()
+        if not branch:
+            return Response({
+                "error_code": "BRANCH_NOT_FOUND",
+                "message": "Branch not found for this company."
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if branch.status != "active":
+            return Response({
+                "error_code": "BRANCH_INACTIVE",
+                "message": "This branch is currently inactive.",
+                "status": branch.status
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        enabled_methods = list(branch.queue_methods.filter(is_enabled=True).values_list("method", flat=True))
+        if enabled_methods:
+            enabled_methods = [int(m) for m in enabled_methods]
+        else:
+            enabled_methods = [1, 2, 3, 4]
+
+        # Return branch details
+        return Response({
+            "id": branch.id,
+            "company_id": branch.company.id,
+            "name": branch.name,
+            "slug": branch.slug,
+            "address": branch.address,
+            "city": branch.city,
+            "geo_lat": branch.geo_lat,
+            "geo_lng": branch.geo_lng,
+            "geofence_radius_meters": branch.geofence_radius_meters,
+            "geofence_enabled": branch.geofence_enabled,
+            "timezone": branch.timezone,
+            "operating_hours": branch.operating_hours,
+            "status": branch.status,
+            "mode": branch.mode,
+            "channel_type": branch.channel_type,
+            "enabled_methods": enabled_methods,
+            "enabledMethods": enabled_methods
+        }, status=status.HTTP_200_OK)
+

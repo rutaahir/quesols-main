@@ -5,11 +5,20 @@ class DeskSerializer(serializers.ModelSerializer):
     service_ids = serializers.SerializerMethodField()
     staff_name = serializers.SerializerMethodField()
     staff_id = serializers.SerializerMethodField()
+    staff_ids = serializers.SerializerMethodField()
+    current_operator_id = serializers.ReadOnlyField(source="current_operator.id", default=None)
+    current_operator_email = serializers.ReadOnlyField(source="current_operator.email", default=None)
+    current_operator_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Desk
         fields = "__all__"
         read_only_fields = ("company",)
+
+    def get_current_operator_name(self, obj):
+        if obj.current_operator:
+            return obj.current_operator.get_full_name() or obj.current_operator.email
+        return None
 
     def get_service_ids(self, obj):
         return list(obj.desk_services.values_list("service_id", flat=True))
@@ -26,6 +35,9 @@ class DeskSerializer(serializers.ModelSerializer):
         # Fetch ID of currently assigned active staff user if exists
         assignment = obj.staff_assignments.filter(is_active=True).first()
         return str(assignment.user.id) if assignment else None
+
+    def get_staff_ids(self, obj):
+        return [str(uid) for uid in obj.staff_assignments.filter(is_active=True).values_list("user_id", flat=True)]
 
 class ServiceSerializer(serializers.ModelSerializer):
     class Meta:

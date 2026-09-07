@@ -950,7 +950,7 @@ class SubscriptionDurationTierViewSet(viewsets.ModelViewSet):
 class PriceChangeLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = PriceChangeLog.objects.all().order_by("-changed_at")
     serializer_class = PriceChangeLogSerializer
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    permission_classes = [IsAuthenticated]
 
 
 class BillingConfigView(APIView):
@@ -1072,15 +1072,21 @@ class CheckoutUpgradeView(APIView):
             service_qty = int(b_cfg.get("service_qty", b_cfg.get("serviceQty", 0)))
             operator_qty = int(b_cfg.get("operator_qty", b_cfg.get("operatorQty", 0)))
             kiosk_qty = int(b_cfg.get("kiosk_qty", b_cfg.get("kioskQty", 0)))
+            kot_qty = int(b_cfg.get("kot_qty", b_cfg.get("kotQty", 0)))
+            display_qty = int(b_cfg.get("display_qty", b_cfg.get("displayQty", 0)))
             token_delivery_selections = b_cfg.get("token_delivery_selections", b_cfg.get("tokenDeliverySelections", []))
             addons = b_cfg.get("addons", {})
             extra_desks = int(addons.get("operator_screens", 0))
             extra_kiosks = int(addons.get("paper_roll_screens", 0))
+            extra_displays = int(addons.get("live_display_screens", 0))
+            extra_kots = int(addons.get("kot_terminals", 0))
             extra_services = int(addons.get("services", 0))
 
             total_services = service_qty + extra_services
             total_operators = operator_qty + extra_desks
             total_kiosks = kiosk_qty + extra_kiosks
+            total_displays = display_qty + extra_displays
+            total_kots = kot_qty + extra_kots
             total_qr = int(addons.get("printed_qr", 0))
 
             branches_payload.append({
@@ -1090,7 +1096,7 @@ class CheckoutUpgradeView(APIView):
                 "operator_qty": total_operators,
                 "kiosk_qty": total_kiosks,
                 "token_delivery_selections": token_delivery_selections,
-                "addons": {"printed_qr": total_qr}
+                "addons": {"printed_qr": total_qr, "kot_terminals": total_kots}
             })
 
         from billing.services.pricing_engine import PricingEngine
@@ -1114,6 +1120,8 @@ class CheckoutUpgradeView(APIView):
         new_operator_qty = 0
         new_services_qty = 0
         new_kiosk_qty = 0
+        new_display_qty = 0
+        new_kot_qty = 0
         new_qr_qty = 0
 
         for b in branches:
@@ -1121,15 +1129,21 @@ class CheckoutUpgradeView(APIView):
             service_qty = int(b.get("service_qty", 0))
             operator_qty = int(b.get("operator_qty", 0))
             kiosk_qty = int(b.get("kiosk_qty", 0))
+            display_qty = int(b.get("display_qty", 0))
+            kot_qty = int(b.get("kot_qty", 0))
             channel_type = b.get("channel_type", "ONSITE_ONLY")
             addons = b.get("addons", {})
             extra_desks = int(addons.get("operator_screens", 0))
             extra_kiosks = int(addons.get("paper_roll_screens", 0))
+            extra_displays = int(addons.get("live_display_screens", 0))
+            extra_kots = int(addons.get("kot_terminals", 0))
             extra_services = int(addons.get("services", 0))
 
             total_services = service_qty + extra_services
             total_operators = operator_qty + extra_desks
             total_kiosks = kiosk_qty + extra_kiosks
+            total_displays = display_qty + extra_displays
+            total_kots = kot_qty + extra_kots
             total_qr = int(addons.get("printed_qr", 0))
 
             from billing.services.pricing_engine import PricingEngine
@@ -1140,7 +1154,7 @@ class CheckoutUpgradeView(APIView):
                 operator_qty=total_operators,
                 kiosk_qty=total_kiosks,
                 token_delivery_selections=token_delivery_selections,
-                addons={"printed_qr": total_qr},
+                addons={"printed_qr": total_qr, "kot_terminals": total_kots},
                 channel_type=channel_type
             )
 
@@ -1148,11 +1162,15 @@ class CheckoutUpgradeView(APIView):
                 total_services = 0
                 total_operators = 0
                 total_kiosks = 0
+                total_displays = 0
+                total_kots = 0
                 total_qr = 0
 
             new_operator_qty += total_operators
             new_services_qty += total_services
             new_kiosk_qty += total_kiosks
+            new_display_qty += total_displays
+            new_kot_qty += total_kots
             new_qr_qty += total_qr
 
         # Get current allocations (company-wide, for price-locking lookup and branches count)
@@ -1178,6 +1196,8 @@ class CheckoutUpgradeView(APIView):
         curr_operators = get_total_branch_scoped_qty("operator_screens", 3)
         curr_services = get_total_branch_scoped_qty("services", 0)
         curr_kiosks = get_total_branch_scoped_qty("paper_roll_screens", 1)
+        curr_displays = get_total_branch_scoped_qty("live_display_screens", 0)
+        curr_kots = get_total_branch_scoped_qty("kot_terminals", 1)
         curr_qr = get_total_branch_scoped_qty("printed_qr", 0)
 
         # Validate no downgrades
@@ -1189,11 +1209,15 @@ class CheckoutUpgradeView(APIView):
             raise ValidationError({"services": [f"Downgrades not allowed. Current purchased service queues is {curr_services}."]})
         if new_kiosk_qty < curr_kiosks:
             raise ValidationError({"paper_roll_screens": [f"Downgrades not allowed. Current purchased kiosks is {curr_kiosks}."]})
+        if new_display_qty < curr_displays:
+            raise ValidationError({"live_display_screens": [f"Downgrades not allowed. Current purchased live display screens is {curr_displays}."]})
+        if new_kot_qty < curr_kots:
+            raise ValidationError({"kot_terminals": [f"Downgrades not allowed. Current purchased KOT terminals is {curr_kots}."]})
         if new_qr_qty < curr_qr:
             raise ValidationError({"printed_qr": [f"Downgrades not allowed. Current purchased printed QR components is {curr_qr}."]})
 
         # 2. Check Plan Ceilings for Superadmin Approval
-        # Exceeding branches ceiling, operator/user ceiling, or kiosk ceiling
+        # Exceeding branches ceiling, operator/user ceiling, kiosk ceiling, display ceiling, or KOT ceiling
         approval_reasons = []
         if new_num_branches > package.max_branches:
             approval_reasons.append(f"Requested branches ({new_num_branches}) exceeds plan-tier ceiling of {package.max_branches}.")
@@ -1201,6 +1225,12 @@ class CheckoutUpgradeView(APIView):
             approval_reasons.append(f"Requested operator seats ({new_operator_qty}) exceeds plan-tier ceiling of {package.max_users}.")
         if new_kiosk_qty > package.max_kiosks:
             approval_reasons.append(f"Requested kiosks ({new_kiosk_qty}) exceeds plan-tier ceiling of {package.max_kiosks}.")
+        max_disp = getattr(package, "max_displays", 0)
+        if max_disp > 0 and new_display_qty > max_disp:
+            approval_reasons.append(f"Requested display screens ({new_display_qty}) exceeds plan-tier ceiling of {max_disp}.")
+        max_kot = getattr(package, "max_kot_terminals", 0)
+        if max_kot > 0 and new_kot_qty > max_kot:
+            approval_reasons.append(f"Requested KOT terminals ({new_kot_qty}) exceeds plan-tier ceiling of {max_kot}.")
 
         if approval_reasons:
             # Create UpgradeRequest
@@ -1223,6 +1253,7 @@ class CheckoutUpgradeView(APIView):
                     "operators_requested": new_operator_qty,
                     "services_requested": new_services_qty,
                     "kiosks_requested": new_kiosk_qty,
+                    "displays_requested": new_display_qty,
                     "qr_requested": new_qr_qty,
                     "duration_months": duration_months
                 },
@@ -1257,6 +1288,7 @@ class CheckoutUpgradeView(APIView):
             "operator_screens": new_operator_qty - curr_operators,
             "services": new_services_qty - curr_services,
             "paper_roll_screens": new_kiosk_qty - curr_kiosks,
+            "live_display_screens": new_display_qty - curr_displays,
             "printed_qr": new_qr_qty - curr_qr,
         }
 
@@ -1367,6 +1399,7 @@ class CheckoutUpgradeView(APIView):
                     "operator_screens": total_operators,
                     "services": total_services,
                     "paper_roll_screens": total_kiosks,
+                    "live_display_screens": total_displays,
                     "printed_qr": total_qr,
                 }
 

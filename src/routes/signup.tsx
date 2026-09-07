@@ -48,6 +48,7 @@ interface Form {
   city: string;
   address: string;
   website: string;
+  hp_field: string;
   adminName: string;
   email: string;
   password: string;
@@ -244,6 +245,7 @@ function SignupPage() {
     city: "",
     address: "",
     website: "",
+    hp_field: "",
     adminName: "",
     email: "",
     password: "",
@@ -394,17 +396,16 @@ function SignupPage() {
         enabledNotificationChannels: portalConfig?.enabledNotificationChannels,
         companySlug: portalConfig?.companySlug,
         website: form.website,
+        hpField: form.hp_field,
       });
-
-      setSession({
-        role: "company_admin",
-        name: form.adminName,
-        email: form.email,
-        companyId,
-        branchId,
-        deskId: "",
+ 
+      // Automatically log the user in using their newly registered credentials
+      await actions.signIn({
+        email: form.email.trim(),
+        password: form.password,
+        company_slug: portalConfig?.companySlug,
       });
-
+ 
       setSubmitting(false);
       setDone(true);
       toast.success("Account activated successfully!");
@@ -456,7 +457,7 @@ function SignupPage() {
           playsInline 
           preload="auto"
           poster="/login-poster.jpg"
-          className="absolute inset-0 h-full w-full object-cover opacity-40 scale-110 translate-y-4"
+          className="absolute inset-0 h-full w-full object-cover opacity-40"
         >
           <source src={loginVideo} type="video/mp4" />
         </video>
@@ -935,14 +936,10 @@ function SignupPage() {
                               <span>₹{Number(signupQuote.itemized.kiosks_subtotal).toLocaleString("en-IN")}</span>
                             </div>
                           )}
-                          {Number(signupQuote.itemized.qr_subtotal) > 0 && (
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">
-                                QR Self-Ticketing Addon ({form.branches?.reduce((acc, b) => acc + (b.addons?.printed_qr || 0), 0) || 0} {(form.branches?.reduce((acc, b) => acc + (b.addons?.printed_qr || 0), 0) || 0) > 1 ? "addons" : "addon"} x ₹{getComponentRate("printed_qr", 990)}/mo)
-                              </span>
-                              <span>₹{Number(signupQuote.itemized.qr_subtotal).toLocaleString("en-IN")}</span>
-                            </div>
-                          )}
+                          <div className="flex justify-between text-emerald-600 font-semibold">
+                            <span>Self-Ticketing QR Display Poster</span>
+                            <span className="font-bold">FREE INCLUDED</span>
+                          </div>
                           {Number(signupQuote.itemized.delivery_subtotal) > 0 && (
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Notification Channels</span>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Plus,
   Trash2,
@@ -74,9 +75,11 @@ const METHOD_DESC: Record<QueueMethod, string> = {
 
 import { CompanyOverviewManager } from "@/components/console/company-overview";
 
-export function CompanyAdminView({ view, companyId, setView, branchId }: { view: string; companyId: string; setView?: (view: string) => void; branchId?: string }) {
+export function CompanyAdminView({ view, companyId, setView, branchId, onManageDesks, companySlug: propCompanySlug }: { view: string; companyId: string; setView?: (view: string) => void; branchId?: string; onManageDesks?: (branchId: string) => void; companySlug?: string }) {
   const { state, actions } = useQuesole();
+  const navigate = useNavigate();
   const company = state.companies.find((c) => String(c.id) === String(companyId));
+  const companySlug = propCompanySlug || company?.slug || "";
   const branches = branchesOf(state, companyId);
   const stats = companyStats(state, companyId);
   const [newBranch, setNewBranch] = useState({ name: "", city: "" });
@@ -127,7 +130,7 @@ export function CompanyAdminView({ view, companyId, setView, branchId }: { view:
   }
 
   if (view === "branch_desks") {
-    const targetBranchId = selectedBranchId || branchesOf(state, companyId)[0]?.id || "";
+    const targetBranchId = branchId || selectedBranchId || branchesOf(state, companyId)[0]?.id || "";
     return (
       <BranchDesksServicesManager
         branchId={targetBranchId}
@@ -143,6 +146,7 @@ export function CompanyAdminView({ view, companyId, setView, branchId }: { view:
     return (
       <BranchesManager
         companyId={companyId}
+        companySlug={companySlug}
         {...(setView ? { setView } : {})}
         onManageDesks={(branchId) => {
           setSelectedBranchId(branchId);
@@ -683,7 +687,16 @@ export function CompanyAdminView({ view, companyId, setView, branchId }: { view:
     );
   }
 
-  return <CompanyOverviewManager companyId={companyId} setView={setView ?? (() => {})} />;
+  return (
+    <CompanyOverviewManager
+      companyId={companyId}
+      setView={setView ?? (() => {})}
+      onSelectBranch={(bId) => {
+        setSelectedBranchId(bId);
+        setView?.("branch_desks");
+      }}
+    />
+  );
 }
 
 function Mini({ label, value }: { label: string; value: string | number }) {
@@ -715,9 +728,10 @@ function Usage({ label, used, cap }: { label: string; used: number; cap: number 
   );
 }
 
-function BranchesManager({ companyId, setView, onManageDesks }: { companyId: string; setView?: (v: string) => void; onManageDesks?: (branchId: string) => void }) {
+function BranchesManager({ companyId, setView, onManageDesks, companySlug: propCompanySlug }: { companyId: string; setView?: (v: string) => void; onManageDesks?: (branchId: string) => void; companySlug?: string }) {
   const { state, session, simulating, refresh, actions } = useQuesole();
   const company = state.companies.find((c) => String(c.id) === String(companyId));
+  const companySlug = propCompanySlug || company?.slug || "";
   const branches = branchesOf(state, companyId);
   const plan = planOf(company?.plan ?? "starter");
   const companyAllocations = state.companyAllocations.filter((a) => String(a.companyId) === String(companyId));
@@ -1144,7 +1158,18 @@ function BranchesManager({ companyId, setView, onManageDesks }: { companyId: str
                     <Button
                       size="sm"
                       variant="brand"
-                      onClick={() => onManageDesks ? onManageDesks(b.id) : setView?.("branch_desks")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const cSlug = companySlug || company?.slug || "";
+                        const bSlug = b.slug || b.id;
+                        if (cSlug && bSlug) {
+                          window.open(`/${cSlug}/branches/${bSlug}`, "_blank");
+                        } else if (onManageDesks) {
+                          onManageDesks(b.id);
+                        } else {
+                          setView?.("branch_desks");
+                        }
+                      }}
                       className="ml-auto h-8 rounded-lg text-xs font-bold flex items-center gap-1"
                     >
                       Open Branch Console <ArrowUpRight className="h-3.5 w-3.5" />
@@ -1631,52 +1656,59 @@ function BranchesManager({ companyId, setView, onManageDesks }: { companyId: str
       )}
 
       {/* 4. VIEW QR CODE MODAL */}
-      {qrBranch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="panel w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 text-center">
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
-              <h3 className="font-display text-base font-bold">Branch QR Code</h3>
-              <button onClick={() => setQrBranch(null)} className="rounded-lg p-1 text-muted-foreground hover:text-foreground">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      {qrBranch && (() => {
+        const companyObj = state.companies.find((c) => String(c.id) === String(companyId));
+        const companySlug = companyObj?.slug || "";
+        const branchSlug = qrBranch.slug || "";
+        const joinUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/join` : `/q/${qrBranch.id}`;
 
-            <div className="my-6 flex flex-col items-center justify-center bg-white p-4 rounded-2xl border shadow-inner">
-              <QRCodeSVG
-                value={`${typeof window !== "undefined" ? window.location.origin : ""}/q/${qrBranch.id}`}
-                size={180}
-              />
-              <p className="mt-3 text-[11px] font-bold text-slate-800 uppercase tracking-wider">
-                {qrBranch.name}
-              </p>
-            </div>
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="panel w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 text-center">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <h3 className="font-display text-base font-bold">Branch QR Code</h3>
+                <button onClick={() => setQrBranch(null)} className="rounded-lg p-1 text-muted-foreground hover:text-foreground">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
 
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="outline"
-                className="w-full h-10 rounded-xl text-xs"
-                onClick={() => {
-                  const url = `${window.location.origin}/q/${qrBranch.id}`;
-                  navigator.clipboard.writeText(url);
-                  setCopiedQr(true);
-                  toast.success("QR Link copied to clipboard!");
-                  setTimeout(() => setCopiedQr(false), 2000);
-                }}
-              >
-                {copiedQr ? <Check className="mr-1.5 h-4 w-4 text-emerald-500" /> : <Copy className="mr-1.5 h-4 w-4" />}
-                {copiedQr ? "Copied!" : "Copy Customer Queue URL"}
-              </Button>
-              <Button
-                variant="brand"
-                className="w-full h-10 rounded-xl text-xs"
-                onClick={() => window.open(`/q/${qrBranch.id}`, "_blank")}
-              >
-                <ExternalLink className="mr-1.5 h-4 w-4" /> Open Public Queue Page
-              </Button>
+              <div className="my-6 flex flex-col items-center justify-center bg-white p-4 rounded-2xl border shadow-inner">
+                <QRCodeSVG
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}${joinUrl}`}
+                  size={180}
+                />
+                <p className="mt-3 text-[11px] font-bold text-slate-800 uppercase tracking-wider">
+                  {qrBranch.name}
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full h-10 rounded-xl text-xs"
+                  onClick={() => {
+                    const url = `${window.location.origin}${joinUrl}`;
+                    navigator.clipboard.writeText(url);
+                    setCopiedQr(true);
+                    toast.success("QR Link copied to clipboard!");
+                    setTimeout(() => setCopiedQr(false), 2000);
+                  }}
+                >
+                  {copiedQr ? <Check className="mr-1.5 h-4 w-4 text-emerald-500" /> : <Copy className="mr-1.5 h-4 w-4" />}
+                  {copiedQr ? "Copied!" : "Copy Customer Queue URL"}
+                </Button>
+                <Button
+                  variant="brand"
+                  className="w-full h-10 rounded-xl text-xs"
+                  onClick={() => window.open(joinUrl, "_blank")}
+                >
+                  <ExternalLink className="mr-1.5 h-4 w-4" /> Open Public Queue Page
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 5. DELETE BRANCH CONFIRMATION MODAL */}
       {deleteBranchTarget && (

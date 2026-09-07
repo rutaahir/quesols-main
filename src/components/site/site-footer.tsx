@@ -7,7 +7,7 @@ const COLS = [
     links: [
       { label: "Walk-in queues", to: "/" },
       { label: "Service routing", to: "/" },
-      { label: "Display boards", to: "/display/b_amd_central" },
+      { label: "Display boards", to: "/services" },
       { label: "Appointments", to: "/book" },
     ],
   },

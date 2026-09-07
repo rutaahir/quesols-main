@@ -1,9 +1,10 @@
-﻿import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   AlertCircle, ArrowLeft, ArrowRight, CheckCircle2,
   Headset, Lock, LogOut, Mail, MessageSquare, Phone,
-  Settings, ShieldCheck, Sparkles, User, Wifi,
+  Settings, ShieldCheck, Sparkles, User, Wifi, Loader2,
+  ShieldAlert, HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuesole, apiFetch } from "@/lib/quesole/store";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/kot/$branchId")({
+export const Route = createFileRoute("/$companySlug/branches/$branchSlug/kot")({
   head: () => ({
     meta: [
       { title: "KOT Check-In — SMS / WhatsApp Token" },
@@ -57,11 +58,47 @@ function SegmentedPin({ length = 4, value, onChange, error }: { length?: number;
 }
 
 function KotScreen() {
-  const { branchId } = Route.useParams();
+  const { companySlug, branchSlug } = Route.useParams();
   const { state, actions } = useQuesole();
-  const branch = state.branches.find((b) => String(b.id) === String(branchId) || b.slug === branchId);
-  const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
-  const services = state.services.filter((s) => String(s.branchId) === String(branch?.id ?? branchId) && s.isActive !== false);
+
+  const [resolvedBranch, setResolvedBranch] = useState<any | null>(null);
+  const [resolvedCompany, setResolvedCompany] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorType, setErrorType] = useState<"company_not_found" | "branch_not_found" | "branch_inactive" | null>(null);
+
+  useEffect(() => {
+    const resolveSlugs = async () => {
+      setIsLoading(true);
+      setErrorType(null);
+      try {
+        const comp = await apiFetch(`/api/companies/by-slug/${companySlug}/`);
+        setResolvedCompany(comp);
+        const br = await apiFetch(`/api/companies/${companySlug}/branches/by-slug/${branchSlug}/`);
+        setResolvedBranch(br);
+      } catch (err: any) {
+        console.error("KOT slug resolution failed:", err);
+        if (err.status === 404) {
+          if (err.message?.includes("Branch") || err.message?.includes("branch")) {
+            setErrorType("branch_not_found");
+          } else {
+            setErrorType("company_not_found");
+          }
+        } else if (err.status === 403) {
+          setErrorType("branch_inactive");
+        } else {
+          setErrorType("branch_not_found");
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    resolveSlugs();
+  }, [companySlug, branchSlug]);
+
+  const branch = resolvedBranch;
+  const company = resolvedCompany;
+  const branchId = branch?.id ? String(branch.id) : "";
+  const services = state.services.filter((s) => String(s.branchId) === String(branchId) && s.isActive !== false);
 
   const [screen, setScreen] = useState<ScreenState>("locked");
   const [pin, setPin] = useState(""); const [pinError, setPinError] = useState<string | null>(null); const [isUnlocking, setIsUnlocking] = useState(false);
@@ -71,18 +108,165 @@ function KotScreen() {
   const [formError, setFormError] = useState<string | null>(null); const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedChannel, setConfirmedChannel] = useState<"sms" | "whatsapp">("sms"); const [confirmedPhone, setConfirmedPhone] = useState("");
 
-  const enabledMethods = (branch?.enabledMethods || []).map(Number);
+  const rawMethods = branch?.enabledMethods || branch?.enabled_methods;
+  const enabledMethods = (rawMethods && Array.isArray(rawMethods) && rawMethods.length > 0 ? rawMethods : [1, 2, 3, 4]).map(Number);
   const hasSms = enabledMethods.includes(3); const hasWhatsapp = enabledMethods.includes(4);
   const isKotEnabled = hasSms || hasWhatsapp; const bothEnabled = hasSms && hasWhatsapp;
   const isServiceMode = branch?.mode === "SERVICE_BASED";
 
+  const [sessionId] = useState(() => Math.random().toString(36).substring(2) + Date.now().toString(36));
+  const [sessionLocked, setSessionLocked] = useState(false);
+  const [sessionLockError, setSessionLockError] = useState<string | null>(null);
+
+  const [kotTerminalsList, setKotTerminalsList] = useState<any[]>([]);
+  const [selectedKotTerminalId, setSelectedKotTerminalId] = useState<string>("");
+
+  useEffect(() => {
+    if (!branch?.id) return;
+    apiFetch(`/api/public/kot-terminals/?branch_id=${branch.id}`)
+      .then((data: any) => {
+        if (Array.isArray(data)) {
+          setKotTerminalsList(data);
+          if (data.length > 0) {
+            setSelectedKotTerminalId((prev) => prev || data[0].id);
+          }
+        }
+      })
+      .catch(() => {
+        apiFetch(`/api/kot/public/kot-terminals/?branch_id=${branch.id}`)
+          .then((data: any) => {
+            if (Array.isArray(data)) {
+              setKotTerminalsList(data);
+              if (data.length > 0) {
+                setSelectedKotTerminalId((prev) => prev || data[0].id);
+              }
+            }
+          })
+          .catch((err: any) => console.error("Failed to load KOT terminals list:", err));
+      });
+  }, [branch?.id]);
+
   useEffect(() => { if (hasSms) setChannel("sms"); else if (hasWhatsapp) setChannel("whatsapp"); }, [hasSms, hasWhatsapp]);
   useEffect(() => { if (services.length > 0 && !selectedServiceId) setSelectedServiceId(services[0]?.id ?? ""); }, [services, selectedServiceId]);
+
+  useEffect(() => {
+    if (!branch?.id) return;
+    let isMounted = true;
+
+    const acquireLock = async (takeover = false) => {
+      try {
+        const res = await apiFetch(`/api/branches/${branch.id}/kot-session-lock/`, {
+          method: "POST",
+          body: JSON.stringify({ session_id: sessionId, force_takeover: takeover })
+        });
+        if (isMounted) {
+          if (res.acquired) {
+            setSessionLocked(false);
+            setSessionLockError(null);
+          } else {
+            setSessionLocked(true);
+            setSessionLockError(res.error || "Another device is currently open on this KOT Terminal.");
+          }
+        }
+      } catch (err: any) {
+        if (err.status === 409 || err.status === 400) {
+          if (isMounted) {
+            setSessionLocked(true);
+            setSessionLockError(err.message || "Another device is currently open on this KOT Terminal. Only 1 active KOT session is allowed at a time.");
+          }
+        }
+      }
+    };
+
+    acquireLock();
+    const interval = setInterval(() => acquireLock(false), 8000);
+
+    const handleRelease = () => {
+      fetch(`${window.location.origin}/api/branches/${branch.id}/kot-session-release/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+        keepalive: true
+      }).catch(() => {});
+    };
+    window.addEventListener("beforeunload", handleRelease);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener("beforeunload", handleRelease);
+    };
+  }, [branch?.id, sessionId]);
+
+  const resetToForm = () => {
+    setScreen("form"); setName(""); setPhone(""); setEmail(""); setNote(""); setFormError(null);
+    if (hasSms) setChannel("sms"); else if (hasWhatsapp) setChannel("whatsapp");
+  };
+
   useEffect(() => {
     if (screen !== "confirmation") return;
     const t = setTimeout(() => resetToForm(), (branch?.kioskIdleTimeoutSeconds || 8) * 1000);
     return () => clearTimeout(t);
-  }, [screen]);
+  }, [screen, branch?.kioskIdleTimeoutSeconds, hasSms, hasWhatsapp]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19]">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 animate-spin text-indigo-600 mx-auto" />
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Loading KOT Terminal...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "company_not_found") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">We couldn't find that company</h2>
+          <p className="text-sm text-muted-foreground">The organization slug matches no active account.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "branch_not_found") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+            <HelpCircle className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Branch not found</h2>
+          <p className="text-sm text-muted-foreground leading-normal">
+            We couldn't find that branch for <strong className="text-foreground">{company?.name || companySlug.toUpperCase()}</strong>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "branch_inactive") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Branch inactive</h2>
+          <p className="text-sm text-muted-foreground">
+            The branch <strong className="text-foreground">{branchSlug}</strong> is currently deactivated or suspended.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!branch) throw notFound();
 
   if (state.branches.length === 0) return (
     <div className="flex min-h-screen items-center justify-center bg-background">
@@ -108,14 +292,28 @@ function KotScreen() {
     </div>
   );
 
-  const resetToForm = () => {
-    setScreen("form"); setName(""); setPhone(""); setEmail(""); setNote(""); setFormError(null);
-    if (hasSms) setChannel("sms"); else if (hasWhatsapp) setChannel("whatsapp");
-  };
-
   const handleUnlock = async () => {
     setPinError(null); if (pin.length < 4) return; setIsUnlocking(true);
     try {
+      if (selectedKotTerminalId) {
+        try {
+          const res = await apiFetch(`/api/public/kot-terminals/login/`, {
+            method: "POST",
+            body: JSON.stringify({ terminal_id: selectedKotTerminalId, pin })
+          });
+          if (res.session_token) {
+            setScreen("form");
+            setPin("");
+            toast.success(`Unlocked ${res.terminal_identifier || "KOT Screen"}!`);
+            return;
+          }
+        } catch (loginErr: any) {
+          console.warn("KOT terminal login failed:", loginErr);
+          setPinError(loginErr.message || "Invalid PIN. Please check the PIN code in your admin console.");
+          setPin("");
+          return;
+        }
+      }
       const res = await apiFetch(`/api/branches/${branch.id}/verify-kiosk-password/`, { method: "POST", body: JSON.stringify({ password: pin }) });
       if (res.verified) { setScreen("form"); setPin(""); toast.success("KOT screen unlocked!"); }
       else { setPinError(res.error || "Incorrect PIN. Please try again."); setPin(""); }
@@ -153,17 +351,17 @@ function KotScreen() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-background text-foreground select-none overflow-hidden font-sans">
+    <div className="relative flex min-h-screen flex-col bg-background text-foreground select-none overflow-y-auto md:overflow-hidden font-sans">
       <BgDecoration />
-      <header className="absolute top-0 w-full z-20 flex items-center justify-between px-6 md:px-12 py-7 pointer-events-none">
-        <div className="flex items-center gap-4">
+      <header className="relative md:absolute top-0 w-full z-20 flex items-center justify-between px-4 sm:px-6 md:px-12 py-4 sm:py-7 pointer-events-none">
+        <div className="flex items-center gap-2 sm:gap-4">
           {company?.logoUrl
-            ? <img src={company.logoUrl} alt={company.name} className="h-11 w-11 object-contain rounded-2xl shadow-sm bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-1 border border-border/40" />
-            : <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand font-bold text-white text-xl shadow-md">{company?.name?.[0] || "Q"}</div>
+            ? <img src={company.logoUrl} alt={company.name} className="h-10 w-10 sm:h-11 sm:w-11 object-contain rounded-2xl shadow-sm bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-1 border border-border/40" />
+            : <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-2xl bg-brand font-bold text-white text-lg sm:text-xl shadow-md">{company?.name?.[0] || "Q"}</div>
           }
           <div className="pointer-events-auto flex flex-col">
-            <div className="font-display text-xl font-bold tracking-tight text-foreground leading-none">{company?.name || "Quesole"}</div>
-            <div className="text-[11px] font-semibold text-muted-foreground lowercase flex gap-1 mt-0.5">{branch.name} <span className="text-primary/60">•</span> {branch.city}</div>
+            <div className="font-display text-base sm:text-xl font-bold tracking-tight text-foreground leading-none">{company?.name || "Quesole"}</div>
+            <div className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground lowercase flex gap-1 mt-0.5">{branch.name} <span className="text-primary/60">•</span> {branch.city}</div>
           </div>
         </div>
         <div className="flex items-center gap-3 pointer-events-auto">
@@ -179,12 +377,57 @@ function KotScreen() {
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 md:p-12 pt-28 pb-32">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-6 md:p-12 pt-6 md:pt-28 pb-6 md:pb-32">
         <AnimatePresence mode="wait">
 
-          {screen === "locked" && (
+          {sessionLocked && (
+            <motion.div key="session-locked" initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 1.03, y: -6 }} transition={{ duration: 0.32 }}
+              className="w-full max-w-[440px] glass rounded-3xl p-8 sm:p-10 shadow-lift space-y-6 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                <Lock className="h-8 w-8" />
+              </div>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 px-3 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">
+                  Active Session Lock (1 Session Limit)
+                </div>
+                <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">KOT Terminal Active Elsewhere</h2>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {sessionLockError || `Another device is currently open on this KOT Terminal for ${branch.name}. Only 1 active KOT terminal session is permitted at a time.`}
+                </p>
+              </div>
+
+              <div className="pt-2 space-y-3">
+                <Button
+                  onClick={async () => {
+                    try {
+                      const res = await apiFetch(`/api/branches/${branch.id}/kot-session-lock/`, {
+                        method: "POST",
+                        body: JSON.stringify({ session_id: sessionId, force_takeover: true })
+                      });
+                      if (res.acquired) {
+                        setSessionLocked(false);
+                        setSessionLockError(null);
+                        toast.success("Active session acquired!");
+                      }
+                    } catch (err: any) {
+                      toast.error("Failed to take over session lock.");
+                    }
+                  }}
+                  className="w-full h-12 font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-md gap-2"
+                >
+                  <Lock className="h-4 w-4" />
+                  Force Unlock &amp; Takeover Session
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  Closing the tab on the other device will automatically unlock this terminal.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {!sessionLocked && screen === "locked" && (
             <motion.div key="locked" initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 1.03, y: -6 }} transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-              className="w-full max-w-[420px] glass rounded-[2rem] p-10 shadow-lift space-y-8">
+              className="w-full max-w-[420px] glass rounded-2xl sm:rounded-[2rem] p-6 sm:p-10 shadow-lift space-y-6 sm:space-y-8">
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
                   <div className="relative flex items-center justify-center h-22 w-22">
@@ -199,10 +442,26 @@ function KotScreen() {
                 <div className="space-y-1.5">
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/8 border border-primary/15 px-3 py-0.5 text-[10px] font-bold text-primary uppercase tracking-widest">KOT Check-In</div>
                   <h2 className="font-display text-3xl font-bold tracking-tight text-foreground">KOT Check-In Locked</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed">Enter the PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">Select terminal &amp; enter PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
                 </div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} className="space-y-5">
+                {kotTerminalsList.length > 1 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select KOT Terminal</Label>
+                    <select
+                      value={selectedKotTerminalId}
+                      onChange={(e) => setSelectedKotTerminalId(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-border bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm px-3 text-sm font-bold text-foreground outline-none focus:border-primary"
+                    >
+                      {kotTerminalsList.map((term) => (
+                        <option key={term.id} value={term.id}>
+                          {term.terminal_identifier} ({term.is_logged_in ? "Online" : "Offline"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="space-y-4 flex flex-col items-center">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground self-start ml-1">Enter 4-Digit PIN</Label>
                   <SegmentedPin length={4} value={pin} onChange={(v) => { setPinError(null); setPin(v); }} error={!!pinError} />
@@ -219,19 +478,19 @@ function KotScreen() {
 
           {screen === "form" && (
             <motion.div key="form" initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 1.03, y: -6 }} transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }} className="w-full max-w-3xl relative">
-              <div className="absolute top-8 left-8 z-20">
+              <div className="absolute top-4 left-4 sm:top-8 sm:left-8 z-20">
                 <Button type="button" variant="ghost" onClick={() => setScreen("locked")} className="text-muted-foreground hover:text-foreground text-xs font-bold uppercase tracking-wider gap-2 rounded-xl px-3 h-9"><ArrowLeft className="h-3.5 w-3.5" /> Back</Button>
               </div>
               <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-20">
                 <div className="flex items-center justify-center h-16 w-16 rounded-2xl bg-brand shadow-md text-white"><MessageSquare className="h-7 w-7" /></div>
               </div>
-              <form onSubmit={handleSubmit} className="pt-16 pb-10 px-8 md:px-10 space-y-6 glass rounded-[2rem] shadow-lift relative">
+              <form onSubmit={handleSubmit} className="pt-14 sm:pt-16 pb-6 sm:pb-10 px-4 sm:px-8 md:px-10 space-y-6 glass rounded-2xl sm:rounded-[2rem] shadow-lift relative">
                 <div className="text-center space-y-1.5">
                   <div className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center justify-center gap-2">
                     <span className="w-1 h-1 rounded-full bg-primary inline-block" /> Digital Token Check-In <span className="w-1 h-1 rounded-full bg-primary inline-block" />
                   </div>
-                  <h1 className="font-display text-4xl md:text-5xl font-black text-gradient tracking-tight">Welcome!</h1>
-                  <p className="text-sm text-muted-foreground">Fill in your details — your queue token will be sent directly to your phone.</p>
+                  <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-black text-gradient tracking-tight">Welcome!</h1>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Fill in your details — your queue token will be sent directly to your phone.</p>
                 </div>
                 {formError && (
                   <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/8 p-3.5 text-sm font-semibold text-destructive">
@@ -300,7 +559,7 @@ function KotScreen() {
 
           {screen === "confirmation" && (
             <motion.div key="confirmation" initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.06 }} transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
-              className="w-full max-w-[480px] text-center glass rounded-[2rem] p-12 shadow-lift space-y-7">
+              className="w-full max-w-[480px] text-center glass rounded-2xl sm:rounded-[2rem] p-6 sm:p-12 shadow-lift space-y-5 sm:space-y-7">
               <div className="flex justify-center">
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 280, damping: 18 }} className="relative flex h-24 w-24 items-center justify-center">
                   <div className="absolute inset-0 rounded-full bg-primary/10 animate-breathe" />
@@ -326,8 +585,8 @@ function KotScreen() {
         </AnimatePresence>
       </main>
 
-      <footer className="absolute bottom-5 w-full z-20 px-6 md:px-12 pointer-events-none flex flex-col items-center gap-3">
-        <div className="flex flex-wrap items-center justify-center gap-5 md:gap-8 glass rounded-full px-7 py-3.5 shadow-soft pointer-events-auto">
+      <footer className="relative md:absolute md:bottom-5 w-full z-20 px-4 sm:px-6 md:px-12 py-6 md:py-0 pointer-events-none flex flex-col items-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-8 glass rounded-2xl md:rounded-full px-4 sm:px-7 py-3 sm:py-3.5 shadow-soft pointer-events-auto text-center">
           {[{ icon: ShieldCheck, label: "Secure Access", sub: "Protected by branch PIN" }, { icon: MessageSquare, label: "SMS & WhatsApp", sub: "Token sent to your phone" }, { icon: Wifi, label: "No Screen Required", sub: "Track queue on your phone" }, { icon: Headset, label: "Need Help?", sub: "Contact your administrator" }].map(({ icon: Icon, label, sub }) => (
             <div key={label} className="flex items-center gap-2.5">
               <div className="flex h-7 w-7 rounded-xl bg-primary/8 text-primary items-center justify-center"><Icon className="h-3.5 w-3.5" /></div>

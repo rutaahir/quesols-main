@@ -94,11 +94,14 @@ export function BillingPlanConfigurator({
 
   // Current company plan parameters
   const currentCompany = useMemo(() => {
+    if (propMode === "registration") {
+      return null;
+    }
     if (state.companies.length > 0) {
       return state.companies[0]; // Active company
     }
     return null;
-  }, [state.companies]);
+  }, [state.companies, propMode]);
 
   // Current purchased limits (price locking constraints)
   const currentAllocations = useMemo(() => {
@@ -2046,24 +2049,31 @@ export function BillingPlanConfigurator({
                               </div>
                             </div>
 
-                            {/* Branch Addons */}
-                            <div className="space-y-3 pt-2">
-                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Branch Addons (Optional)</span>
-                              <div className="flex justify-between items-center rounded-2xl border border-border p-3.5 bg-background">
-                                <div>
-                                  <span className="font-bold text-xs">Self-Ticketing QR Display Poster</span>
-                                  <span className="text-[9px] text-muted-foreground block mt-0.5">{getComponentPriceLabelText("printed_qr")}</span>
-                                </div>
+                            {/* Digital KOT Terminals selection */}
+                            <div className="flex items-center justify-between border-t border-border/40 pt-3">
+                              <div>
+                                <label className="text-xs font-bold block text-foreground flex items-center gap-1.5">
+                                  <span>Digital KOT Terminals (KOT Delivery)</span>
+                                </label>
+                                <p className="text-[10px] text-muted-foreground">₹100/mo per KOT terminal screen</p>
+                              </div>
+                              <div className="flex items-center gap-3 bg-background border border-border rounded-xl p-1">
+                                <button
+                                  type="button"
+                                  disabled={(branches[activeBranchIndex].kotQty || 0) <= 0 || branches[activeBranchIndex].channel_type === "ONLINE_ONLY"}
+                                  onClick={() => updateBranchField(activeBranchIndex, "kotQty", Math.max(0, (branches[activeBranchIndex].kotQty || 0) - 1))}
+                                  className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 font-bold"
+                                >
+                                  −
+                                </button>
+                                <span className="w-8 text-center font-bold text-xs">{branches[activeBranchIndex].kotQty || 0}</span>
                                 <button
                                   type="button"
                                   disabled={branches[activeBranchIndex].channel_type === "ONLINE_ONLY"}
-                                  onClick={() => updateBranchAddon(activeBranchIndex, "printed_qr", branches[activeBranchIndex].addons["printed_qr"] === 0 ? 1 : 0)}
-                                  className={cn(
-                                    "rounded-xl px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all border cursor-pointer disabled:opacity-50 disabled:pointer-events-none",
-                                    branches[activeBranchIndex].addons["printed_qr"] > 0 ? "bg-brand text-white border-brand" : "bg-background border-border text-foreground"
-                                  )}
+                                  onClick={() => updateBranchField(activeBranchIndex, "kotQty", (branches[activeBranchIndex].kotQty || 0) + 1)}
+                                  className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 font-bold disabled:opacity-30"
                                 >
-                                  {branches[activeBranchIndex].addons["printed_qr"] > 0 ? "Enabled" : "Enable"}
+                                  +
                                 </button>
                               </div>
                             </div>

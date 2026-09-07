@@ -1,6 +1,6 @@
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuesole, waitingOf, apiFetch } from "@/lib/quesole/store";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Ticket } from "@/lib/quesole/types";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/kiosk/$branchId")({
+export const Route = createFileRoute("/$companySlug/branches/$branchSlug/kiosk")({
   validateSearch: (search: Record<string, unknown>): { method?: string | undefined } => {
     return {
       method: search["method"] as string | undefined,
@@ -31,15 +31,50 @@ export const Route = createFileRoute("/kiosk/$branchId")({
 type KioskState = "idle" | "form" | "confirmation";
 
 function Kiosk() {
-  const { branchId } = Route.useParams();
+  const { companySlug, branchSlug } = Route.useParams();
   const { method: methodQuery } = Route.useSearch();
   const isKotDirect = methodQuery === "kot";
   const navigate = useNavigate();
   const { state, actions } = useQuesole();
 
-  const branch = state.branches.find((b) => String(b.id) === String(branchId) || b.slug === branchId);
-  const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
-  const services = state.services.filter((s) => String(s.branchId) === String(branch?.id ?? branchId) && s.isActive !== false);
+  const [resolvedBranch, setResolvedBranch] = useState<any | null>(null);
+  const [resolvedCompany, setResolvedCompany] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorType, setErrorType] = useState<"company_not_found" | "branch_not_found" | "branch_inactive" | null>(null);
+
+  useEffect(() => {
+    const resolveSlugs = async () => {
+      setIsLoading(true);
+      setErrorType(null);
+      try {
+        const comp = await apiFetch(`/api/companies/by-slug/${companySlug}/`);
+        setResolvedCompany(comp);
+        const br = await apiFetch(`/api/companies/${companySlug}/branches/by-slug/${branchSlug}/`);
+        setResolvedBranch(br);
+      } catch (err: any) {
+        console.error("Kiosk slug resolution failed:", err);
+        if (err.status === 404) {
+          if (err.message?.includes("Branch") || err.message?.includes("branch")) {
+            setErrorType("branch_not_found");
+          } else {
+            setErrorType("company_not_found");
+          }
+        } else if (err.status === 403) {
+          setErrorType("branch_inactive");
+        } else {
+          setErrorType("branch_not_found");
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    resolveSlugs();
+  }, [companySlug, branchSlug]);
+
+  const branch = resolvedBranch;
+  const company = resolvedCompany;
+  const branchId = branch?.id ? String(branch.id) : "";
+  const services = state.services.filter((s) => String(s.branchId) === String(branchId) && s.isActive !== false);
 
   // 4-State UI State Machine
   const [kioskState, setKioskState] = useState<KioskState>(isKotDirect ? "form" : "idle");
@@ -50,10 +85,25 @@ function Kiosk() {
   // Kiosk Initial Unlock State
   const [initPin, setInitPin] = useState("");
   const [initPinError, setInitPinError] = useState<string | null>(null);
-  const [isDeviceUnlocked, setIsDeviceUnlocked] = useState(false);
+  const [isDeviceUnlocked, setIsDeviceUnlocked] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(`kiosk_unlocked_${branchId}`) === "true";
+    }
+    return false;
+  });
   const [kiosksList, setKiosksList] = useState<any[]>([]);
-  const [selectedKioskId, setSelectedKioskId] = useState<string>("");
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [selectedKioskId, setSelectedKioskId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(`kiosk_selected_id_${branchId}`) || "";
+    }
+    return "";
+  });
+  const [sessionToken, setSessionToken] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(`kiosk_session_token_${branchId}`) || null;
+    }
+    return null;
+  });
   const [isEvicted, setIsEvicted] = useState(false);
 
   // Form State
@@ -72,31 +122,16 @@ function Kiosk() {
   // Delivery Channel state
   const [deliveryChannel, setDeliveryChannel] = useState<"sms" | "whatsapp" | "kiosk">("kiosk");
 
-  // Determine active methods for this branch
-  const enabledMethods = (branch?.enabledMethods || []).map(Number);
+  const rawMethods = branch?.enabledMethods || branch?.enabled_methods;
+  const enabledMethods = (rawMethods && Array.isArray(rawMethods) && rawMethods.length > 0 ? rawMethods : [1, 2, 3, 4]).map(Number);
   const hasKioskPrinted = enabledMethods.includes(2) && !isKotDirect;
   const hasSms = enabledMethods.includes(3);
   const hasWhatsapp = enabledMethods.includes(4);
 
   // Set default delivery channel when branch loaded or changed
   useEffect(() => {
-    if (isKotDirect) {
-      // KOT Direct link: lock to SMS, or WhatsApp if SMS not enabled
-      if (hasSms) {
-        setDeliveryChannel("sms");
-      } else if (hasWhatsapp) {
-        setDeliveryChannel("whatsapp");
-      }
-    } else if (hasKioskPrinted) {
-      setDeliveryChannel("kiosk");
-    } else if (hasSms) {
-      setDeliveryChannel("sms");
-    } else if (hasWhatsapp) {
-      setDeliveryChannel("whatsapp");
-    } else {
-      setDeliveryChannel("kiosk");
-    }
-  }, [isKotDirect, hasKioskPrinted, hasSms, hasWhatsapp]);
+    setDeliveryChannel("kiosk");
+  }, []);
 
   // When isKotDirect resolves (TanStack Router search params settle after mount),
   // upgrade idle → form so the attract screen is never shown on the KOT direct link.
@@ -120,11 +155,34 @@ function Kiosk() {
       .then((data: any) => {
         setKiosksList(data);
         if (data.length > 0) {
-          setSelectedKioskId(data[0].id);
+          setSelectedKioskId((prev) => prev || data[0].id);
         }
       })
       .catch((err: any) => console.error("Failed to load kiosks:", err));
   }, [branch?.id]);
+
+  // Sync unlock states with localStorage to persist through refreshes
+  useEffect(() => {
+    if (branchId) {
+      localStorage.setItem(`kiosk_unlocked_${branchId}`, String(isDeviceUnlocked));
+    }
+  }, [isDeviceUnlocked, branchId]);
+
+  useEffect(() => {
+    if (branchId && selectedKioskId) {
+      localStorage.setItem(`kiosk_selected_id_${branchId}`, selectedKioskId);
+    }
+  }, [selectedKioskId, branchId]);
+
+  useEffect(() => {
+    if (branchId) {
+      if (sessionToken) {
+        localStorage.setItem(`kiosk_session_token_${branchId}`, sessionToken);
+      } else {
+        localStorage.removeItem(`kiosk_session_token_${branchId}`);
+      }
+    }
+  }, [sessionToken, branchId]);
 
   // WebSocket Live Session Connection & Heartbeat
   useEffect(() => {
@@ -200,6 +258,63 @@ function Kiosk() {
 
     return () => clearTimeout(timer);
   }, [kioskState, branch?.kioskIdleTimeoutSeconds]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19]">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 animate-spin text-indigo-600 mx-auto" />
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Loading Kiosk Terminal...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "company_not_found") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">We couldn't find that company</h2>
+          <p className="text-sm text-muted-foreground">The organization slug matches no active account.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "branch_not_found") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+            <HelpCircle className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Branch not found</h2>
+          <p className="text-sm text-muted-foreground leading-normal">
+            We couldn't find that branch for <strong className="text-foreground">{company?.name || companySlug.toUpperCase()}</strong>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorType === "branch_inactive") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] dark:bg-[#0B0F19] px-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-8 text-center space-y-6 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Branch inactive</h2>
+          <p className="text-sm text-muted-foreground">
+            The branch <strong className="text-foreground">{branchSlug}</strong> is currently deactivated or suspended.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (state.branches.length === 0) {
     return (
@@ -308,6 +423,8 @@ function Kiosk() {
       if (res.verified) {
         toast.success("Kiosk unlocked — Returning to Branch Console");
         setIsStaffLockOpen(false);
+        localStorage.removeItem(`kiosk_unlocked_${branchId}`);
+        localStorage.removeItem(`kiosk_session_token_${branchId}`);
         void navigate({ to: "/app" });
       } else {
         setPinError(res.error || "Incorrect password. Please try again.");
@@ -351,7 +468,7 @@ function Kiosk() {
   const waitingCount = waitingOf(state, branch.id).length;
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-background text-foreground select-none overflow-hidden font-sans">
+    <div className="relative flex min-h-screen flex-col bg-background text-foreground select-none overflow-y-auto md:overflow-hidden font-sans">
       <KioskBackground 
         customerName={customerName}
         selectedServiceName={selectedServiceObj?.name || ""}
@@ -403,30 +520,30 @@ function Kiosk() {
         </div>
       </div>
 
-      {/* Screen Header Bar */}
-      <header className="absolute top-0 w-full z-20 flex items-center justify-between px-6 md:px-12 py-8 pointer-events-none">
-        <div className="flex items-center gap-4">
+      {/* Screen Header */}
+      <header className="relative md:absolute top-0 w-full z-20 flex flex-row items-center justify-between px-4 sm:px-6 md:px-12 py-4 sm:py-8 pointer-events-none">
+        <div className="flex items-center gap-2 sm:gap-4">
           {company?.logoUrl ? (
-            <img src={company.logoUrl} alt={company.name} className="h-12 w-12 object-contain rounded-full shadow-sm bg-background/50 backdrop-blur-md p-1" />
+            <img src={company.logoUrl} alt={company.name} className="h-10 w-10 sm:h-12 sm:w-12 object-contain rounded-full shadow-sm bg-background/50 backdrop-blur-md p-1" />
           ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 font-bold text-white text-2xl shadow-lg">
+            <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 font-bold text-white text-lg sm:text-2xl shadow-lg">
               {company?.name?.[0] || "Q"}
             </div>
           )}
           <div className="pointer-events-auto flex flex-col">
-            <div className="font-display text-2xl font-bold tracking-tight text-foreground drop-shadow-sm leading-none">{company?.name || "Quesole"}</div>
-            <div className="text-xs font-semibold text-muted-foreground lowercase flex gap-1 mt-1">
+            <div className="font-display text-lg sm:text-2xl font-bold tracking-tight text-foreground drop-shadow-sm leading-none">{company?.name || "Quesole"}</div>
+            <div className="text-[10px] sm:text-xs font-semibold text-muted-foreground lowercase flex gap-1 mt-0.5 sm:mt-1">
               {branch.name} branch <span className="text-brand">•</span> {branch.city}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 md:gap-6 pointer-events-auto">
+        <div className="flex items-center gap-2 sm:gap-4 md:gap-6 pointer-events-auto">
           <div className="hidden md:flex items-center gap-2 rounded-full bg-white dark:bg-slate-900 shadow-sm border border-border/50 px-4 py-2 font-bold text-xs">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
             {waitingCount} People Waiting
           </div>
-          <LiveClock />
+          <div className="scale-90 sm:scale-100"><LiveClock /></div>
           <ThemeToggle />
           <button
             onClick={() => {
@@ -434,16 +551,16 @@ function Kiosk() {
               setPinError(null);
               setIsStaffLockOpen(true);
             }}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-slate-900 text-muted-foreground hover:text-foreground transition-colors shadow-sm border border-border/50"
+            className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-white dark:bg-slate-900 text-muted-foreground hover:text-foreground transition-colors shadow-sm border border-border/50"
             title="Staff Kiosk Controls"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
           </button>
         </div>
       </header>
 
       {/* Main Touch Screen Content */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 md:p-12 relative pt-24 pb-32">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-6 md:p-12 pt-6 md:pt-24 pb-6 md:pb-32">
         <AnimatePresence mode="wait">
           {/* STATE 0: Locked Screen — branches on isKotDirect */}
           {showLockScreen ? (
@@ -531,15 +648,15 @@ function Kiosk() {
               animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
               onClick={() => setKioskState("form")}
-              className="w-full max-w-[640px] cursor-pointer p-12 text-center shadow-[0_30px_80px_-15px_rgba(0,0,0,0.15)] transition-all duration-300 hover:shadow-[0_40px_100px_-20px_rgba(139,92,246,0.3)] space-y-10 rounded-[2.5rem] border border-white/40 dark:border-white/10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
+              className="w-full max-w-[640px] cursor-pointer p-6 sm:p-12 text-center shadow-[0_30px_80px_-15px_rgba(0,0,0,0.15)] transition-all duration-300 hover:shadow-[0_40px_100px_-20px_rgba(139,92,246,0.3)] space-y-6 sm:space-y-10 rounded-2xl sm:rounded-[2.5rem] border border-white/40 dark:border-white/10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
             >
               <div className="flex justify-center">
                 <motion.div
                   animate={{ y: [0, -10, 0] }}
                   transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  className="flex h-24 w-24 items-center justify-center rounded-3xl bg-brand/15 text-brand shadow-inner"
+                  className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-3xl bg-brand/15 text-brand shadow-inner"
                 >
-                  <Touchpad className="h-12 w-12" />
+                  <Touchpad className="h-10 w-10 sm:h-12 sm:w-12" />
                 </motion.div>
               </div>
 
@@ -550,10 +667,10 @@ function Kiosk() {
                 >
                   Welcome to {branch.name}
                 </motion.span>
-                <h1 className="font-display text-4xl md:text-5xl font-black tracking-tight text-foreground">
+                <h1 className="font-display text-3xl sm:text-5xl font-black tracking-tight text-foreground">
                   Tap Anywhere to Check In
                 </h1>
-                <p className="text-sm md:text-base text-muted-foreground max-w-md mx-auto">
+                <p className="text-xs sm:text-base text-muted-foreground max-w-md mx-auto">
                   Get your printed walk-in queue token instantly in seconds. No smartphone required.
                 </p>
               </div>
@@ -562,9 +679,9 @@ function Kiosk() {
                 <motion.div
                   animate={{ scale: [1, 1.05, 1], boxShadow: ["0 0 0 0 rgba(139,92,246,0.5)", "0 0 0 15px rgba(139,92,246,0)", "0 0 0 0 rgba(139,92,246,0)"] }}
                   transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="inline-flex items-center gap-3 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 px-10 py-5 text-xl font-bold text-white shadow-2xl shadow-brand/30 transition-transform active:scale-95"
+                  className="inline-flex items-center gap-2 sm:gap-3 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 px-6 py-4 sm:px-10 sm:py-5 text-base sm:text-xl font-bold text-white shadow-2xl shadow-brand/30 transition-transform active:scale-95"
                 >
-                  <Sparkles className="h-7 w-7" /> Touch Screen to Start
+                  <Sparkles className="h-5.5 w-5.5 sm:h-7 sm:w-7" /> Touch Screen to Start
                 </motion.div>
               </div>
             </motion.div>
@@ -576,30 +693,30 @@ function Kiosk() {
               exit={{ opacity: 0, scale: 1.05 }}
               className="w-full max-w-3xl relative"
             >
-              <div className="absolute top-8 left-8 z-20">
+              <div className="absolute top-4 left-4 sm:top-8 sm:left-8 z-20">
                 <Button 
                   type="button" 
                   variant="ghost" 
                   onClick={resetToIdle} 
-                  className="text-muted-foreground hover:text-foreground font-bold text-xs uppercase tracking-wider gap-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full px-4 h-10"
+                  className="text-muted-foreground hover:text-foreground font-bold text-xs uppercase tracking-wider gap-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full px-3 sm:px-4 h-9 sm:h-10"
                 >
                   <ArrowLeft className="h-4 w-4" /> Back
                 </Button>
               </div>
-              <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20">
-                <div className="flex items-center justify-center h-20 w-20 rounded-full bg-white dark:bg-slate-900 border-[6px] border-[#F8F9FE] dark:border-slate-950 shadow-xl text-brand">
-                  <Touchpad className="h-8 w-8" />
+              <div className="absolute -top-8 sm:-top-10 left-1/2 -translate-x-1/2 z-20">
+                <div className="flex items-center justify-center h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-white dark:bg-slate-900 border-[4px] sm:border-[6px] border-[#F8F9FE] dark:border-slate-950 shadow-xl text-brand">
+                  <Touchpad className="h-6 w-6 sm:h-8 sm:w-8" />
                 </div>
               </div>
 
-              <form onSubmit={handleCheckInSubmit} className="pt-16 pb-10 px-10 space-y-8 shadow-[0_40px_100px_-20px_rgba(139,92,246,0.15)] dark:shadow-[0_40px_100px_-20px_rgba(0,0,0,0.5)] rounded-[2.5rem] border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-3xl relative">
+              <form onSubmit={handleCheckInSubmit} className="pt-12 sm:pt-16 pb-6 sm:pb-10 px-4 sm:px-10 space-y-4 sm:space-y-8 shadow-[0_40px_100px_-20px_rgba(139,92,246,0.15)] dark:shadow-[0_40px_100px_-20px_rgba(0,0,0,0.5)] rounded-2xl sm:rounded-[2.5rem] border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-3xl relative">
 
                 <div className="text-center space-y-2">
                   <div className="text-[10px] font-black text-brand uppercase tracking-widest flex items-center justify-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-brand" /> WALK-IN CHECK-IN <span className="w-1.5 h-1.5 rounded-full bg-brand" />
                   </div>
-                  <h1 className="font-display text-5xl font-black text-brand tracking-tight">Welcome!</h1>
-                  <p className="text-sm font-medium text-muted-foreground flex flex-col gap-1 items-center">
+                  <h1 className="font-display text-3xl sm:text-5xl font-black text-brand tracking-tight">Welcome!</h1>
+                  <p className="text-xs sm:text-sm font-medium text-muted-foreground flex flex-col gap-1 items-center">
                     <span>Get your queue token instantly</span>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-brand/70 flex items-center gap-2">
                       <span className="w-6 border-b border-brand/30" />
@@ -652,74 +769,7 @@ function Kiosk() {
                     </div>
                   </div>
 
-                  {/* Delivery Channel selector */}
-                  {isKotDirect ? (
-                    // KOT Direct link: no selector, show a locked info banner
-                    <div className="col-span-1 md:col-span-2 flex items-center gap-3 text-[11px] font-semibold text-brand bg-brand/5 border border-brand/20 rounded-xl p-3">
-                      <MessageSquare className="h-4 w-4 shrink-0 text-brand" />
-                      <span>
-                        KOT Direct Check-In —{" "}
-                        {deliveryChannel === "sms" && "Your queue token will be sent via SMS."}
-                        {deliveryChannel === "whatsapp" && "Your queue token will be sent via WhatsApp."}
-                      </span>
-                    </div>
-                  ) : (
-                    <>
-                      {((hasKioskPrinted ? 1 : 0) + (hasSms ? 1 : 0) + (hasWhatsapp ? 1 : 0)) > 1 && (
-                        <div className="space-y-1.5 col-span-1 md:col-span-2 group">
-                          <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1 group-focus-within:text-brand transition-colors">
-                            Choose Delivery Method *
-                          </Label>
-                          <div className="flex flex-wrap gap-3">
-                            {hasKioskPrinted && (
-                              <button
-                                type="button"
-                                onClick={() => setDeliveryChannel("kiosk")}
-                                className={cn(
-                                  "flex-1 min-w-[120px] h-12 rounded-xl border font-bold text-xs transition-colors cursor-pointer",
-                                  deliveryChannel === "kiosk" ? "border-brand bg-brand/5 text-brand" : "border-border bg-background/50 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                )}
-                              >
-                                Printed Slip
-                              </button>
-                            )}
-                            {hasSms && (
-                              <button
-                                type="button"
-                                onClick={() => setDeliveryChannel("sms")}
-                                className={cn(
-                                  "flex-1 min-w-[120px] h-12 rounded-xl border font-bold text-xs transition-colors cursor-pointer",
-                                  deliveryChannel === "sms" ? "border-brand bg-brand/5 text-brand" : "border-border bg-background/50 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                )}
-                              >
-                                SMS Token
-                              </button>
-                            )}
-                            {hasWhatsapp && (
-                              <button
-                                type="button"
-                                onClick={() => setDeliveryChannel("whatsapp")}
-                                className={cn(
-                                  "flex-1 min-w-[120px] h-12 rounded-xl border font-bold text-xs transition-colors cursor-pointer",
-                                  deliveryChannel === "whatsapp" ? "border-brand bg-brand/5 text-brand" : "border-border bg-background/50 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                )}
-                              >
-                                WhatsApp Token
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {((hasKioskPrinted ? 1 : 0) + (hasSms ? 1 : 0) + (hasWhatsapp ? 1 : 0)) === 1 && (
-                        <div className="col-span-1 md:col-span-2 text-[11px] font-semibold text-brand bg-brand/5 border border-brand/20 rounded-xl p-3">
-                          {hasKioskPrinted && "Token delivery: A physical slip will be printed for you."}
-                          {hasSms && "Token delivery: We will send your queue ticket directly to your phone via SMS."}
-                          {hasWhatsapp && "Token delivery: We will send your queue ticket directly to your phone via WhatsApp."}
-                        </div>
-                      )}
-                    </>
-                  )}
+                  {/* Delivery method is locked to Printed Slip */}
 
                   {isServiceMode && services.length > 0 && (
                     <div className="space-y-1.5 group col-span-1 md:col-span-2">
@@ -861,8 +911,8 @@ function Kiosk() {
       </main>
 
       {/* Footer Features */}
-      <footer className="absolute bottom-6 w-full z-20 px-6 md:px-12 pointer-events-none flex flex-col items-center gap-4">
-        <div className="flex flex-wrap items-center justify-center gap-6 md:gap-12 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md rounded-full px-8 py-4 shadow-sm border border-white/50 dark:border-slate-800 pointer-events-auto">
+      <footer className="relative md:absolute md:bottom-6 w-full z-20 px-4 sm:px-6 md:px-12 py-6 md:py-0 pointer-events-none flex flex-col items-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-12 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md rounded-2xl md:rounded-full px-4 sm:px-8 py-3 sm:py-4 shadow-sm border border-white/50 dark:border-slate-800 pointer-events-auto text-center">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 rounded-full bg-brand/10 text-brand items-center justify-center"><ShieldCheck className="h-4 w-4" /></div>
             <div className="text-left leading-tight"><div className="text-xs font-bold text-foreground">Secure Access</div><div className="text-[9px] text-muted-foreground font-medium">Protected by advanced security</div></div>
@@ -986,7 +1036,7 @@ function KioskLockScreen({
       initial={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
       animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
       exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
-      className="w-full max-w-[480px] p-10 md:p-12 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.15)] rounded-[2.5rem] space-y-10 border border-white/40 dark:border-white/10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
+      className="w-full max-w-[480px] p-6 sm:p-10 md:p-12 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.15)] rounded-2xl sm:rounded-[2.5rem] space-y-6 sm:space-y-10 border border-white/40 dark:border-white/10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
     >
       <div className="text-center space-y-4">
         <div className="flex justify-center mb-6">
@@ -1002,9 +1052,9 @@ function KioskLockScreen({
             </motion.div>
           </div>
         </div>
-        <h2 className="font-display text-4xl font-bold tracking-tight text-foreground text-center">Kiosk Locked</h2>
+        <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-foreground text-center">Kiosk Locked</h2>
         <p className="text-sm font-medium text-muted-foreground/80 mt-2">
-          Please enter the PIN for <strong className="text-violet-600 dark:text-violet-400">{branchName}</strong><br />to unlock this terminal.
+          Please enter the PIN for <strong className="text-violet-600 dark:text-violet-400">{branchName}</strong> to unlock this terminal.
         </p>
       </div>
 
@@ -1016,12 +1066,13 @@ function KioskLockScreen({
         )}
         {kiosksList.length > 0 ? (
           <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Select Kiosk Terminal</Label>
-            <select value={selectedKioskId} onChange={(e) => setSelectedKioskId(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-medium text-sm outline-none appearance-none">
-              {kiosksList.map((k: any) => (
-                <option key={k.id} value={k.id}>{k.kiosk_identifier} {k.is_logged_in ? "(In Use)" : "(Available)"}</option>
-              ))}
-            </select>
+            <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Kiosk Terminal</Label>
+            <div className="w-full h-12 px-4 flex items-center justify-between rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-semibold text-sm">
+              <span>{kiosksList.find((k: any) => k.id === selectedKioskId)?.kiosk_identifier || kiosksList[0]?.kiosk_identifier || "None"}</span>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                Selected
+              </span>
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 font-semibold text-center">
@@ -1057,7 +1108,7 @@ function KotLockScreen({
       initial={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
       animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
       exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
-      className="w-full max-w-[480px] p-10 md:p-12 shadow-[0_30px_80px_-15px_rgba(16,185,129,0.2)] rounded-[2.5rem] space-y-10 border border-emerald-200/60 dark:border-emerald-800/30 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
+      className="w-full max-w-[480px] p-6 sm:p-10 md:p-12 shadow-[0_30px_80px_-15px_rgba(16,185,129,0.2)] rounded-2xl sm:rounded-[2.5rem] space-y-6 sm:space-y-10 border border-emerald-200/60 dark:border-emerald-800/30 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl"
     >
       <div className="text-center space-y-4">
         <div className="flex justify-center mb-6">
@@ -1078,9 +1129,9 @@ function KotLockScreen({
           <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3.5 py-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2">
             KOT Check-In
           </div>
-          <h2 className="font-display text-4xl font-bold tracking-tight text-foreground text-center">KOT Check-In Locked</h2>
+          <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-foreground text-center">KOT Check-In Locked</h2>
           <p className="text-sm font-medium text-muted-foreground/80 mt-2">
-            Enter the PIN to unlock <strong className="text-emerald-600 dark:text-emerald-400">SMS / WhatsApp</strong> token check-in<br />for <strong className="text-foreground">{branchName}</strong>.
+            Enter the PIN to unlock <strong className="text-emerald-600 dark:text-emerald-400">SMS / WhatsApp</strong> token check-in for <strong className="text-foreground">{branchName}</strong>.
           </p>
         </div>
       </div>
@@ -1156,7 +1207,7 @@ function KioskBackground({
       {/* 3. Pure CSS 3D Pedestals and Objects */}
 
       {/* Kiosk (Left) */}
-      <div className="absolute bottom-20 -left-12 w-48 opacity-40 md:bottom-28 md:left-4 md:w-56 md:opacity-80 lg:left-12 lg:w-72 lg:opacity-100 xl:bottom-32 xl:left-24 xl:w-80 transition-all duration-700 ease-out z-0 group">
+      <div className="hidden sm:block absolute bottom-20 -left-12 w-48 opacity-40 md:bottom-28 md:left-4 md:w-56 md:opacity-80 lg:left-12 lg:w-72 lg:opacity-100 xl:bottom-32 xl:left-24 xl:w-80 transition-all duration-700 ease-out z-0 group">
         {/* Neon Pedestal */}
         <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-[80%] h-8 md:h-12 rounded-[100%] bg-brand/30 shadow-[0_0_40px_rgba(139,92,246,0.5)] blur-md border border-brand/50 dark:bg-brand/50 dark:shadow-[0_0_60px_rgba(139,92,246,0.8)]" />
         {/* Flat/Soft Kiosk with pure transparent alpha (No mix-blend-mode needed!) */}

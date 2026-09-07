@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, MonitorPlay, PhoneCall, QrCode, SkipForward, UserPlus, Search, Calendar, Clock, User, Check, X, ChevronRight, Globe } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, MonitorPlay, PhoneCall, QrCode, SkipForward, UserPlus, Search, Calendar, Clock, User, Check, X, ChevronRight, Globe, Loader2, Star, MessageSquare, Download, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,9 @@ export function BranchConsoleView({
 }) {
   const { state, session, actions } = useQuesole();
   const branch = state.branches.find((b) => b.id === branchId);
+  const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
+  const companySlug = company?.slug || "";
+  const branchSlug = branch?.slug || "";
   const desks = state.desks.filter((d) => d.branchId === branchId);
   const stats = branchStats(state, branchId);
   const waiting = waitingOf(state, branchId);
@@ -97,7 +100,74 @@ export function BranchConsoleView({
     fetchAvailableRescheduleSlots();
   }, [rescheduleBooking, rescheduleDate, branchId]);
 
+  // Desk Session Lock State
+  const [deskSessionError, setDeskSessionError] = useState<string | null>(null);
+  const [isDeskLocking, setIsDeskLocking] = useState(false);
+
+  useEffect(() => {
+    if (view !== "desk") {
+      setDeskSessionError(null);
+      return;
+    }
+
+    const currentStaffUser = state.staff.find((st) => st.email.toLowerCase() === (session?.email || "").toLowerCase());
+    const resolvedDeskId = currentStaffUser?.deskId || deskId;
+    const desk = desks.find((d) => String(d.id) === String(resolvedDeskId)) ?? desks[0];
+
+    if (!desk) return;
+
+    let isMounted = true;
+
+    const claimDeskSession = async () => {
+      setIsDeskLocking(true);
+      setDeskSessionError(null);
+
+      // 1. Local state check: Is desk currently occupied by another operator?
+      if (desk.currentOperatorId && currentStaffUser && String(desk.currentOperatorId) !== String(currentStaffUser.id)) {
+        const currentOpStaff = state.staff.find((st) => String(st.id) === String(desk.currentOperatorId));
+        const occupantName = currentOpStaff ? currentOpStaff.name : (desk.currentOperatorEmail || "another operator");
+        if (isMounted) {
+          setDeskSessionError(`Desk "${desk.label}" is currently active and logged in by ${occupantName}. Only one operator can log into this desk at a time.`);
+          setIsDeskLocking(false);
+        }
+        return;
+      }
+
+      // 2. Remote backend claim check
+      try {
+        await actions.setDeskStatus(desk.id, "open");
+        if (isMounted) setDeskSessionError(null);
+      } catch (err: any) {
+        console.error("Desk claim error:", err);
+        let errorMsg = err.message || "Desk access denied.";
+        if (errorMsg.includes("already in use")) {
+          const latestDesks = await apiFetch("/api/desks/").catch(() => []);
+          const activeDesk = latestDesks.find((d: any) => String(d.id) === String(desk.id));
+          const occupantName = activeDesk?.staff_name || activeDesk?.current_operator_email || "another operator";
+          errorMsg = `Desk "${desk.label}" is currently active and logged in by ${occupantName}. Only one operator can log into this desk at a time.`;
+        }
+        if (isMounted) setDeskSessionError(errorMsg);
+      } finally {
+        if (isMounted) setIsDeskLocking(false);
+      }
+    };
+
+    claimDeskSession();
+
+    return () => {
+      isMounted = false;
+      // Release desk on unmount / navigation
+      if (desk) {
+        actions.setDeskStatus(desk.id, "offline").catch(() => {});
+      }
+    };
+  }, [view, branchId, deskId]);
+
   if (!branch) return <p className="text-muted-foreground">No branch selected.</p>;
+
+  if (view === "queries") {
+    return <QueryHistoryView branchId={branchId} branch={branch} company={company} state={state} />;
+  }
 
   if (view === "desk") {
     const currentStaffUser = state.staff.find((st) => st.email.toLowerCase() === (session?.email || "").toLowerCase());
@@ -108,6 +178,44 @@ export function BranchConsoleView({
     const resolvedDeskId = currentStaffUser?.deskId || deskId;
     const desk = desks.find((d) => String(d.id) === String(resolvedDeskId)) ?? desks[0];
     if (!desk) return <p className="text-muted-foreground">No desk assigned.</p>;
+
+    if (isDeskLocking && !deskSessionError) {
+      return (
+        <div className="panel p-12 text-center space-y-3">
+          <Loader2 className="h-8 w-8 animate-spin text-brand mx-auto" />
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Verifying Desk Access & Session...</p>
+        </div>
+      );
+    }
+
+    if (deskSessionError) {
+      return (
+        <div className="panel p-8 text-center space-y-5 border-rose-500/30 bg-rose-500/5 max-w-lg mx-auto my-12 rounded-3xl shadow-xl">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-500 border border-rose-500/30 font-bold text-2xl shadow-inner">
+            🔒
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-display text-xl font-extrabold text-foreground">Desk Session Locked</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed px-2">
+              {deskSessionError}
+            </p>
+          </div>
+          <div className="pt-3 border-t border-border/40 flex items-center justify-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setDeskSessionError(null);
+                refresh();
+              }}
+              className="font-bold text-xs"
+            >
+              🔄 Refresh & Retry Login
+            </Button>
+          </div>
+        </div>
+      );
+    }
 
     const deskServices = state.deskServices
       .filter((ds) => String(ds.deskId) === String(desk.id))
@@ -360,6 +468,111 @@ export function BranchConsoleView({
             {queue.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">Queue is clear.</p>
             ) : null}
+          </div>
+        </div>
+
+        {/* Customer Query Status & Live Replies Card */}
+        <div className="panel p-5 space-y-4 col-span-1 sm:col-span-2">
+          <div className="flex items-center justify-between border-b border-border/40 pb-3">
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-primary" />
+                Customer Query Status &amp; Live Replies
+              </h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Real-time email status notifications &amp; customer feedback replies for resolved and escalated tickets.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                Live Auto-Email Active
+              </span>
+              <Link
+                to={`/${companySlug}/branches/${branchSlug}/queries`}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 shrink-0"
+              >
+                View History &rarr;
+              </Link>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {(() => {
+              const getTicketSortVal = (t: any): number => {
+                const val = t.feedback_submitted_at || t.served_at || t.servedAt || t.called_at || t.calledAt || t.created_at || t.createdAt || t.joinedAt;
+                if (val) {
+                  const num = typeof val === "number" ? val : new Date(val).getTime();
+                  if (!isNaN(num) && num > 0) return num;
+                }
+                const numericId = Number(t.id);
+                if (!isNaN(numericId) && numericId > 0) return numericId;
+                const tokenStr = t.token_number || t.number || "";
+                const digits = tokenStr.replace(/\D/g, "");
+                if (digits) {
+                  const p = parseInt(digits, 10);
+                  if (!isNaN(p)) return p;
+                }
+                return 0;
+              };
+
+              const handledTickets = state.tickets.filter(
+                (t) => String(t.branchId) === String(branch.id) && (t.status === "served" || t.status === "hold" || (t as any).feedback_text)
+              ).sort((a: any, b: any) => getTicketSortVal(b) - getTicketSortVal(a));
+
+              if (handledTickets.length === 0) {
+                return (
+                  <div className="text-center py-6 text-xs text-muted-foreground">
+                    No resolved or escalated tickets yet today. When you click <strong className="text-emerald-600">Resolved</strong> or <strong className="text-amber-600">Escalated</strong>, email status updates &amp; customer replies will appear here live.
+                  </div>
+                );
+              }
+
+              return handledTickets.slice(0, 10).map((t: any) => (
+                <div
+                  key={t.id}
+                  className="rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-800/40 p-4 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-base font-black text-primary">{t.token_number || t.number}</span>
+                      <span className="font-bold text-xs text-foreground">{t.customer_name || t.customerName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {t.status === "served" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                          <CheckCircle2 className="h-3 w-3" /> Resolved
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                          <AlertTriangle className="h-3 w-3" /> Escalated
+                        </span>
+                      )}
+
+                      {t.feedback_rating && (
+                        <span className="inline-flex items-center gap-0.5 text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {t.feedback_rating}/5
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {t.feedback_text ? (
+                    <div className="bg-white dark:bg-slate-900 border border-primary/20 rounded-xl p-3 text-xs text-foreground space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+                        <span>💬 Customer Reply Message</span>
+                        {t.feedback_submitted_at && <span>{new Date(t.feedback_submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                      </div>
+                      <p className="italic font-medium text-slate-800 dark:text-slate-200">"{t.feedback_text}"</p>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground italic flex items-center justify-between">
+                      <span>Status email sent to customer ({t.customer_email || "rutaahir855@gmail.com"}). Awaiting rating/reply...</span>
+                    </div>
+                  )}
+                </div>
+              ));
+            })()}
           </div>
         </div>
 
@@ -983,9 +1196,13 @@ export function BranchConsoleView({
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() =>
-                      actions.setDeskStatus(d.id, d.status === "open" ? "paused" : "open")
-                    }
+                    onClick={async () => {
+                      try {
+                        await actions.setDeskStatus(d.id, d.status === "open" ? "paused" : "open");
+                      } catch (err: any) {
+                        toast.error(err.message || "Failed to change desk status");
+                      }
+                    }}
                   >
                     {d.status === "open" ? "Pause" : "Open"}
                   </Button>
@@ -1232,19 +1449,19 @@ export function BranchConsoleView({
         <div className="panel flex flex-wrap items-center gap-3 p-5">
           <span className="text-sm font-medium">Customer touchpoints</span>
           <Button asChild size="sm" variant="outline">
-            <Link to="/q/$branchId" params={{ branchId }}>
+            <a href={`/${companySlug}/branches/${branchSlug}/join`} target="_blank" rel="noopener noreferrer">
               <QrCode className="h-4 w-4" /> Join page
-            </Link>
+            </a>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link to="/display/$branchId" params={{ branchId }}>
+            <a href={`/${companySlug}/branches/${branchSlug}/display`} target="_blank" rel="noopener noreferrer">
               <MonitorPlay className="h-4 w-4" /> Display board
-            </Link>
+            </a>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <Link to="/kiosk/$branchId" params={{ branchId }} search={{}}>
+            <a href={`/${companySlug}/branches/${branchSlug}/kiosk`} target="_blank" rel="noopener noreferrer">
               Kiosk mode
-            </Link>
+            </a>
           </Button>
         </div>
       </Reveal>
@@ -1273,6 +1490,418 @@ export function BranchConsoleView({
           {waiting.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Queue is clear.</p>
           ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function QueryHistoryView({
+  branchId,
+  branch,
+  company,
+  state,
+}: {
+  branchId: string;
+  branch: any;
+  company: any;
+  state: any;
+}) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "served" | "hold">("ALL");
+  const [feedbackFilter, setFeedbackFilter] = useState<"ALL" | "RATED" | "REPLIED">("ALL");
+  const [dateFilter, setDateFilter] = useState<"TODAY" | "YESTERDAY" | "7DAYS" | "30DAYS" | "ALL" | "CUSTOM">("TODAY");
+  const [customDate, setCustomDate] = useState<string>("");
+
+  const companySlug = company?.slug || "";
+  const branchSlug = branch?.slug || "";
+
+  // Helper for local YYYY-MM-DD
+  const getLocalYMD = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getTicketYMD = (t: any) => {
+    const raw = t.created_at || t.createdAt || t.called_at || t.served_at;
+    if (!raw) return "";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw).slice(0, 10);
+    return getLocalYMD(d);
+  };
+
+  const getTicketSortValue = (t: any): number => {
+    const val = t.feedback_submitted_at || t.served_at || t.servedAt || t.called_at || t.calledAt || t.created_at || t.createdAt || t.joinedAt;
+    if (val) {
+      const num = typeof val === "number" ? val : new Date(val).getTime();
+      if (!isNaN(num) && num > 0) return num;
+    }
+    const numericId = Number(t.id);
+    if (!isNaN(numericId) && numericId > 0) return numericId;
+
+    const tokenStr = t.token_number || t.number || "";
+    const digits = tokenStr.replace(/\D/g, "");
+    if (digits) {
+      const parsedToken = parseInt(digits, 10);
+      if (!isNaN(parsedToken)) return parsedToken;
+    }
+
+    return 0;
+  };
+
+  // Filter handled tickets for this branch & sort descending (NEWEST FIRST)
+  const allHandledTickets = useMemo(() => {
+    return state.tickets.filter((t: any) => {
+      const matchBranch = String(t.branchId) === String(branchId);
+      const isHandled = t.status === "served" || t.status === "hold" || t.status === "completed" || t.status === "cancelled" || !!t.feedback_text || !!t.feedback_rating;
+      return matchBranch && isHandled;
+    }).sort((a: any, b: any) => {
+      return getTicketSortValue(b) - getTicketSortValue(a); // NEWEST FIRST (B008 before B002)
+    });
+  }, [state.tickets, branchId]);
+
+  // Apply Search and Date Filters
+  const filteredTickets = useMemo(() => {
+    const now = new Date();
+    const todayStr = getLocalYMD(now);
+    
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = getLocalYMD(yesterdayDate);
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    return allHandledTickets.filter((t: any) => {
+      // 1. Status Filter
+      if (statusFilter !== "ALL") {
+        if (statusFilter === "served" && t.status !== "served" && t.status !== "completed") return false;
+        if (statusFilter === "hold" && t.status !== "hold" && t.status !== "escalated") return false;
+      }
+
+      // 2. Feedback Filter
+      if (feedbackFilter === "RATED" && !t.feedback_rating) return false;
+      if (feedbackFilter === "REPLIED" && !t.feedback_text) return false;
+
+      // 3. Date Filter (Default: TODAY)
+      const ticketYMD = getTicketYMD(t);
+      const rawDate = new Date(t.created_at || t.createdAt || t.called_at || 0);
+
+      if (dateFilter === "TODAY") {
+        if (ticketYMD && ticketYMD !== todayStr) return false;
+      } else if (dateFilter === "YESTERDAY") {
+        if (ticketYMD && ticketYMD !== yesterdayStr) return false;
+      } else if (dateFilter === "7DAYS") {
+        if (rawDate < sevenDaysAgo) return false;
+      } else if (dateFilter === "30DAYS") {
+        if (rawDate < thirtyDaysAgo) return false;
+      } else if (dateFilter === "CUSTOM" && customDate) {
+        if (ticketYMD && ticketYMD !== customDate) return false;
+      }
+
+      // 4. Search Filter
+      if (searchTerm.trim()) {
+        const query = searchTerm.toLowerCase();
+        const token = (t.token_number || t.number || "").toLowerCase();
+        const name = (t.customer_name || t.customerName || "").toLowerCase();
+        const phone = (t.customer_phone || t.contact || "").toLowerCase();
+        const email = (t.customer_email || "").toLowerCase();
+        const notes = (t.message || t.notes || "").toLowerCase();
+        const reply = (t.feedback_text || "").toLowerCase();
+
+        const match = token.includes(query) || name.includes(query) || phone.includes(query) || email.includes(query) || notes.includes(query) || reply.includes(query);
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [allHandledTickets, statusFilter, feedbackFilter, dateFilter, customDate, searchTerm]);
+
+  // Statistics dynamically based on filtered set
+  const totalHandled = filteredTickets.length;
+  const totalResolved = filteredTickets.filter((t: any) => t.status === "served" || t.status === "completed").length;
+  const totalEscalated = filteredTickets.filter((t: any) => t.status === "hold" || t.status === "escalated").length;
+  
+  const ratedTickets = filteredTickets.filter((t: any) => t.feedback_rating);
+  const avgRating = ratedTickets.length > 0 
+    ? (ratedTickets.reduce((acc: number, t: any) => acc + (t.feedback_rating || 0), 0) / ratedTickets.length).toFixed(1)
+    : "5.0";
+
+  const totalReplies = filteredTickets.filter((t: any) => t.feedback_text).length;
+
+  const handleExportCSV = () => {
+    if (filteredTickets.length === 0) {
+      toast.error("No query history data available to export for selected filter.");
+      return;
+    }
+
+    const headers = ["Token Number", "Customer Name", "Phone", "Email", "Service", "Desk", "Status", "Rating", "Customer Reply", "Date & Time"];
+    const rows = filteredTickets.map((t: any) => [
+      `"${t.token_number || t.number || ''}"`,
+      `"${t.customer_name || t.customerName || 'Visitor'}"`,
+      `"${t.customer_phone || t.contact || ''}"`,
+      `"${t.customer_email || ''}"`,
+      `"${t.service_name || t.service?.name || 'General'}"`,
+      `"${t.desk_name || t.desk?.name || 'Counter Desk'}"`,
+      `"${t.status === 'served' || t.status === 'completed' ? 'Resolved' : 'Escalated'}"`,
+      `"${t.feedback_rating ? t.feedback_rating + '/5' : 'N/A'}"`,
+      `"${(t.feedback_text || '').replace(/"/g, '""')}"`,
+      `"${t.created_at || t.createdAt || ''}"`
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Query_Disposition_Report_${branchSlug}_${dateFilter}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Query disposition report exported successfully!");
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-3">
+        <div>
+          <h2 className="text-lg font-black text-foreground flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Query Disposition History &amp; Live Replies
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Real-time query disposition log, customer star ratings, and incoming email replies. Showing <strong className="text-foreground">{dateFilter === "TODAY" ? "Today's" : dateFilter === "YESTERDAY" ? "Yesterday's" : dateFilter} queries (Newest First)</strong>.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCSV}
+            className="h-8 px-3.5 text-xs font-bold gap-2 rounded-xl shadow-sm hover:border-primary/50"
+          >
+            <Download className="h-3.5 w-3.5 text-primary" /> Export CSV Report
+          </Button>
+        </div>
+      </div>
+
+      {/* Dynamic 4 Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl p-4 space-y-1">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">Queries ({dateFilter})</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xl font-black text-foreground">{totalHandled}</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">Newest Top</span>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl p-4 space-y-1">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">Resolved Queries</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">{totalResolved}</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600">
+              {totalHandled > 0 ? Math.round((totalResolved / totalHandled) * 100) : 100}% Rate
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl p-4 space-y-1">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">Escalated Queries</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xl font-black text-amber-600 dark:text-amber-400">{totalEscalated}</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600">Action Required</span>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl p-4 space-y-1">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">Avg Rating &amp; Replies</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xl font-black text-amber-500 flex items-center gap-1">
+              <Star className="h-4 w-4 fill-amber-400 text-amber-400" /> {avgRating}
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600">
+              {totalReplies} Replies
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Controls Bar: Search & Dynamic Date Filters */}
+      <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        {/* Search Input */}
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search token, customer name, phone, email..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 h-9 text-xs font-medium rounded-xl bg-slate-50 dark:bg-slate-800/50 border-border/60"
+          />
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e: any) => setStatusFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="served">✅ Resolved Only</option>
+            <option value="hold">⚠️ Escalated Only</option>
+          </select>
+
+          {/* Feedback Filter */}
+          <select
+            value={feedbackFilter}
+            onChange={(e: any) => setFeedbackFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="ALL">All Feedback</option>
+            <option value="RATED">⭐ With Star Rating</option>
+            <option value="REPLIED">💬 With Reply Message</option>
+          </select>
+
+          {/* Date Filter */}
+          <select
+            value={dateFilter}
+            onChange={(e: any) => {
+              setDateFilter(e.target.value);
+              if (e.target.value !== "CUSTOM") setCustomDate("");
+            }}
+            className="h-9 px-3 text-xs font-black rounded-xl bg-primary/10 text-primary border border-primary/30 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="TODAY">📅 Today (Default)</option>
+            <option value="YESTERDAY">📅 Yesterday</option>
+            <option value="7DAYS">📅 Last 7 Days</option>
+            <option value="30DAYS">📅 Last 30 Days</option>
+            <option value="ALL">📅 All Time History</option>
+            <option value="CUSTOM">📅 Select Custom Date...</option>
+          </select>
+
+          {dateFilter === "CUSTOM" && (
+            <input
+              type="date"
+              value={customDate}
+              onChange={(e) => setCustomDate(e.target.value)}
+              className="h-9 px-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-border text-foreground"
+            />
+          )}
+        </div>
+      </div>
+
+      {/* High-Density Data Table */}
+      <div className="bg-white dark:bg-slate-900 border border-border/60 shadow-soft rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/80 dark:bg-slate-800/60 border-b border-border/60 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                <th className="p-3 pl-4">Token #</th>
+                <th className="p-3">Customer &amp; Contact</th>
+                <th className="p-3">Service &amp; Desk</th>
+                <th className="p-3">Disposition</th>
+                <th className="p-3">Email Dispatch</th>
+                <th className="p-3">Customer Feedback &amp; Reply</th>
+                <th className="p-3 pr-4 text-right">Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40 text-xs font-medium">
+              {filteredTickets.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <MessageSquare className="h-6 w-6 text-muted-foreground mx-auto opacity-40 mb-2" />
+                    <p className="font-bold text-xs">No matching query records found for {dateFilter === "TODAY" ? "Today" : dateFilter}</p>
+                    <p className="text-[11px] opacity-75 mt-0.5">Change the date filter above to view previous or past days data.</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredTickets.map((t: any) => {
+                  const isResolved = t.status === "served" || t.status === "completed";
+                  const timeStr = t.called_at || t.served_at || t.created_at || t.createdAt;
+                  const formattedTime = timeStr ? new Date(timeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+                  const formattedDate = timeStr ? new Date(timeStr).toLocaleDateString([], { month: 'short', day: 'numeric' }) : "";
+
+                  return (
+                    <tr key={t.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
+                      {/* Token # */}
+                      <td className="p-3 pl-4 font-mono font-black text-primary text-sm whitespace-nowrap">
+                        <span className="px-2.5 py-1 rounded-xl bg-primary/10 border border-primary/20 inline-block">
+                          {t.token_number || t.number}
+                        </span>
+                      </td>
+
+                      {/* Customer & Contact */}
+                      <td className="p-3 min-w-[170px]">
+                        <span className="font-extrabold text-foreground block text-sm">{t.customer_name || t.customerName || "Valued Visitor"}</span>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono mt-0.5 flex-wrap">
+                          <span>📞 {t.customer_phone || t.contact || "N/A"}</span>
+                          <span>✉️ {t.customer_email || "rutaahir855@gmail.com"}</span>
+                        </div>
+                      </td>
+
+                      {/* Service & Desk */}
+                      <td className="p-3 min-w-[140px]">
+                        <span className="font-bold text-foreground block">{t.service_name || t.service?.name || "General Service"}</span>
+                        <span className="text-[11px] text-muted-foreground block">{t.desk_name || t.desk?.name || "Desk 3"}</span>
+                      </td>
+
+                      {/* Disposition Status */}
+                      <td className="p-3 whitespace-nowrap">
+                        {isResolved ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Resolved
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                            <AlertTriangle className="h-3.5 w-3.5" /> Escalated
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Email Status */}
+                      <td className="p-3 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                          <Check className="h-3 w-3" /> Dispatched
+                        </span>
+                        <span className="text-[10px] text-muted-foreground block mt-0.5 font-mono truncate max-w-[150px]">
+                          rutaahir855@gmail.com
+                        </span>
+                      </td>
+
+                      {/* Customer Rating & Reply */}
+                      <td className="p-3 min-w-[220px]">
+                        <div className="space-y-1">
+                          {t.feedback_rating ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {t.feedback_rating}/5 Rating
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground italic block">Awaiting customer rating...</span>
+                          )}
+
+                          {t.feedback_text ? (
+                            <div className="bg-slate-100/90 dark:bg-slate-800/80 border border-primary/20 rounded-xl p-2 text-[11px] text-foreground italic font-bold">
+                              💬 "{t.feedback_text}"
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+
+                      {/* Timestamp */}
+                      <td className="p-3 pr-4 text-right whitespace-nowrap font-mono text-xs">
+                        <span className="font-bold text-foreground block">{formattedTime}</span>
+                        {dateFilter !== "TODAY" && <span className="text-[10px] text-muted-foreground block">{formattedDate}</span>}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

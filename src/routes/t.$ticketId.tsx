@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { CheckCircle2, MapPin, Timer, Users, Loader2 } from "lucide-react";
+import { CheckCircle2, MapPin, Timer, Users, Loader2, Clock } from "lucide-react";
 import { Logo } from "@/components/site/logo";
 import { useQuesole, positionOf } from "@/lib/quesole/store";
 import { CountUp, FlipNumber, motion } from "@/components/quesole/motion";
@@ -106,18 +106,32 @@ function TokenPage() {
   }
 
   const { ticket, ahead, eta, service } = info;
-  const branch = state.branches.find((b) => String(b.id) === String(ticket.branchId)) || { name: remoteInfo?.branchName || "Branch" };
+  const branch = state.branches.find((b) => String(b.id) === String(ticket.branchId)) || { name: remoteInfo?.branchName || "Branch", companyId: remoteInfo?.companyId };
   const desk = state.desks.find((d) => String(d.id) === String(ticket.deskId)) || (remoteInfo?.deskLabel ? { label: remoteInfo.deskLabel } : null);
   const isNow = ticket.status === "serving" || ticket.status === "called";
   const isDone = ticket.status === "served";
   const progress = isDone ? 100 : isNow ? 92 : Math.max(8, 92 - ahead * 12);
+  const estWait = eta;
+  const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
 
   return (
-    <div className="ambient min-h-screen bg-background px-5 py-8">
-      <div className="mx-auto max-w-lg">
-        <Link to="/" className="mb-6 inline-flex items-center gap-2.5">
-          <Logo size={32} />
-        </Link>
+    <div className="ambient min-h-screen bg-background px-5 py-8 flex flex-col justify-between">
+      <div className="mx-auto max-w-lg w-full">
+        <div className="mb-6 flex items-center justify-between">
+          {company?.logoUrl ? (
+            <img src={company.logoUrl} alt={company?.name || "Company Logo"} className="h-8 w-auto max-w-[160px] object-contain" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-700 text-white flex items-center justify-center font-black text-xs shadow-md shadow-indigo-600/20">
+                {(company?.name || "C").charAt(0).toUpperCase()}
+              </div>
+              <span className="text-sm font-black text-foreground tracking-tight">
+                {company?.name || "Company Queue"}
+              </span>
+            </div>
+          )}
+          <span className="text-xs font-bold text-muted-foreground bg-accent px-2.5 py-1 rounded-full">{branch?.name}</span>
+        </div>
 
         <motion.div
           initial={{ opacity: 0, y: 18 }}
@@ -141,42 +155,38 @@ function TokenPage() {
             </div>
           </div>
 
-          <div className="grid gap-5 p-6">
-            <div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <motion.div
-                  className="h-full bg-brand"
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+          <div className="p-6 space-y-6">
+            {!isDone && (
+              <div className="grid grid-cols-3 gap-3">
+                <Stat icon={Users} label="Ahead" value={ahead} />
+                <Stat icon={Clock} label="Est. Wait" value={`~${estWait}m`} />
+                <Stat icon={MapPin} label="Counter" value={desk?.label || "TBD"} />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Progress</span>
+                <span className="font-semibold text-foreground">{Math.round(progress)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-accent overflow-hidden">
+                <div
+                  className="h-full bg-brand rounded-full transition-all duration-500"
+                  style={{ width: `${progress}%` }}
                 />
               </div>
-              <div className="mt-2 flex justify-between text-[11px] uppercase tracking-wider text-muted-foreground">
-                <span>Joined</span>
-                <span>Called</span>
-                <span>Served</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <Stat icon={Users} label="Ahead of you" value={<CountUp value={ahead} />} />
-              <Stat icon={Timer} label="Est. wait" value={<CountUp value={eta} suffix="m" />} />
-              <Stat
-                icon={MapPin}
-                label="Counter"
-                value={desk ? desk.label.replace("Counter ", "") : "—"}
-              />
             </div>
 
             {isNow ? (
-              <motion.div
-                initial={{ scale: 0.96, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-coral/12 px-4 py-4 text-sm font-semibold text-coral"
-              >
-                <CheckCircle2 className="h-4 w-4" /> Please proceed to {desk?.label ?? "the counter"}
-              </motion.div>
+              <div className="rounded-2xl bg-coral/10 border border-coral/30 p-4 text-coral font-medium text-xs">
+                ⚡ Please proceed to <strong className="text-foreground">{desk?.label || "the counter"}</strong> immediately.
+              </div>
+            ) : isDone ? (
+              <div className="rounded-2xl bg-emerald/10 border border-emerald/30 p-4 text-emerald font-medium text-xs">
+                ✓ Thank you for visiting! Your service has been completed.
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Keep this page open — your position updates automatically. We'll highlight the screen
                 when it's your turn.
               </p>
@@ -189,6 +199,11 @@ function TokenPage() {
           </div>
         </motion.div>
       </div>
+
+      <footer className="py-6 text-center text-xs text-muted-foreground/70 flex items-center justify-center gap-1.5 border-t border-border/40 mt-12 bg-background/50">
+        <span>Powered by</span>
+        <span className="font-extrabold tracking-tight text-foreground">Quesoles</span>
+      </footer>
     </div>
   );
 }

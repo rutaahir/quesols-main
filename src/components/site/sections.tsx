@@ -1003,7 +1003,7 @@ const METHODS = [
     n: "Method 03",
     title: "Now Serving display board",
     body: "A full-screen board for the TV in the hall, with airport-style flips on every token change.",
-    to: "/display/b_amd_central",
+    to: "/services",
     cta: "Open display board",
     icon: MonitorPlay,
   },

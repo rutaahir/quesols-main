@@ -1,6 +1,14 @@
+import re
+from django.core.exceptions import ValidationError
 from django.db import models
 from core.models import BaseModel
 from core.managers import TenantManager
+
+def validate_branch_slug(value):
+    if not value:
+        return
+    if not re.match(r'^[a-z0-9]+(?:-[a-z0-9]+)*$', value):
+        raise ValidationError("Slug must be lowercase and contain only letters, numbers, and hyphens.")
 
 class Branch(BaseModel):
     STATUS_CHOICES = [
@@ -10,7 +18,7 @@ class Branch(BaseModel):
 
     company = models.ForeignKey("companies.Company", on_delete=models.CASCADE, related_name="branches")
     name = models.CharField(max_length=255)
-    slug = models.CharField(max_length=255)
+    slug = models.CharField(max_length=255, validators=[validate_branch_slug])
     address = models.TextField()
     city = models.CharField(max_length=100)
     geo_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -50,6 +58,26 @@ class Branch(BaseModel):
         if self.kiosk_password_hash and not self.kiosk_password_hash.startswith("pbkdf2_sha256$"):
             from django.contrib.auth.hashers import make_password
             self.kiosk_password_hash = make_password(self.kiosk_password_hash)
+
+        if not self.slug:
+            from django.utils.text import slugify
+            base_slug = slugify(self.name)
+            if not base_slug:
+                base_slug = "branch"
+            slug = base_slug
+            counter = 1
+            while Branch.all_objects.filter(company=self.company, slug=slug).exclude(id=self.id).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        else:
+            self.slug = self.slug.lower().strip()
+            validate_branch_slug(self.slug)
+            
+            # If slug was manually edited, verify it is unique within this company
+            if Branch.all_objects.filter(company=self.company, slug=self.slug).exclude(id=self.id).exists():
+                raise ValidationError(f"Branch slug '{self.slug}' is already taken for this company.")
+
         super().save(*args, **kwargs)
 
     def __str__(self):
