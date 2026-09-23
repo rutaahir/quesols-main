@@ -43,8 +43,9 @@ class OnlineBookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = OnlineBooking
         fields = [
-            "id", "branch", "service", "customer_name", "customer_phone",
-            "customer_email", "notes", "date", "slot_time", "booking_reference",
-            "status", "created_at", "updated_at"
+            "id", "branch", "service", "desk", "customer_name", "customer_phone",
+            "customer_email", "customer_photo", "notes", "date", "slot_time", "booking_reference",
+            "status", "escalated_notes", "internal_notes", "feedback_rating", "feedback_text",
+            "feedback_submitted_at", "created_at", "updated_at"
         ]
         read_only_fields = ["id", "booking_reference", "created_at", "updated_at"]

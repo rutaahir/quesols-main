@@ -17,7 +17,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from core.permissions import IsBranchAdmin, IsDeskStaff, IsBranchAdminOnly
 from core.throttles import PublicBurstThrottle, PublicSubmitThrottle
 from core.honeypot import validate_honeypot
-from queuing.models import Desk, Service, DeskService, UserService, DeskStaffAssignment, QueueMethod, QrCode, Ticket, TicketNote, KotMessageTemplate, KotNotificationLog
+from queuing.models import Desk, Service, DeskService, UserService, DeskStaffAssignment, QueueMethod, QrCode, Ticket, TicketNote, KotMessageTemplate, KotNotificationLog, OperatorAttendance, OperatorBreakLog
 from queuing.serializers import (
     DeskSerializer,
     ServiceSerializer,
@@ -29,7 +29,9 @@ from queuing.serializers import (
     TicketSerializer,
     TicketNoteSerializer,
     KotMessageTemplateSerializer,
-    KotNotificationLogSerializer
+    KotNotificationLogSerializer,
+    OperatorAttendanceSerializer,
+    OperatorBreakLogSerializer
 )
 from audit.utils import log_audit
 
@@ -48,9 +50,8 @@ def broadcast_queue_update(branch_id, ticket):
         "data": TicketSerializer(ticket).data
     }
     
-    # 2. Public Payload (PII Excluded)
+    # 2. Public Payload (Include customer_name for live display boards)
     public_data = TicketSerializer(ticket).data.copy()
-    public_data.pop("customer_name", None)
     public_data.pop("customer_phone", None)
     public_data.pop("message", None)
     public_data.pop("note", None)
@@ -162,17 +163,45 @@ class DeskViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         
         status = self.request.data.get("status")
-        if status == "open":
+        
+        # Check if the desk operator has an active "on_break" attendance session
+        op_user = instance.current_operator or user
+        active_break = None
+        if op_user and op_user.is_authenticated:
+            active_break = OperatorAttendance.objects.filter(
+                user=op_user,
+                branch=instance.branch,
+                status="on_break"
+            ).first()
+
+        if active_break and status == "open":
+            # Operator is actively on break; preserve break status in DB!
+            serializer.validated_data["status"] = "break"
+        elif status == "open":
             # Check if desk is already open by someone else
             if instance.current_operator and instance.current_operator != user:
                 op_name = instance.current_operator.get_full_name() or instance.current_operator.email
                 raise ValidationError(f"Desk '{instance.name}' is currently active and logged in by operator '{op_name}'. Only 1 operator can log into this desk at a time. Please wait for '{op_name}' to log out before opening this desk.")
             serializer.validated_data["current_operator"] = user
-        elif status in ["paused", "offline"]:
-            if instance.current_operator == user:
+        elif status == "offline":
+            if instance.current_operator == user and not active_break:
                 serializer.validated_data["current_operator"] = None
 
-        serializer.save()
+        updated_desk = serializer.save()
+
+        # Broadcast desk status update over WebSockets to public display screens & staff
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            payload = {
+                "type": "queue.update",
+                "event": "desk_updated",
+                "data": DeskSerializer(updated_desk).data
+            }
+            try:
+                async_to_sync(channel_layer.group_send)(f"branch_{updated_desk.branch.id}_staff", payload)
+                async_to_sync(channel_layer.group_send)(f"branch_{updated_desk.branch.id}_public", payload)
+            except Exception as ws_err:
+                pass
 
     def perform_destroy(self, instance):
         log_audit(
@@ -586,6 +615,7 @@ class PublicJoinQueueView(APIView):
         service_id = request.data.get("service") or request.data.get("service_id")
         user_lat = request.data.get("lat") or request.data.get("user_lat")
         user_lng = request.data.get("lng") or request.data.get("user_lng")
+        customer_photo = request.data.get("customer_photo") or request.data.get("photo") or ""
         
         if not branch_id or not name or not contact:
             return Response({"error": "Branch, customer name, and contact phone are required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -614,6 +644,18 @@ class PublicJoinQueueView(APIView):
 
         # Check backend entitlement
         is_method_enabled = QueueMethod.objects.filter(branch_id=branch_id, method=target_method, is_enabled=True).exists()
+        if not is_method_enabled:
+            qm, _ = QueueMethod.objects.get_or_create(
+                company=branch.company,
+                branch=branch,
+                method=target_method,
+                defaults={"is_enabled": True, "config": {"single_queue_enabled": True, "max_daily_tickets": 150}}
+            )
+            if not qm.is_enabled:
+                qm.is_enabled = True
+                qm.save()
+            is_method_enabled = True
+
         if not is_method_enabled:
             return Response(
                 {"error": f"The requested channel '{channel_param}' is not enabled or purchased on your current plan."},
@@ -719,6 +761,7 @@ class PublicJoinQueueView(APIView):
                     customer_name=name,
                     customer_email=email if email else None,
                     customer_phone=contact,
+                    customer_photo=customer_photo,
                     message=message,
                     source=channel_param,
                     channel=channel_param,
@@ -735,7 +778,7 @@ class PublicJoinQueueView(APIView):
             assign_predicted_desk_for_ticket(ticket)
             ticket.save(update_fields=["predicted_desk"])
 
-            if ticket.customer_email:
+            if ticket.customer_email and channel_param not in ["sms", "whatsapp"] and method not in ["3", "4"]:
                 try:
                     # Calculate queue position & ETA
                     position = Ticket.objects.filter(
@@ -780,7 +823,7 @@ class PublicJoinQueueView(APIView):
                 except Exception:
                     pass
 
-            if ticket.customer_phone and method in ["3", "4"]:
+            if ticket.customer_phone and (method in ["3", "4"] or channel_param in ["sms", "whatsapp"]):
                 try:
                     # Calculate queue position & ETA
                     position = Ticket.objects.filter(
@@ -825,7 +868,7 @@ class PublicJoinQueueView(APIView):
                             res = res.replace("{" + k + "}", str(v))
                         return res
 
-                    if method == "3":
+                    if method == "3" or channel_param == "sms":
                         # SMS
                         template = KotMessageTemplate.objects.filter(branch=ticket.branch, channel="sms").first()
                         if template and template.template_text.strip():
@@ -862,24 +905,33 @@ class PublicJoinQueueView(APIView):
                                 error_message=error_msg
                             )
 
-                    elif method == "4":
+                    elif method == "4" or channel_param == "whatsapp":
                         # WhatsApp
                         template = KotMessageTemplate.objects.filter(branch=ticket.branch, channel="whatsapp").first()
                         if template and template.template_text.strip():
                             body = format_template_safely(template.template_text, context)
                         else:
                             body = (
-                                f"Hello {ticket.customer_name}! Here is your digital ticket for {ticket.branch.name}.\n"
-                                f"Token: {ticket.token_number}\n"
-                                f"Service: {service_name}\n"
-                                f"People ahead: {position}\n"
-                                f"Est wait: ~{int(eta)} mins.\n"
-                                f"Quesole Team"
+                                f"🎫 *Quesole Digital Token*\n\n"
+                                f"Hello {ticket.customer_name}!\n"
+                                f"Your queue token for *{ticket.branch.name}* is confirmed.\n\n"
+                                f"• *Token Number:* {ticket.token_number}\n"
+                                f"• *Service:* {service_name}\n"
+                                f"• *Assigned Counter:* {desk_name}\n"
+                                f"• *People Ahead:* {position}\n"
+                                f"• *Estimated Wait:* ~{int(eta)} mins\n\n"
+                                f"📱 *Track Live Queue:* {tracking_link}\n\n"
+                                f"Thank you for choosing {ticket.company.name}!"
                             )
 
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.warning(f"[WHATSAPP MOCK BUSINESS API] Sent to {ticket.customer_phone}: {body}")
+                        log_status = "sent"
+                        error_msg = None
+                        try:
+                            from notifications.tasks import send_whatsapp_notification
+                            send_whatsapp_notification(ticket.customer_phone, body)
+                        except Exception as wa_err:
+                            log_status = "failed"
+                            error_msg = str(wa_err)
 
                         KotNotificationLog.objects.create(
                             company=ticket.company,
@@ -888,14 +940,27 @@ class PublicJoinQueueView(APIView):
                             channel="whatsapp",
                             recipient=ticket.customer_phone or "",
                             message_body=body,
-                            status="sent_mock"
+                            status=log_status,
+                            error_message=error_msg
                         )
                 except Exception as alert_err:
                     import logging
                     logger = logging.getLogger(__name__)
                     logger.error(f"Failed to send ticket delivery alert: {alert_err}")
             
-            return Response(TicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
+            resp_data = TicketSerializer(ticket).data
+            if method == "4" or channel_param == "whatsapp":
+                import urllib.parse
+                clean_phone = (ticket.customer_phone or "").replace(" ", "").replace("-", "")
+                if not clean_phone.startswith("+") and len(clean_phone) == 10:
+                    clean_phone = f"+91{clean_phone}"
+                msg_text = body if 'body' in locals() else f"🎫 *Quesole Digital Token*\n\nHello {ticket.customer_name}!\nYour queue token for *{ticket.branch.name}* is {ticket.token_number}."
+                encoded_msg = urllib.parse.quote(msg_text)
+                resp_data["whatsapp_url"] = f"https://api.whatsapp.com/send?phone={clean_phone.lstrip('+')}&text={encoded_msg}"
+                resp_data["wa_me_url"] = f"https://wa.me/{clean_phone.lstrip('+')}?text={encoded_msg}"
+                resp_data["whatsapp_body"] = msg_text
+
+            return Response(resp_data, status=status.HTTP_201_CREATED)
             
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -974,6 +1039,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         
         now = timezone.now()
+        from datetime import timedelta
+        cutoff = now - timedelta(hours=24)
+        Ticket.objects.filter(status__in=["waiting", "called"], created_at__lt=cutoff).update(status="cancelled")
+
         qs = Ticket.objects.annotate(
             priority_time=Coalesce('scheduled_for', 'created_at')
         )
@@ -982,6 +1051,26 @@ class TicketViewSet(viewsets.ModelViewSet):
         if user.role == "super_admin":
             return qs.order_by("priority_time")
         return qs.filter(company=user.company).order_by("priority_time")
+
+    def perform_update(self, serializer):
+        note = self.request.data.get("note") or self.request.data.get("notes") or self.request.data.get("message")
+        if note is not None:
+            ticket = serializer.save(message=note)
+        else:
+            ticket = serializer.save()
+
+        if note and self.request.user and self.request.user.is_authenticated:
+            try:
+                TicketNote.objects.create(
+                    ticket=ticket,
+                    user=self.request.user,
+                    note=note
+                )
+            except Exception:
+                pass
+
+        if ticket.branch:
+            broadcast_queue_update(ticket.branch.id, ticket)
 
     @action(detail=False, methods=["post"], url_path="call-next")
     def call_next(self, request):
@@ -1087,9 +1176,20 @@ class TicketViewSet(viewsets.ModelViewSet):
 
                 broadcast_queue_update(ticket.branch.id, ticket)
 
-                # Send email to customer, operator, admin, rutaahir855@gmail.com & socialbuzz31@gmail.com on Resolved or Escalated
                 if act in ["complete", "hold", "escalate"]:
                     notes = request.data.get("notes") or request.data.get("note") or ""
+                    if notes:
+                        ticket.message = notes
+                        ticket.save(update_fields=["message"])
+                        if request.user and request.user.is_authenticated:
+                            try:
+                                TicketNote.objects.create(
+                                    ticket=ticket,
+                                    user=request.user,
+                                    note=notes
+                                )
+                            except Exception:
+                                pass
                     disposition = "resolved" if act == "complete" else "escalated"
                     t_id = ticket.id
                     a_id = request.user.id if request.user and request.user.is_authenticated else None
@@ -1116,9 +1216,37 @@ class PublicTicketFeedbackView(APIView):
 
     def get(self, request, tracking_code):
         ticket = Ticket.all_objects.filter(tracking_code=tracking_code).first()
-        if not ticket:
+        if not ticket and str(tracking_code).isdigit():
             ticket = Ticket.all_objects.filter(id=tracking_code).first()
         if not ticket:
+            from appointments.models import OnlineBooking
+            booking = OnlineBooking.objects.filter(booking_reference=tracking_code).first()
+            if not booking and str(tracking_code).isdigit():
+                booking = OnlineBooking.objects.filter(id=tracking_code).first()
+            if booking:
+                desk_name = booking.desk.name if booking.desk else "Appointment Counter"
+                branch_name = booking.branch.name if booking.branch else "Branch Office"
+                service_name = booking.service.name if booking.service else "General Service"
+                company = booking.branch.company if (booking.branch and booking.branch.company) else None
+                company_name = company.name if company else "Company"
+                company_logo = getattr(company, "logo_url", None) if company else None
+                return Response({
+                    "id": booking.id,
+                    "tracking_code": booking.booking_reference,
+                    "token_number": booking.booking_reference,
+                    "customer_name": booking.customer_name,
+                    "customer_email": booking.customer_email or "",
+                    "status": booking.status,
+                    "desk_name": desk_name,
+                    "branch_name": branch_name,
+                    "company_name": company_name,
+                    "company_logo": company_logo,
+                    "service_name": service_name,
+                    "feedback_rating": booking.feedback_rating,
+                    "feedback_text": booking.feedback_text,
+                    "feedback_submitted_at": booking.feedback_submitted_at,
+                    "is_appointment": True,
+                })
             return Response({"error": "Ticket not found"}, status=status.HTTP_404_NOT_FOUND)
 
         desk_name = ticket.desk.name if ticket.desk else "Counter Desk"
@@ -1146,9 +1274,30 @@ class PublicTicketFeedbackView(APIView):
 
     def post(self, request, tracking_code):
         ticket = Ticket.all_objects.filter(tracking_code=tracking_code).first()
-        if not ticket:
+        if not ticket and str(tracking_code).isdigit():
             ticket = Ticket.all_objects.filter(id=tracking_code).first()
+        
+        rating = request.data.get("rating") or request.data.get("feedback_rating")
+        feedback_text = request.data.get("feedback_text") or request.data.get("message") or request.data.get("reply") or ""
+
         if not ticket:
+            from appointments.models import OnlineBooking
+            booking = OnlineBooking.objects.filter(booking_reference=tracking_code).first()
+            if not booking and str(tracking_code).isdigit():
+                booking = OnlineBooking.objects.filter(id=tracking_code).first()
+            if booking:
+                if rating:
+                    booking.feedback_rating = int(rating)
+                booking.feedback_text = str(feedback_text).strip()
+                booking.feedback_submitted_at = timezone.now()
+                booking.save(update_fields=["feedback_rating", "feedback_text", "feedback_submitted_at"])
+                return Response({
+                    "message": "Feedback submitted successfully for appointment!",
+                    "feedback_rating": booking.feedback_rating,
+                    "feedback_text": booking.feedback_text,
+                    "feedback_submitted_at": booking.feedback_submitted_at
+                }, status=status.HTTP_200_OK)
+
             return Response({"error": "Ticket not found"}, status=status.HTTP_404_NOT_FOUND)
 
         rating = request.data.get("rating") or request.data.get("feedback_rating")
@@ -1231,23 +1380,63 @@ class PublicTicketDetailView(APIView):
         ).first()
 
         if not ticket:
+            from appointments.models import OnlineBooking
+            booking = OnlineBooking.all_objects.filter(
+                Q(booking_reference=ticket_id) | Q(id=ticket_id if str(ticket_id).isdigit() else -1)
+            ).first()
+
+            if booking:
+                slot_str = str(booking.slot_time)[:5] if booking.slot_time else ""
+                date_str = str(booking.date) if booking.date else ""
+                return Response({
+                    "id": str(booking.id),
+                    "tracking_code": booking.booking_reference,
+                    "branchId": str(booking.branch.id) if booking.branch else "",
+                    "companyId": str(booking.branch.company.id) if (booking.branch and booking.branch.company) else "",
+                    "serviceId": str(booking.service.id) if booking.service else "",
+                    "serviceName": booking.service.name if booking.service else "General Service",
+                    "branchName": booking.branch.name if booking.branch else "",
+                    "deskId": None,
+                    "deskLabel": "Appointment Counter",
+                    "number": booking.booking_reference,
+                    "customerName": booking.customer_name or "Valued Customer",
+                    "customerPhoto": booking.customer_photo or "",
+                    "customer_photo": booking.customer_photo or "",
+                    "contact": booking.customer_phone or "",
+                    "note": f"Appointment: {date_str} @ {slot_str}".strip(),
+                    "status": booking.status or "confirmed",
+                    "ahead": 0,
+                    "eta": 0,
+                    "joinedAt": int(booking.created_at.timestamp() * 1000) if booking.created_at else 0,
+                    "calledAt": None,
+                    "servedAt": None,
+                    "isAppointment": True,
+                    "appointmentDate": date_str,
+                    "slotTime": slot_str,
+                }, status=status.HTTP_200_OK)
+
             return Response({"error": "Ticket not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        ahead = Ticket.objects.filter(
-            branch=ticket.branch,
-            service=ticket.service,
-            status="waiting",
-            created_at__lt=ticket.created_at
-        ).count()
+        if ticket.branch and ticket.created_at:
+            ahead_kwargs = {
+                "branch": ticket.branch,
+                "status": "waiting",
+                "created_at__lt": ticket.created_at
+            }
+            if ticket.service:
+                ahead_kwargs["service"] = ticket.service
+            ahead = Ticket.objects.filter(**ahead_kwargs).count()
+        else:
+            ahead = 0
 
-        avg_mins = ticket.service.est_service_minutes if ticket.service else 15
+        avg_mins = ticket.service.est_service_minutes if (ticket.service and ticket.service.est_service_minutes) else 15
         eta = round(ahead * avg_mins * 0.8) + (0 if ticket.status == "serving" else 2)
 
         return Response({
             "id": str(ticket.id),
             "tracking_code": ticket.tracking_code,
-            "branchId": str(ticket.branch.id),
-            "companyId": str(ticket.company.id) if ticket.company else "",
+            "branchId": str(ticket.branch.id) if ticket.branch else "",
+            "companyId": str(ticket.company.id) if ticket.company else (str(ticket.branch.company.id) if ticket.branch and ticket.branch.company else ""),
             "serviceId": str(ticket.service.id) if ticket.service else "",
             "serviceName": ticket.service.name if ticket.service else "General Service",
             "branchName": ticket.branch.name if ticket.branch else "",
@@ -1255,6 +1444,8 @@ class PublicTicketDetailView(APIView):
             "deskLabel": ticket.desk.name if ticket.desk else None,
             "number": ticket.token_number,
             "customerName": ticket.customer_name or "Guest",
+            "customerPhoto": ticket.customer_photo or "",
+            "customer_photo": ticket.customer_photo or "",
             "contact": ticket.customer_phone or "",
             "note": ticket.message or "",
             "status": ticket.status,
@@ -1358,7 +1549,7 @@ class PublicDisplayView(APIView):
         clean_tickets = []
         for t in serializer.data:
             c = t.copy()
-            c.pop("customer_name", None)
+            cust_name = c.get("customer_name") or "Customer"
             c.pop("customer_phone", None)
             c.pop("customer_email", None)
             c.pop("message", None)
@@ -1372,6 +1563,7 @@ class PublicDisplayView(APIView):
                 "deskId": str(c["desk"]) if c.get("desk") else None,
                 "predictedDeskId": str(c["predicted_desk"]) if c.get("predicted_desk") else None,
                 "number": c["token_number"],
+                "customerName": cust_name,
                 "status": c["status"],
                 "joinedAt": int(timezone.datetime.fromisoformat(c["created_at"].replace('Z', '+00:00')).timestamp() * 1000) if c.get("created_at") else 0,
                 "calledAt": int(timezone.datetime.fromisoformat(c["called_at"].replace('Z', '+00:00')).timestamp() * 1000) if c.get("called_at") else None,
@@ -1488,3 +1680,274 @@ class KotNotificationLogViewSet(viewsets.ReadOnlyModelViewSet):
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
         return qs.order_by("-created_at")
+
+class OperatorAttendanceViewSet(viewsets.ModelViewSet):
+    queryset = OperatorAttendance.objects.all()
+    serializer_class = OperatorAttendanceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return OperatorAttendance.objects.none()
+        
+        if user.role == "super_admin":
+            qs = OperatorAttendance.objects.all()
+        else:
+            qs = OperatorAttendance.objects.filter(company=user.company)
+        
+        branch_id = self.request.query_params.get("branch") or self.request.query_params.get("branch_id")
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+
+        user_id = self.request.query_params.get("user_id")
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        date_param = self.request.query_params.get("date")
+        if date_param:
+            qs = qs.filter(check_in_time__date=date_param)
+
+        return qs.order_by("-check_in_time")
+
+    @action(detail=False, methods=["get"], url_path="active")
+    def active_attendance(self, request):
+        user = request.user
+        branch_id = request.query_params.get("branch") or request.query_params.get("branch_id")
+        
+        qs = OperatorAttendance.objects.filter(
+            user=user,
+            status__in=["checked_in", "on_break"]
+        )
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+            
+        attendance = qs.order_by("-check_in_time").first()
+        if not attendance:
+            return Response({"active": False, "attendance": None})
+            
+        return Response({
+            "active": True,
+            "attendance": OperatorAttendanceSerializer(attendance).data
+        })
+
+    @action(detail=False, methods=["post"], url_path="check-in")
+    def check_in(self, request):
+        user = request.user
+        branch_id = request.data.get("branch_id") or request.data.get("branch")
+        desk_id = request.data.get("desk_id") or request.data.get("desk")
+
+        if not branch_id:
+            return Response({"error": "branch_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from branches.models import Branch
+        try:
+            branch = Branch.objects.get(id=branch_id)
+        except Branch.DoesNotExist:
+            return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        desk = None
+        if desk_id:
+            try:
+                desk = Desk.objects.get(id=desk_id, branch=branch)
+            except Desk.DoesNotExist:
+                pass
+
+        active_session = OperatorAttendance.objects.filter(
+            user=user,
+            branch=branch,
+            status__in=["checked_in", "on_break"]
+        ).first()
+
+        if active_session:
+            if desk and active_session.desk != desk:
+                active_session.desk = desk
+                active_session.save()
+            return Response(OperatorAttendanceSerializer(active_session).data, status=status.HTTP_200_OK)
+
+        with transaction.atomic():
+            attendance = OperatorAttendance.objects.create(
+                user=user,
+                branch=branch,
+                company=branch.company,
+                desk=desk,
+                status="checked_in",
+                check_in_time=timezone.now()
+            )
+
+            if desk:
+                desk.status = "open"
+                desk.current_operator = user
+                desk.save()
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {"type": "queue.update", "event": "desk_updated", "data": DeskSerializer(desk).data}
+                    async_to_sync(channel_layer.group_send)(f"branch_{branch.id}_staff", payload)
+                    async_to_sync(channel_layer.group_send)(f"branch_{branch.id}_public", payload)
+
+        return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="break-start")
+    def break_start(self, request):
+        user = request.user
+        reason = request.data.get("reason", "Tea / Lunch Break")
+        attendance_id = request.data.get("attendance_id")
+        desk_id = request.data.get("desk_id") or request.data.get("desk")
+
+        if attendance_id:
+            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+        else:
+            attendance = OperatorAttendance.objects.filter(user=user, status__in=["checked_in", "on_break"]).order_by("-check_in_time").first()
+
+        if not attendance:
+            return Response({"error": "No active check-in session found to start break."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Resolve target desk if missing
+        if desk_id and not attendance.desk:
+            try:
+                attendance.desk = Desk.objects.get(id=desk_id)
+            except Desk.DoesNotExist:
+                pass
+        if not attendance.desk:
+            assignment = user.desk_assignments.filter(is_active=True).first()
+            if assignment:
+                attendance.desk = assignment.desk
+
+        if attendance.status == "on_break":
+            if attendance.desk and attendance.desk.status != "break":
+                attendance.desk.status = "break"
+                attendance.desk.save()
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {"type": "queue.update", "event": "desk_updated", "data": DeskSerializer(attendance.desk).data}
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_staff", payload)
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_public", payload)
+            return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_200_OK)
+
+        now = timezone.now()
+        with transaction.atomic():
+            attendance.status = "on_break"
+            attendance.break_start_time = now
+            attendance.save()
+
+            OperatorBreakLog.objects.create(
+                attendance=attendance,
+                break_start=now,
+                reason=reason
+            )
+
+            if attendance.desk:
+                attendance.desk.status = "break"
+                attendance.desk.save()
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {"type": "queue.update", "event": "desk_updated", "data": DeskSerializer(attendance.desk).data}
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_staff", payload)
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_public", payload)
+
+        return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="break-end")
+    def break_end(self, request):
+        user = request.user
+        attendance_id = request.data.get("attendance_id")
+        desk_id = request.data.get("desk_id") or request.data.get("desk")
+
+        if attendance_id:
+            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+        else:
+            attendance = OperatorAttendance.objects.filter(user=user, status="on_break").order_by("-check_in_time").first()
+
+        if not attendance:
+            return Response({"error": "No active break session found to end."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if desk_id and not attendance.desk:
+            try:
+                attendance.desk = Desk.objects.get(id=desk_id)
+            except Desk.DoesNotExist:
+                pass
+
+        now = timezone.now()
+        with transaction.atomic():
+            active_break = attendance.breaks.filter(break_end__isnull=True).order_by("-break_start").first()
+            duration = 0
+            if active_break:
+                duration = max(0, int((now - active_break.break_start).total_seconds()))
+                active_break.break_end = now
+                active_break.duration_seconds = duration
+                active_break.save()
+            elif attendance.break_start_time:
+                duration = max(0, int((now - attendance.break_start_time).total_seconds()))
+
+            attendance.status = "checked_in"
+            attendance.total_break_seconds += duration
+            attendance.break_count += 1
+            attendance.break_start_time = None
+            attendance.save()
+
+            if attendance.desk:
+                attendance.desk.status = "open"
+                attendance.desk.save()
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {"type": "queue.update", "event": "desk_updated", "data": DeskSerializer(attendance.desk).data}
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_staff", payload)
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_public", payload)
+
+        return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="check-out")
+    def check_out(self, request):
+        user = request.user
+        attendance_id = request.data.get("attendance_id")
+        desk_id = request.data.get("desk_id") or request.data.get("desk")
+        notes = request.data.get("notes", "")
+
+        if attendance_id:
+            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+        else:
+            attendance = OperatorAttendance.objects.filter(user=user, status__in=["checked_in", "on_break"]).order_by("-check_in_time").first()
+
+        if not attendance:
+            return Response({"error": "No active check-in session found to check out."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if desk_id and not attendance.desk:
+            try:
+                attendance.desk = Desk.objects.get(id=desk_id)
+            except Desk.DoesNotExist:
+                pass
+
+        now = timezone.now()
+        with transaction.atomic():
+            if attendance.status == "on_break":
+                active_break = attendance.breaks.filter(break_end__isnull=True).order_by("-break_start").first()
+                if active_break:
+                    duration = max(0, int((now - active_break.break_start).total_seconds()))
+                    active_break.break_end = now
+                    active_break.duration_seconds = duration
+                    active_break.save()
+                    attendance.total_break_seconds += duration
+                    attendance.break_count += 1
+
+            attendance.status = "checked_out"
+            attendance.check_out_time = now
+            if notes:
+                attendance.notes = notes
+            attendance.save()
+
+            if attendance.desk:
+                attendance.desk.status = "offline"
+                if attendance.desk.current_operator == user:
+                    attendance.desk.current_operator = None
+                attendance.desk.save()
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    payload = {"type": "queue.update", "event": "desk_updated", "data": DeskSerializer(attendance.desk).data}
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_staff", payload)
+                    async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_public", payload)
+
+        return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_200_OK)

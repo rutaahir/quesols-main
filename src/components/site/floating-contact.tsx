@@ -43,8 +43,7 @@ export function FloatingContact() {
   return (
     <div
       className={cn(
-        "fixed right-6 z-[100] font-sans flex flex-col items-end transition-all duration-300",
-        hasScrolled ? "bottom-[80px]" : "bottom-6"
+        "fixed right-4 sm:right-6 bottom-4 sm:bottom-6 z-[40] font-sans flex flex-col items-end transition-all duration-300 pointer-events-auto"
       )}
     >
       <AnimatePresence>
@@ -54,7 +53,7 @@ export function FloatingContact() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: 40 }}
             transition={{ type: "spring", stiffness: 380, damping: 28 }}
-            className="mb-4 w-[310px] overflow-hidden rounded-[2rem] bg-gradient-to-br from-primary via-violet to-ice p-[1.5px] shadow-[0_15px_40px_rgba(99,102,241,0.25)]"
+            className="mb-3 w-[290px] sm:w-[310px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[2rem] bg-gradient-to-br from-primary via-violet to-ice p-[1.5px] shadow-[0_15px_40px_rgba(99,102,241,0.25)]"
           >
             {/* Inner Glassmorphic Container */}
             <div className="w-full h-full rounded-[1.9rem] bg-slate-950/95 backdrop-blur-xl p-4 text-white relative">

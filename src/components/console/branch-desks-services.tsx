@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, planOf, useQuesole, branchStats, isNoServiceMode, calculateBranchReadiness } from "@/lib/quesole/store";
+import { getNetworkOrigin } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
 import { DisplayTerminalsManager } from "@/components/console/display-terminals-manager";
+import { BranchAttendanceLogsView } from "@/components/console/branch-attendance-logs";
 
 const tabVariants = {
   initial: { opacity: 0, y: 6 },
@@ -31,7 +33,7 @@ export function BranchDesksServicesManager({
 }) {
   const { state, actions, session, refresh } = useQuesole();
   const isBranchAdmin = session?.role === "branch_admin";
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "kiosks" | "displays" | "online_booking" | "kot">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot">("overview");
   const [searchServicesQuery, setSearchServicesQuery] = useState("");
   const [searchDesksQuery, setSearchDesksQuery] = useState("");
   const [searchStaffQuery, setSearchStaffQuery] = useState("");
@@ -811,6 +813,19 @@ export function BranchDesksServicesManager({
             <Users className="h-3.5 w-3.5" /> Staff & Credentials
           </button>
         )}
+        {branch?.channel_type !== "ONLINE_ONLY" && (
+          <button
+            onClick={() => setActiveTab("attendance")}
+            className={cn(
+              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
+              activeTab === "attendance"
+                ? "border-primary text-primary font-black"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5 text-brand" /> Attendance Logs
+          </button>
+        )}
         {purchasedKiosks > 0 && branch?.channel_type !== "ONLINE_ONLY" && (
           <button
             onClick={() => setActiveTab("kiosks")}
@@ -866,73 +881,78 @@ export function BranchDesksServicesManager({
         )}
       </div>
 
+      {/* Attendance & Shift Logs Tab */}
+      {activeTab === "attendance" && (
+        <BranchAttendanceLogsView branchId={branch.id} branchName={branch.name} />
+      )}
+
       {/* Stat Cards Grid (Overview Tab Only) */}
       {activeTab === "overview" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 z-10 relative">
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4 z-10 relative">
           {/* Stat Card 1: Waiting Visitors */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-            <div className="flex items-center gap-4">
-              <span className="h-11 w-11 rounded-2xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
-                <Users className="h-5 w-5" />
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                <Users className="h-4 w-4 sm:h-5 sm:w-5" />
               </span>
-              <div>
-                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Waiting Visitors</span>
-                <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).waiting}</span>
-                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Live in queue</span>
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Waiting Visitors</span>
+                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).waiting}</span>
+                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Live in queue</span>
               </div>
             </div>
-            <svg className="w-16 h-8 text-indigo-500" viewBox="0 0 100 30" fill="none">
+            <svg className="w-12 h-6 text-indigo-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
               <path d="M0 25 Q15 10 30 20 T60 10 T90 25 T100 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
 
           {/* Stat Card 2: Served Today */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-            <div className="flex items-center gap-4">
-              <span className="h-11 w-11 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center">
-                <Check className="h-5 w-5" />
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                <Check className="h-4 w-4 sm:h-5 sm:w-5" />
               </span>
-              <div>
-                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Served Today</span>
-                <span className="text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).served}</span>
-                <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">+12% vs yesterday</span>
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Served Today</span>
+                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).served}</span>
+                <span className="text-[9px] sm:text-[10px] text-emerald-500 font-bold block mt-0.5 truncate">+12% vs yesterday</span>
               </div>
             </div>
-            <svg className="w-16 h-8 text-blue-500" viewBox="0 0 100 30" fill="none">
+            <svg className="w-12 h-6 text-blue-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
               <path d="M0 20 Q20 5 40 25 T80 15 T100 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
 
           {/* Stat Card 3: Active Services */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-            <div className="flex items-center gap-4">
-              <span className="h-11 w-11 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                <Layers className="h-5 w-5" />
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <Layers className="h-4 w-4 sm:h-5 sm:w-5" />
               </span>
-              <div>
-                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Active Services</span>
-                <span className="text-2xl font-black text-foreground block mt-0.5">{branchServices.length}</span>
-                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Across all counters</span>
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Active Services</span>
+                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchServices.length}</span>
+                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Across all counters</span>
               </div>
             </div>
-            <svg className="w-16 h-8 text-emerald-500" viewBox="0 0 100 30" fill="none">
+            <svg className="w-12 h-6 text-emerald-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
               <path d="M0 25 Q20 15 40 20 T80 10 T100 15" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
 
           {/* Stat Card 4: Operator Desks */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex items-center justify-between hover:scale-[1.01] transition-all">
-            <div className="flex items-center gap-4">
-              <span className="h-11 w-11 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-                <Monitor className="h-5 w-5" />
+          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                <Monitor className="h-4 w-4 sm:h-5 sm:w-5" />
               </span>
-              <div>
-                <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block">Operator Desks</span>
-                <span className="text-2xl font-black text-foreground block mt-0.5">{branchDesks.length}</span>
-                <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">Active & ready</span>
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Operator Desks</span>
+                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchDesks.length}</span>
+                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Active & ready</span>
               </div>
             </div>
-            <svg className="w-16 h-8 text-amber-500" viewBox="0 0 100 30" fill="none">
+            <svg className="w-12 h-6 text-amber-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
               <path d="M0 15 Q25 25 50 15 T100 20" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
@@ -3562,7 +3582,7 @@ export function BranchDesksServicesManager({
               <div className="p-4 bg-white rounded-2xl shadow-lg border border-slate-200 flex flex-col items-center">
                 <img
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                    `${typeof window !== "undefined" ? window.location.origin : ""}${joinUrl}`
+                    `${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`
                   )}`}
                   alt={`QR Code for ${branch.name}`}
                   className="h-48 w-48 object-contain rounded-xl"
@@ -3584,14 +3604,14 @@ export function BranchDesksServicesManager({
               <div className="flex items-center gap-2">
                 <Input
                   readOnly
-                  value={`${typeof window !== "undefined" ? window.location.origin : ""}${joinUrl}`}
+                  value={`${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`}
                   className="h-9 text-xs font-mono text-foreground bg-slate-100/70 dark:bg-slate-800/70 border-border/80 rounded-xl"
                 />
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}${joinUrl}`);
+                    navigator.clipboard.writeText(`${getNetworkOrigin()}${joinUrl}`);
                     toast.success("Customer Queue URL copied to clipboard!");
                   }}
                   className="h-9 shrink-0 text-xs font-bold gap-1.5 rounded-xl border-border/80"
@@ -3619,7 +3639,7 @@ export function BranchDesksServicesManager({
                   const printWin = window.open("", "_blank");
                   if (!printWin) return;
                   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-                    `${window.location.origin}${joinUrl}`
+                    `${getNetworkOrigin()}${joinUrl}`
                   )}`;
                   printWin.document.write(`
                     <!DOCTYPE html>

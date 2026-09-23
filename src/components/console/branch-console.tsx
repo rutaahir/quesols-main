@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, MonitorPlay, PhoneCall, QrCode, SkipForward, UserPlus, Search, Calendar, Clock, User, Check, X, ChevronRight, Globe, Loader2, Star, MessageSquare, Download, Filter } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, MonitorPlay, PhoneCall, QrCode, SkipForward, UserPlus, Search, Calendar, Clock, User, Check, X, ChevronRight, Globe, Loader2, Star, MessageSquare, Download, Filter, ShieldCheck, RotateCw, Printer, Phone, Mail, FileText, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { StatCard } from "@/components/console/shell";
 import {
@@ -18,6 +19,9 @@ import {
 import { QueueMethod } from "@/lib/quesole/types";
 import { CountUp, FlipNumber, Reveal, motion, AnimatePresence } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
+import { OperatorAttendanceControlBar } from "@/components/console/operator-attendance-bar";
+import { AppointmentCustomerModal } from "@/components/console/appointment-customer-modal";
+import { getNetworkOrigin } from "@/lib/api-config";
 
 export function BranchConsoleView({
   view,
@@ -28,7 +32,7 @@ export function BranchConsoleView({
   branchId: string;
   deskId?: string | undefined;
 }) {
-  const { state, session, actions } = useQuesole();
+  const { state, session, actions, refresh } = useQuesole();
   const branch = state.branches.find((b) => b.id === branchId);
   const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
   const companySlug = company?.slug || "";
@@ -54,6 +58,8 @@ export function BranchConsoleView({
   const [isLoadingBookings, setIsLoadingBookings] = useState(false);
   const [bookingSearchQuery, setBookingSearchQuery] = useState("");
   const [bookingStatusFilter, setBookingStatusFilter] = useState("all");
+  const [bookingDateFilter, setBookingDateFilter] = useState("all"); // "all" | "today" | "tomorrow" | "specific"
+  const [specificDateValue, setSpecificDateValue] = useState("");
 
   // Rescheduling states
   const [rescheduleBooking, setRescheduleBooking] = useState<any | null>(null);
@@ -62,6 +68,15 @@ export function BranchConsoleView({
   const [rescheduleSlots, setRescheduleSlots] = useState<any[]>([]);
   const [isLoadingRescheduleSlots, setIsLoadingRescheduleSlots] = useState(false);
   const [isSavingReschedule, setIsSavingReschedule] = useState(false);
+
+  // In-place Appointments Workbench states (Zero Popups)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [showInlineReschedule, setShowInlineReschedule] = useState(false);
+  const [staffNoteText, setStaffNoteText] = useState("");
+
+  // Attendance shift check-in state
+  const [isCheckedIn, setIsCheckedIn] = useState<boolean>(true);
+  const [isCheckingInLoading, setIsCheckingInLoading] = useState(false);
 
   const fetchOnlineBookings = async () => {
     setIsLoadingBookings(true);
@@ -81,15 +96,16 @@ export function BranchConsoleView({
     }
   }, [view, branchId]);
 
-  // Fetch rescheduling slots when date changes
+  // Fetch rescheduling slots in real-time when date or active booking changes
   useEffect(() => {
-    if (!rescheduleBooking || !rescheduleDate) return;
+    const activeBk = onlineBookings.find(b => String(b.id) === String(selectedBookingId));
+    if (!activeBk || !rescheduleDate || !showInlineReschedule) return;
     const fetchAvailableRescheduleSlots = async () => {
       setIsLoadingRescheduleSlots(true);
       try {
-        const serviceQuery = rescheduleBooking.service ? `&service_id=${rescheduleBooking.service}` : "";
+        const serviceQuery = activeBk.service ? `&service_id=${activeBk.service}` : "";
         const data = await apiFetch(`/api/public/branches/${branchId}/slots/?date=${rescheduleDate}${serviceQuery}`);
-        setRescheduleSlots(data);
+        setRescheduleSlots(Array.isArray(data) ? data : data?.slots || []);
       } catch (err) {
         console.error(err);
         setRescheduleSlots([]);
@@ -98,7 +114,7 @@ export function BranchConsoleView({
       }
     };
     fetchAvailableRescheduleSlots();
-  }, [rescheduleBooking, rescheduleDate, branchId]);
+  }, [selectedBookingId, rescheduleDate, showInlineReschedule, branchId, onlineBookings]);
 
   // Desk Session Lock State
   const [deskSessionError, setDeskSessionError] = useState<string | null>(null);
@@ -133,9 +149,13 @@ export function BranchConsoleView({
         return;
       }
 
-      // 2. Remote backend claim check
+      // 2. Remote backend claim check (preserve break status if currently on break)
       try {
-        await actions.setDeskStatus(desk.id, "open");
+        const activeAtt = await apiFetch(`/api/operator/attendance/active/?branch=${branchId}`).catch(() => null);
+        const isOnBreak = activeAtt && activeAtt.active && activeAtt.attendance && activeAtt.attendance.status === "on_break";
+
+        const targetStatus = isOnBreak || desk.status === "break" ? "break" : "open";
+        await actions.setDeskStatus(desk.id, targetStatus);
         if (isMounted) setDeskSessionError(null);
       } catch (err: any) {
         console.error("Desk claim error:", err);
@@ -156,10 +176,13 @@ export function BranchConsoleView({
 
     return () => {
       isMounted = false;
-      // Release desk on unmount / navigation
-      if (desk) {
-        actions.setDeskStatus(desk.id, "offline").catch(() => {});
-      }
+      // Release desk on unmount / navigation (do NOT set offline if currently on break)
+      apiFetch(`/api/operator/attendance/active/?branch=${branchId}`).then((activeAtt) => {
+        const isOnBreak = activeAtt && activeAtt.active && activeAtt.attendance && activeAtt.attendance.status === "on_break";
+        if (!isOnBreak && desk && desk.status !== "break") {
+          actions.setDeskStatus(desk.id, "offline").catch(() => {});
+        }
+      }).catch(() => {});
     };
   }, [view, branchId, deskId]);
 
@@ -206,7 +229,7 @@ export function BranchConsoleView({
               size="sm"
               onClick={() => {
                 setDeskSessionError(null);
-                refresh();
+                window.location.reload();
               }}
               className="font-bold text-xs"
             >
@@ -275,148 +298,122 @@ export function BranchConsoleView({
     }
 
     return (
-      <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
-        <div className="panel overflow-hidden">
-          <div className="bg-brand px-6 py-8 text-center text-primary-foreground">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80">
-              {desk.label} · now serving
-            </div>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={current?.number ?? "idle"}
-                initial={{ y: 22, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -22, opacity: 0 }}
-                className="mt-1 font-display text-6xl font-bold"
-              >
-                {current ? <FlipNumber value={current.number} /> : "—"}
-              </motion.div>
-            </AnimatePresence>
-            <div className="mt-2 text-sm opacity-85">
-              {current ? current.customerName : "Ready for the next visitor"}
-            </div>
-          </div>
+      <div className="space-y-4">
+        <OperatorAttendanceControlBar
+          branchId={branchId}
+          deskId={desk.id}
+          onStatusChange={(att: any) => {
+            setIsCheckedIn(!!att && att.status !== "checked_out");
+          }}
+        />
 
-          <div className="p-5 space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
-                variant="brand"
-                size="lg"
-                disabled={!!current || queue.length === 0}
-                onClick={async () => {
-                  try {
-                    const res: any = await actions.callNext(desk.id);
-                    if (res?.number) {
-                      toast.success(`Called token ${res.number}`);
-                    } else if (res?.message) {
-                      toast.info(res.message);
-                    } else {
-                      toast.success("Next visitor called");
-                    }
-                  } catch (err: any) {
-                    toast.error(err.message || "Failed to call next visitor");
-                  }
-                }}
-                className="w-full shadow-lg shadow-brand/20 font-bold"
-              >
-                <PhoneCall className="h-4 w-4 mr-1.5" /> Call Next
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                disabled={!current}
-                onClick={async () => {
-                  if (!current) return;
-                  try {
-                    await actions.setTicketStatus(current.id, "skipped");
-                    toast.info(`Skipped ticket ${current.number}`);
-                  } catch (err: any) {
-                    toast.error(err.message || "Failed to skip ticket");
-                  }
-                }}
-                className="w-full font-semibold"
-              >
-                <SkipForward className="h-4 w-4 mr-1.5" /> Skip
-              </Button>
-            </div>
+        {!isCheckedIn ? (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="panel relative overflow-hidden p-8 md:p-12 text-center space-y-6 border border-border/80 bg-card shadow-sm"
+          >
+            {/* Top Accent Gradient Bar */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand via-violet-500 to-indigo-600" />
 
-            {/* Visitor Service Resolution & Transfer Controls */}
-            <div className="border-t border-border/60 pt-4 space-y-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                <span>Visitor Disposition Options</span>
-                {current && <span className="text-brand font-semibold">Active: {current.number} ({current.customerName})</span>}
+            <div className="max-w-xl mx-auto space-y-6">
+              {/* Icon Badge */}
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand/10 text-brand ring-8 ring-brand/5">
+                <ShieldCheck className="h-8 w-8 text-brand" />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                {/* 1. Resolved */}
-                <button
-                  type="button"
-                  disabled={!current}
+              <div className="space-y-2">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/25">
+                    <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                    Shift Check-In Required
+                  </span>
+                </div>
+                <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+                  Check In to Begin Operator Shift
+                </h2>
+                <p className="text-muted-foreground text-sm leading-relaxed max-w-md mx-auto">
+                  Desk controls, visitor calling, queue management, and resolution tools are locked until you check in to your shift.
+                </p>
+              </div>
+
+              {/* Information Overview Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left bg-muted/30 border border-border/60 rounded-2xl p-4 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background border border-border/70 text-brand">
+                    <MonitorPlay className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Assigned Desk</div>
+                    <div className="font-bold text-foreground truncate">{desk.label}</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background border border-border/70 text-brand">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground">Logged Operator</div>
+                    <div className="font-bold text-foreground truncate">{session?.email || "Operator Staff"}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Button */}
+              <div className="pt-2">
+                <Button
+                  size="lg"
+                  variant="brand"
+                  disabled={isCheckingInLoading}
                   onClick={async () => {
-                    if (!current) return;
+                    setIsCheckingInLoading(true);
                     try {
-                      await actions.setTicketStatus(current.id, "served");
-                      toast.success(`Ticket ${current.number} (${current.customerName}) marked as Resolved!`);
+                      const data = await apiFetch("/api/operator/attendance/check-in/", {
+                        method: "POST",
+                        body: JSON.stringify({ branch_id: branchId, desk_id: desk.id })
+                      });
+                      toast.success("Checked in to shift successfully!");
+                      setIsCheckedIn(true);
+                      if (desk.id) {
+                        actions.setDeskStatus(desk.id, "open").catch(() => {});
+                      }
+                      await refresh();
                     } catch (err: any) {
-                      toast.error(err.message || "Failed to resolve ticket");
+                      toast.error(err.message || "Failed to check in");
+                    } finally {
+                      setIsCheckingInLoading(false);
                     }
                   }}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
-                    current
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500 shadow-sm cursor-pointer"
-                      : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
-                  )}
+                  className="h-12 px-8 text-sm font-bold rounded-xl shadow-lg shadow-brand/20 gap-2 cursor-pointer transition-transform active:scale-95"
                 >
-                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                  <span>Resolved</span>
-                </button>
+                  {isCheckingInLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Checking in...
+                    </>
+                  ) : (
+                    <>
+                      <LogIn className="h-4 w-4" /> Check In to Start Shift
+                    </>
+                  )}
+                </Button>
+              </div>
 
-                {/* 2. Escalated */}
-                <button
-                  type="button"
-                  disabled={!current}
-                  onClick={async () => {
-                    if (!current) return;
-                    try {
-                      await actions.setTicketStatus(current.id, "hold");
-                      toast.warning(`Ticket ${current.number} (${current.customerName}) Escalated for supervisor review.`);
-                    } catch (err: any) {
-                      toast.error(err.message || "Failed to escalate ticket");
-                    }
-                  }}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
-                    current
-                      ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 hover:border-amber-500 shadow-sm cursor-pointer"
-                      : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
-                  )}
-                >
-                  <AlertTriangle className="h-5 w-5 text-amber-500" />
-                  <span>Escalated</span>
-                </button>
-
-                {/* 3. Transfer */}
-                <button
-                  type="button"
-                  disabled={!current}
-                  onClick={() => {
-                    if (current) setIsTransferModalOpen(true);
-                  }}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
-                    current
-                      ? "border-brand/40 bg-brand/10 text-brand hover:bg-brand/20 hover:border-brand shadow-sm cursor-pointer"
-                      : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
-                  )}
-                >
-                  <ArrowRightLeft className="h-5 w-5 text-brand" />
-                  <span>Transfer</span>
-                </button>
+              <div className="text-[11px] text-muted-foreground pt-1">
+                🔒 Shift attendance logs are recorded in real-time for compliance &amp; performance metrics.
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
+        <ServingCustomerDeskPanel
+          desk={desk}
+          current={current}
+          queue={queue}
+          actions={actions}
+          setIsTransferModalOpen={setIsTransferModalOpen}
+          refresh={refresh}
+        />
 
         <div className="panel p-5 space-y-4">
           <div className="flex items-center justify-between">
@@ -487,12 +484,12 @@ export function BranchConsoleView({
               <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                 Live Auto-Email Active
               </span>
-              <Link
-                to={`/${companySlug}/branches/${branchSlug}/queries`}
+              <a
+                href={`/${companySlug}/branches/${branchSlug}/queries`}
                 className="text-xs font-bold text-primary hover:underline flex items-center gap-1 shrink-0"
               >
                 View History &rarr;
-              </Link>
+              </a>
             </div>
           </div>
 
@@ -788,18 +785,39 @@ export function BranchConsoleView({
             </div>
           </div>
         )}
+        </div>
+        )}
       </div>
     );
   }
 
   if (view === "appointments") {
+
     // Stats calculation
     const confirmedCount = onlineBookings.filter(b => b.status === "confirmed").length;
     const checkedInCount = onlineBookings.filter(b => b.status === "checked_in").length;
     const completedCount = onlineBookings.filter(b => b.status === "completed").length;
 
-    // Filter calculations
-    const filteredBookings = onlineBookings.filter(b => {
+    // Date Strings for filtering
+    const todayStr = new Date().toISOString().split("T")[0];
+    const tomorrowDate = new Date();
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrowStr = tomorrowDate.toISOString().split("T")[0];
+
+    // Filter by Date
+    const dateFilteredBookings = onlineBookings.filter((b) => {
+      if (bookingDateFilter === "today") {
+        return b.date === todayStr;
+      } else if (bookingDateFilter === "tomorrow") {
+        return b.date === tomorrowStr;
+      } else if (bookingDateFilter === "specific" && specificDateValue) {
+        return b.date === specificDateValue;
+      }
+      return true;
+    });
+
+    // Filter by Search & Status
+    const filteredBookings = dateFilteredBookings.filter(b => {
       const ref = (b.booking_reference || "").toLowerCase();
       const name = (b.customer_name || "").toLowerCase();
       const phone = (b.customer_phone || "").toLowerCase();
@@ -811,6 +829,8 @@ export function BranchConsoleView({
         matchesStatus = b.status === "confirmed";
       } else if (bookingStatusFilter === "checked_in") {
         matchesStatus = b.status === "checked_in";
+      } else if (bookingStatusFilter === "escalated") {
+        matchesStatus = ["escalated", "hold"].includes(b.status);
       } else if (bookingStatusFilter === "completed") {
         matchesStatus = b.status === "completed";
       } else if (bookingStatusFilter === "no_show_or_cancelled") {
@@ -819,6 +839,18 @@ export function BranchConsoleView({
       
       return matchesSearch && matchesStatus;
     });
+
+    // Chronological Sorting by Date (Ascending) and Slot Time (Ascending)
+    const sortedBookings = [...filteredBookings].sort((a, b) => {
+      const dateA = a.date || "";
+      const dateB = b.date || "";
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      const slotA = a.slot_time || "00:00";
+      const slotB = b.slot_time || "00:00";
+      return slotA.localeCompare(slotB);
+    });
+
+    const activeBooking = selectedBookingId ? onlineBookings.find(b => String(b.id) === String(selectedBookingId)) || null : null;
 
     const handleCheckInBooking = async (booking: any) => {
       try {
@@ -843,6 +875,19 @@ export function BranchConsoleView({
         fetchOnlineBookings();
       } catch (err: any) {
         toast.error(err.message || "Failed to complete booking.");
+      }
+    };
+
+    const handleEscalateBooking = async (booking: any) => {
+      try {
+        await apiFetch(`/api/online-bookings/${booking.id}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "escalated" })
+        });
+        toast.warning(`Booking ${booking.booking_reference} marked as escalated.`);
+        fetchOnlineBookings();
+      } catch (err: any) {
+        toast.error(err.message || "Failed to escalate booking.");
       }
     };
 
@@ -872,14 +917,14 @@ export function BranchConsoleView({
       }
     };
 
-    const handleSaveReschedule = async () => {
-      if (!rescheduleSlot) {
-        toast.error("Please select a time slot.");
+    const handleSaveInlineReschedule = async () => {
+      if (!rescheduleSlot || !activeBooking) {
+        toast.error("Please select a valid time slot.");
         return;
       }
       setIsSavingReschedule(true);
       try {
-        await apiFetch(`/api/online-bookings/${rescheduleBooking.id}/`, {
+        await apiFetch(`/api/online-bookings/${activeBooking.id}/`, {
           method: "PATCH",
           body: JSON.stringify({
             date: rescheduleDate,
@@ -887,7 +932,7 @@ export function BranchConsoleView({
           })
          });
          toast.success("Appointment rescheduled successfully!");
-         setRescheduleBooking(null);
+         setShowInlineReschedule(false);
          fetchOnlineBookings();
       } catch (err: any) {
         toast.error(err.message || "Failed to reschedule booking.");
@@ -896,50 +941,196 @@ export function BranchConsoleView({
       }
     };
 
+    const handleSaveStaffNote = async () => {
+      if (!staffNoteText.trim() || !activeBooking) return;
+      try {
+        const existingNotes = activeBooking.internal_notes ? `${activeBooking.internal_notes} | ${staffNoteText.trim()}` : staffNoteText.trim();
+        await apiFetch(`/api/online-bookings/${activeBooking.id}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ internal_notes: existingNotes })
+        });
+        toast.success("Staff note saved successfully!");
+        setStaffNoteText("");
+        fetchOnlineBookings();
+      } catch (err: any) {
+        toast.error(err.message || "Failed to save staff note.");
+      }
+    };
+
+    const handlePrintPass = (booking: any) => {
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.error("Please allow popups in your browser to print receipt.");
+        return;
+      }
+      const companyName = company?.name || "Quesoles";
+      const serviceName = state.services.find(s => String(s.id) === String(booking.service))?.name || "General Service";
+      const networkOrigin = getNetworkOrigin();
+      const trackingUrl = `${networkOrigin}/t/${booking.booking_reference}`;
+      const qrData = encodeURIComponent(trackingUrl);
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Appointment Receipt - ${booking.booking_reference}</title>
+            <style>
+              @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+              * { box-sizing: border-box; margin: 0; padding: 0; }
+              body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8fafc; color: #0f172a; padding: 24px; -webkit-print-color-adjust: exact; }
+              .card { max-width: 520px; margin: 0 auto; background: #fff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.06); }
+              .bar { background: linear-gradient(90deg, #4f46e5, #06b6d4); height: 6px; }
+              .head { padding: 20px; border-bottom: 1px dashed #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+              .ref { font-size: 22px; font-weight: 800; color: #4f46e5; }
+              .body { padding: 20px; }
+              .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+              .lbl { color: #64748b; font-weight: 600; }
+              .val { font-weight: 700; color: #0f172a; }
+              .qr { text-align: center; margin-top: 20px; padding: 16px; background: #faf5ff; border-radius: 12px; border: 1px border #e9d5ff; }
+              .footer { text-align: center; padding: 14px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; font-weight: 700; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="bar"></div>
+              <div class="head">
+                <div>
+                  <div style="font-size: 18px; font-weight: 800; color: #0f172a;">${companyName}</div>
+                  <div style="font-size: 11px; color: #64748b; font-weight: 600;">Official Appointment Pass</div>
+                </div>
+                <div class="ref">${booking.booking_reference}</div>
+              </div>
+              <div class="body">
+                <div class="row"><span class="lbl">Customer Name</span><span class="val">${booking.customer_name}</span></div>
+                <div class="row"><span class="lbl">Contact Phone</span><span class="val">${booking.customer_phone || 'N/A'}</span></div>
+                <div class="row"><span class="lbl">Service</span><span class="val">${serviceName}</span></div>
+                <div class="row"><span class="lbl">Scheduled Date</span><span class="val">${booking.date}</span></div>
+                <div class="row"><span class="lbl">Scheduled Slot</span><span class="val">${booking.slot_time ? booking.slot_time.substring(0, 5) : '09:00'}</span></div>
+                <div class="row"><span class="lbl">Booking Status</span><span class="val" style="text-transform: uppercase;">${booking.status}</span></div>
+
+                <div class="qr">
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${qrData}" style="width: 130px; height: 130px; margin: 0 auto; display: block; border-radius: 8px;" />
+                  <div style="font-size: 10px; color: #6b21a8; font-weight: 800; margin-top: 8px;">SCAN TO TRACK LIVE STATUS</div>
+                </div>
+              </div>
+              <div class="footer">Powered by Quesoles Digital Queueing</div>
+            </div>
+            <script>window.onload = function() { window.print(); };</script>
+          </body>
+        </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+
     const STATUS_BADGES: Record<string, React.ReactNode> = {
-      confirmed: <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500">Confirmed</span>,
-      checked_in: <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500">Checked In</span>,
-      completed: <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-500">Completed</span>,
-      no_show: <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-500">No Show</span>,
-      cancelled: <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-500/10 text-gray-500">Cancelled</span>,
+      confirmed: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-600 border border-amber-500/30">Confirmed</span>,
+      checked_in: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">Checked In</span>,
+      escalated: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/15 text-purple-600 border border-purple-500/30">Escalated</span>,
+      hold: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/15 text-purple-600 border border-purple-500/30">Escalated</span>,
+      completed: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/15 text-blue-600 border border-blue-500/30">Completed</span>,
+      no_show: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/15 text-rose-600 border border-rose-500/30">No Show</span>,
+      cancelled: <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-gray-500/15 text-gray-600 border border-gray-500/30">Cancelled</span>,
     };
 
     return (
       <div className="space-y-5">
         {/* KPI stats strip */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="panel p-4 border border-border/80 bg-accent/5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pending Confirmed</span>
-            <div className="mt-1 text-lg font-bold text-foreground">{confirmedCount}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="panel p-4 border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400">Pending Confirmed</span>
+            <div className="mt-1 text-2xl font-black text-amber-600 dark:text-amber-400">{confirmedCount}</div>
           </div>
-          <div className="panel p-4 border border-border/80 bg-accent/5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Checked-In Waiting</span>
-            <div className="mt-1 text-lg font-bold text-foreground">{checkedInCount}</div>
+          <div className="panel p-4 border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Checked-In Waiting</span>
+            <div className="mt-1 text-2xl font-black text-emerald-600 dark:text-emerald-400">{checkedInCount}</div>
           </div>
-          <div className="panel p-4 border border-border/80 bg-accent/5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Served Successfully</span>
-            <div className="mt-1 text-lg font-bold text-foreground">{completedCount}</div>
+          <div className="panel p-4 border border-blue-500/30 bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400">Served Successfully</span>
+            <div className="mt-1 text-2xl font-black text-blue-600 dark:text-blue-400">{completedCount}</div>
+          </div>
+          <div className="panel p-4 border border-border/80 bg-accent/10">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">Total Bookings</span>
+            <div className="mt-1 text-2xl font-black text-foreground">{onlineBookings.length}</div>
           </div>
         </div>
 
-        {/* Filters and search bar */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Tabs */}
-          <div className="flex gap-1.5 border border-border rounded-xl p-1 bg-surface w-fit">
+        {/* Upper Line Master Filter Bar (Date + Search + Status Filters) */}
+        <div className="panel p-4 space-y-3 bg-card border border-border/80 shadow-xs">
+          {/* Row 1: Date Quick Filters + Search Bar */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            
+            {/* Date Quick Filter Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground mr-1 flex items-center gap-1">
+                <Calendar className="h-3.5 w-3.5 text-brand" /> Date:
+              </span>
+              {[
+                { id: "all", label: "All Dates" },
+                { id: "today", label: `Today (${todayStr})` },
+                { id: "tomorrow", label: "Tomorrow" },
+                { id: "specific", label: "Specific Date" },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setBookingDateFilter(tab.id);
+                    if (tab.id === "specific" && !specificDateValue) {
+                      setSpecificDateValue(todayStr ?? "");
+                    }
+                  }}
+                  className={cn(
+                    "rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all border",
+                    bookingDateFilter === tab.id
+                      ? "bg-brand text-white border-brand shadow-xs"
+                      : "bg-background border-border/80 text-muted-foreground hover:text-foreground hover:border-brand/40"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+
+              {bookingDateFilter === "specific" && (
+                <input
+                  type="date"
+                  value={specificDateValue}
+                  onChange={(e) => setSpecificDateValue(e.target.value)}
+                  className="rounded-xl border border-brand/50 bg-background px-3 py-1 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              )}
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-full md:w-72">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={bookingSearchQuery}
+                onChange={(e) => setBookingSearchQuery(e.target.value)}
+                placeholder="Search name, phone, ref ID..."
+                className="pl-9 text-xs rounded-xl h-9 bg-background"
+              />
+            </div>
+          </div>
+
+          {/* Row 2: Status Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1 border-t border-border/50 pt-2.5">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground mr-2">Status:</span>
             {[
-              { id: "all", label: "All Bookings" },
+              { id: "all", label: "All Statuses" },
               { id: "confirmed", label: "Confirmed" },
               { id: "checked_in", label: "Checked In" },
+              { id: "escalated", label: "Escalated" },
               { id: "completed", label: "Completed" },
-              { id: "no_show_or_cancelled", label: "No-Show / Cancelled" },
+              { id: "no_show_or_cancelled", label: "No-Show / Cancel" },
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setBookingStatusFilter(tab.id)}
                 className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
+                  "rounded-lg px-2.5 py-1 text-[11px] font-extrabold transition-all",
                   bookingStatusFilter === tab.id
-                    ? "bg-brand text-white shadow-sm"
+                    ? "bg-brand/15 text-brand border border-brand/30"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -947,206 +1138,531 @@ export function BranchConsoleView({
               </button>
             ))}
           </div>
-
-          {/* Search bar */}
-          <div className="relative max-w-sm w-full">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={bookingSearchQuery}
-              onChange={(e) => setBookingSearchQuery(e.target.value)}
-              placeholder="Search reference, name, phone..."
-              className="pl-9 text-xs rounded-xl"
-            />
-          </div>
         </div>
 
-        {/* List of bookings */}
-        <div className="panel p-0 border border-border/80 overflow-hidden overflow-x-auto">
-          {isLoadingBookings ? (
-            <div className="py-12 text-center text-xs text-muted-foreground animate-pulse">Loading bookings...</div>
-          ) : filteredBookings.length === 0 ? (
-            <div className="py-12 text-center text-xs text-muted-foreground">
-              No online bookings found matching the selected filters.
+        {/* Dynamic Display Mode: Full Page Grid (when selectedBookingId === null) vs Split Screen Workbench (when selectedBookingId !== null) */}
+        {!selectedBookingId ? (
+          /* MODE A: FULL-PAGE ALL CUSTOMERS OVERVIEW GRID (100% Page Width) */
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                Showing {sortedBookings.length} Customer Appointments (Sorted Chronologically by Date &amp; Time)
+              </span>
             </div>
-          ) : (
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-accent/20 border-b border-border/80 text-muted-foreground font-bold uppercase tracking-wider">
-                  <th className="p-4">Reference</th>
-                  <th className="p-4">Customer Info</th>
-                  <th className="p-4">Service Category</th>
-                  <th className="p-4">Scheduled Slot</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {filteredBookings.map((b) => {
-                  const svcName = state.services.find(s => String(s.id) === String(b.service))?.name || "General/All Services";
+
+            {isLoadingBookings ? (
+              <div className="py-16 text-center text-xs text-muted-foreground animate-pulse bg-card border border-dashed rounded-3xl">Loading customer appointments...</div>
+            ) : sortedBookings.length === 0 ? (
+              <div className="py-16 text-center text-xs text-muted-foreground bg-card border border-dashed rounded-3xl p-6">
+                No customer appointments found matching your date or status filters.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
+                {sortedBookings.map((b) => {
+                  const svcName = state.services.find(s => String(s.id) === String(b.service))?.name || "General Service";
                   return (
-                    <tr key={b.id} className="hover:bg-accent/5">
-                      <td className="p-4 font-mono font-bold text-brand">{b.booking_reference}</td>
-                      <td className="p-4">
-                        <div className="font-semibold text-foreground">{b.customer_name}</div>
-                        <div className="text-muted-foreground mt-0.5">{b.customer_phone} · {b.email}</div>
-                      </td>
-                      <td className="p-4 font-medium">{svcName}</td>
-                      <td className="p-4 font-medium">
-                        <div>{b.date}</div>
-                        <div className="text-muted-foreground font-mono mt-0.5">{b.slot_time.substring(0, 5)}</div>
-                      </td>
-                      <td className="p-4">{STATUS_BADGES[b.status] || b.status}</td>
-                      <td className="p-4 text-right">
-                        <div className="flex justify-end gap-1.5">
-                          {b.status === "confirmed" && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="brand"
-                                className="rounded-lg h-7 text-[10px] px-2.5"
-                                onClick={() => handleCheckInBooking(b)}
-                              >
-                                Check-In
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg h-7 text-[10px] px-2.5"
-                                onClick={() => {
-                                  setRescheduleBooking(b);
-                                  setRescheduleDate(b.date);
-                                  setRescheduleSlot(b.slot_time.substring(0, 5));
-                                }}
-                              >
-                                Reschedule
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg h-7 text-[10px] px-2.5 text-rose-500 hover:bg-rose-500/10 border-rose-500/20"
-                                onClick={() => handleNoShowBooking(b)}
-                              >
-                                No-Show
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg h-7 text-[10px] px-2.5 text-gray-500 hover:bg-gray-500/10 border-gray-500/20"
-                                onClick={() => handleCancelBooking(b)}
-                              >
-                                Cancel
-                              </Button>
-                            </>
+                    <div
+                      key={b.id}
+                      className="panel p-4 border border-border/80 hover:border-brand/50 transition-all rounded-3xl shadow-xs flex flex-col justify-between bg-card group"
+                    >
+                      <div className="space-y-3">
+                        {/* Header: Photo + Name + Ref + Status */}
+                        <div className="flex items-start justify-between gap-2 border-b border-border/50 pb-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {b.customer_photo ? (
+                              <img src={b.customer_photo} alt={b.customer_name} className="h-12 w-12 rounded-full object-cover border-2 border-brand/30 shrink-0 shadow-xs" />
+                            ) : (
+                              <div className="h-12 w-12 rounded-full bg-brand/15 text-brand font-black text-sm flex items-center justify-center shrink-0 border border-brand/20 shadow-xs">
+                                {(b.customer_name || "C").charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <h4 className="font-extrabold text-sm text-foreground truncate group-hover:text-brand transition-colors">{b.customer_name}</h4>
+                              <span className="font-mono text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-md border border-brand/20 inline-block mt-0.5">
+                                {b.booking_reference}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            {STATUS_BADGES[b.status] || <span className="text-[10px] font-bold">{b.status}</span>}
+                          </div>
+                        </div>
+
+                        {/* Customer Details */}
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between text-muted-foreground font-medium">
+                            <span>Service:</span>
+                            <strong className="text-foreground font-extrabold">{svcName}</strong>
+                          </div>
+                          <div className="flex items-center justify-between text-muted-foreground font-medium">
+                            <span>Date &amp; Time:</span>
+                            <strong className="text-brand font-extrabold flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {b.date} at {b.slot_time?.substring(0, 5)}
+                            </strong>
+                          </div>
+                          {b.customer_phone && (
+                            <div className="flex items-center justify-between text-muted-foreground font-medium">
+                              <span>Phone:</span>
+                              <strong className="text-foreground font-bold">{b.customer_phone}</strong>
+                            </div>
                           )}
-                          {b.status === "checked_in" && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="brand"
-                                className="rounded-lg h-7 text-[10px] px-2.5 flex items-center gap-1"
-                                onClick={() => handleCompleteBooking(b)}
-                              >
-                                Mark Completed
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg h-7 text-[10px] px-2.5 text-rose-500 hover:bg-rose-500/10 border-rose-500/20"
-                                onClick={() => handleNoShowBooking(b)}
-                              >
-                                No-Show
-                              </Button>
-                            </>
-                          )}
-                          {!["confirmed", "checked_in"].includes(b.status) && (
-                            <span className="text-[10px] text-muted-foreground font-semibold px-2">Processed</span>
+                          {b.notes && (
+                            <div className="text-[11px] italic text-muted-foreground bg-accent/10 p-2 rounded-xl border border-border/50 truncate">
+                              "{b.notes}"
+                            </div>
                           )}
                         </div>
-                      </td>
-                    </tr>
+                      </div>
+
+                      {/* Card Action Buttons */}
+                      <div className="pt-3 border-t border-border/50 flex items-center justify-between gap-1.5 mt-3">
+                        <div className="flex items-center gap-1">
+                          {b.status === "confirmed" && (
+                            <Button
+                              size="sm"
+                              variant="brand"
+                              className="h-8 text-[11px] font-extrabold rounded-xl px-3"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCheckInBooking(b);
+                              }}
+                            >
+                              ⚡ Check-In
+                            </Button>
+                          )}
+                          {["checked_in", "serving", "escalated"].includes(b.status) && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-8 text-[11px] font-extrabold rounded-xl px-3 bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCompleteBooking(b);
+                              }}
+                            >
+                              ✅ Complete
+                            </Button>
+                          )}
+                          {["confirmed", "checked_in"].includes(b.status) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-[11px] font-bold rounded-xl px-2.5 text-purple-600 border-purple-500/30 hover:bg-purple-500/10"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEscalateBooking(b);
+                              }}
+                            >
+                              🚨 Escalate
+                            </Button>
+                          )}
+                        </div>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-[11px] font-extrabold rounded-xl px-3 border-brand/40 text-brand hover:bg-brand/10"
+                          onClick={() => {
+                            setSelectedBookingId(b.id);
+                            setShowInlineReschedule(false);
+                          }}
+                        >
+                          Details →
+                        </Button>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Reschedule Modal Dialog */}
-        {rescheduleBooking && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="panel max-w-md w-full p-6 border border-border/80 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center border-b border-border/60 pb-3">
-                <h3 className="font-display font-bold text-sm">Reschedule Booking {rescheduleBooking.booking_reference}</h3>
-                <button
-                  onClick={() => setRescheduleBooking(null)}
-                  className="rounded-lg p-1.5 hover:bg-accent text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
               </div>
-
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Select New Date</Label>
-                  <input
-                    type="date"
-                    value={rescheduleDate}
-                    onChange={(e) => setRescheduleDate(e.target.value)}
-                    className="w-full mt-1 rounded-xl border border-border bg-accent/20 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Select Time Slot</Label>
-                  {isLoadingRescheduleSlots ? (
-                    <div className="py-6 text-center text-xs text-muted-foreground animate-pulse">Checking slot availability...</div>
-                  ) : rescheduleSlots.length === 0 ? (
-                    <div className="py-6 text-center border border-dashed border-border rounded-xl text-xs text-muted-foreground">
-                      No slots available on this date.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-1.5 max-h-[160px] overflow-y-auto pr-1">
-                      {rescheduleSlots.map((slot) => {
-                        const isBooked = slot.status === "fully_booked";
-                        const isSelected = rescheduleSlot === slot.time;
-                        return (
-                          <button
-                            key={slot.time}
-                            type="button"
-                            disabled={isBooked}
-                            onClick={() => setRescheduleSlot(slot.time)}
-                            className={cn(
-                              "rounded-lg border p-2 text-center text-[10px] font-semibold transition-all",
-                              isBooked
-                                ? "border-coral/10 bg-coral/5 text-coral/60 opacity-60 cursor-not-allowed"
-                                : isSelected
-                                ? "bg-brand/10 border-brand text-brand ring-1 ring-brand font-bold"
-                                : "border-border text-foreground bg-accent/5 hover:border-brand/40"
-                            )}
-                          >
-                            {slot.time}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
-                <Button variant="outline" onClick={() => setRescheduleBooking(null)} className="text-xs h-9">
-                  Cancel
-                </Button>
+            )}
+          </div>
+        ) : (
+          /* MODE B: SPLIT-SCREEN WORKBENCH VIEW (Left 5 Cols Stream + Right 7 Cols Detail Workbench) */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            
+            {/* Left Stream (5/12) */}
+            <div className="lg:col-span-5 space-y-3">
+              <div className="flex items-center justify-between bg-card p-3 rounded-2xl border border-border/80">
                 <Button
-                  variant="brand"
-                  disabled={isSavingReschedule || !rescheduleSlot}
-                  onClick={handleSaveReschedule}
-                  className="text-xs h-9"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs font-extrabold rounded-xl border-brand/40 text-brand hover:bg-brand/10 gap-1"
+                  onClick={() => setSelectedBookingId(null)}
                 >
-                  {isSavingReschedule ? "Saving..." : "Reschedule Appointment"}
+                  ← Back to Full Grid
                 </Button>
+                <span className="text-[11px] font-bold text-muted-foreground">{sortedBookings.length} Customers</span>
+              </div>
+
+              {/* Customer List Stream */}
+              <div className="space-y-2 max-h-[660px] overflow-y-auto pr-1">
+                {sortedBookings.map((b) => {
+                  const isSelected = activeBooking?.id === b.id;
+                  const svcName = state.services.find(s => String(s.id) === String(b.service))?.name || "General Service";
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => {
+                        setSelectedBookingId(b.id);
+                        setShowInlineReschedule(false);
+                      }}
+                      className={cn(
+                        "p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 group",
+                        isSelected 
+                          ? "bg-brand/10 border-brand ring-2 ring-brand/30 shadow-xs" 
+                          : "bg-card border-border/70 hover:border-brand/40 hover:bg-accent/10"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        {b.customer_photo ? (
+                          <img src={b.customer_photo} alt={b.customer_name} className="h-11 w-11 rounded-full object-cover border-2 border-brand/30 shrink-0" />
+                        ) : (
+                          <div className="h-11 w-11 rounded-full bg-brand/15 text-brand font-black text-sm flex items-center justify-center shrink-0 border border-brand/20">
+                            {(b.customer_name || "C").charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-xs text-foreground truncate group-hover:text-brand transition-colors">{b.customer_name}</span>
+                            <span className="font-mono text-[10px] font-extrabold text-brand bg-brand/10 px-1.5 py-0.5 rounded-md shrink-0 border border-brand/20">
+                              {b.booking_reference}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground truncate mt-0.5 font-medium">
+                            {svcName} · {b.customer_phone}
+                          </div>
+                          <div className="text-[10px] font-semibold text-muted-foreground mt-0.5 flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-brand" /> {b.date} at {b.slot_time?.substring(0, 5)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        {STATUS_BADGES[b.status] || <span className="text-[10px] font-bold">{b.status}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
+
+            {/* Right Workbench Detail Box (7/12) */}
+            <div className="lg:col-span-7">
+              {activeBooking ? (
+                <div className="panel p-0 border border-border/80 shadow-md rounded-3xl overflow-hidden bg-card">
+                  
+                  {/* Glassmorphic Header Banner */}
+                  <div className="bg-gradient-to-br from-brand/10 via-accent/30 to-brand/5 border-b border-border/70 p-5 backdrop-blur-sm relative">
+                    <button
+                      onClick={() => setSelectedBookingId(null)}
+                      className="absolute top-4 right-4 text-xs font-bold text-muted-foreground hover:text-foreground bg-background/80 px-2 py-1 rounded-lg border border-border/60"
+                    >
+                      ✕ Close Workbench
+                    </button>
+
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                      {activeBooking.customer_photo ? (
+                        <img
+                          src={activeBooking.customer_photo}
+                          alt={activeBooking.customer_name}
+                          className="h-16 w-16 rounded-full object-cover border-2 border-brand/40 shadow-md shrink-0"
+                        />
+                      ) : (
+                        <div className="h-16 w-16 rounded-full bg-brand/15 text-brand border-2 border-brand/30 flex items-center justify-center font-black text-xl shrink-0 shadow-md">
+                          {(activeBooking.customer_name || "C").charAt(0).toUpperCase()}
+                        </div>
+                      )}
+
+                      <div className="flex-1 text-center sm:text-left space-y-1 min-w-0 pr-12 sm:pr-0">
+                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                          <h3 className="text-xl font-extrabold text-foreground tracking-tight">{activeBooking.customer_name}</h3>
+                          <span className="bg-brand/15 text-brand border border-brand/30 px-2.5 py-0.5 rounded-xl text-xs font-mono font-black">
+                            {activeBooking.booking_reference}
+                          </span>
+                          {STATUS_BADGES[activeBooking.status]}
+                        </div>
+
+                        <div className="text-xs text-muted-foreground font-medium flex flex-wrap items-center justify-center sm:justify-start gap-x-4 gap-y-1 pt-1">
+                          {activeBooking.customer_phone && (
+                            <a href={`tel:${activeBooking.customer_phone}`} className="flex items-center gap-1 bg-background/80 hover:bg-background px-2.5 py-1 rounded-lg border border-border/60 transition-colors">
+                              <Phone className="h-3 w-3 text-brand" /> {activeBooking.customer_phone}
+                            </a>
+                          )}
+                          {activeBooking.customer_email && !activeBooking.customer_email.startsWith("bookings+anon_") && (
+                            <a href={`mailto:${activeBooking.customer_email}`} className="flex items-center gap-1 bg-background/80 hover:bg-background px-2.5 py-1 rounded-lg border border-border/60 transition-colors">
+                              <Mail className="h-3 w-3 text-brand" /> {activeBooking.customer_email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* All-in-One Action Toolbar (STRICT CONDITION: Check-In FIRST, Complete ONLY AFTER Check-In!) */}
+                  <div className="p-4 bg-accent/10 border-b border-border/60 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Check-In Button: ONLY when status is "confirmed" */}
+                      {activeBooking.status === "confirmed" && (
+                        <Button
+                          size="sm"
+                          variant="brand"
+                          className="rounded-xl text-xs font-extrabold gap-1.5 h-9 px-4 shadow-xs"
+                          onClick={() => handleCheckInBooking(activeBooking)}
+                        >
+                          <CheckCircle2 className="h-4 w-4" /> ⚡ Check-In / Call
+                        </Button>
+                      )}
+
+                      {/* Complete & Request Feedback: ONLY AFTER Check-In! (checked_in, serving, or escalated) */}
+                      {["checked_in", "serving", "escalated"].includes(activeBooking.status) && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="rounded-xl text-xs font-extrabold gap-1.5 h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                          onClick={() => handleCompleteBooking(activeBooking)}
+                        >
+                          <ShieldCheck className="h-4 w-4" /> ✅ Complete &amp; Request Feedback
+                        </Button>
+                      )}
+
+                      {/* Escalated Button */}
+                      {["confirmed", "checked_in"].includes(activeBooking.status) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl text-xs font-bold gap-1.5 h-9 px-3 text-purple-600 border-purple-500/30 hover:bg-purple-500/10"
+                          onClick={() => handleEscalateBooking(activeBooking)}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 text-purple-600" /> Escalate
+                        </Button>
+                      )}
+
+                      {/* Reschedule Button */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl text-xs font-bold gap-1.5 h-9 px-3 border-brand/30 text-brand hover:bg-brand/10"
+                        onClick={() => {
+                          setShowInlineReschedule(!showInlineReschedule);
+                          setRescheduleDate(activeBooking.date);
+                          setRescheduleSlot(activeBooking.slot_time ? activeBooking.slot_time.substring(0, 5) : "10:00");
+                        }}
+                      >
+                        <RotateCw className="h-3.5 w-3.5" /> {showInlineReschedule ? "Close Reschedule" : "Reschedule"}
+                      </Button>
+
+                      {/* Print Pass Button */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl text-xs font-bold gap-1.5 h-9 px-3"
+                        onClick={() => handlePrintPass(activeBooking)}
+                      >
+                        <Printer className="h-3.5 w-3.5 text-foreground/70" /> Print Pass
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {["confirmed", "checked_in", "escalated"].includes(activeBooking.status) && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl text-xs font-bold text-rose-600 border-rose-500/30 hover:bg-rose-500/10 h-9 px-3"
+                            onClick={() => handleNoShowBooking(activeBooking)}
+                          >
+                            No-Show
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl text-xs font-bold text-gray-600 border-gray-500/30 hover:bg-gray-500/10 h-9 px-3"
+                            onClick={() => handleCancelBooking(activeBooking)}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline Reschedule Panel (Real-Time Slot Availability) */}
+                  {showInlineReschedule && (
+                    <div className="p-4 bg-brand/5 border-b border-brand/20 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold uppercase tracking-wider text-brand flex items-center gap-1.5">
+                          <RotateCw className="h-3.5 w-3.5" /> Real-Time Rescheduler &amp; Slot Availability
+                        </span>
+                        <button onClick={() => setShowInlineReschedule(false)} className="text-xs font-bold text-muted-foreground hover:text-foreground">
+                          ✕ Close
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">1. Select New Date</Label>
+                          <input
+                            type="date"
+                            value={rescheduleDate}
+                            onChange={(e) => setRescheduleDate(e.target.value)}
+                            className="w-full mt-1 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">2. Select Real-Time Time Slot</Label>
+                          {isLoadingRescheduleSlots ? (
+                            <div className="py-3 text-center text-xs text-muted-foreground animate-pulse font-medium">Checking live slot availability...</div>
+                          ) : rescheduleSlots.length === 0 ? (
+                            <div className="py-3 text-center text-xs text-muted-foreground border border-dashed rounded-xl p-2 bg-background/50">
+                              No slots available on this date.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-1.5 mt-1 max-h-[140px] overflow-y-auto p-1 border rounded-xl bg-background">
+                              {rescheduleSlots.map((slot: any) => {
+                                const isBooked = slot.status === "fully_booked" || slot.available_spots === 0;
+                                const isSelected = rescheduleSlot === slot.time;
+                                return (
+                                  <button
+                                    key={slot.time}
+                                    type="button"
+                                    disabled={isBooked}
+                                    onClick={() => setRescheduleSlot(slot.time)}
+                                    className={cn(
+                                      "rounded-lg border px-2 py-1.5 text-center text-[10px] font-extrabold transition-all flex flex-col items-center justify-center",
+                                      isBooked
+                                        ? "border-coral/10 bg-coral/5 text-coral/60 opacity-50 cursor-not-allowed"
+                                        : isSelected
+                                        ? "bg-brand text-white border-brand font-black shadow-xs"
+                                        : "border-border/80 text-foreground bg-accent/5 hover:border-brand/40"
+                                    )}
+                                  >
+                                    <span>{slot.time}</span>
+                                    {slot.available_spots !== undefined && (
+                                      <span className="text-[8px] font-semibold opacity-80">{slot.available_spots} left</span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2 border-t border-brand/10">
+                        <Button size="sm" variant="brand" disabled={isSavingReschedule || !rescheduleSlot} onClick={handleSaveInlineReschedule} className="text-xs h-8 px-4 font-extrabold rounded-xl">
+                          {isSavingReschedule ? "Saving..." : "Confirm Inline Reschedule"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Workbench Main Details Section */}
+                  <div className="p-5 space-y-4 max-h-[540px] overflow-y-auto">
+                    {/* Grid Key Info */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3.5 rounded-2xl bg-accent/10 border border-border/70">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <FileText className="h-3.5 w-3.5 text-brand" /> Service Category
+                        </div>
+                        <div className="text-xs font-extrabold text-foreground mt-1">
+                          {state.services.find(s => String(s.id) === String(activeBooking.service))?.name || "General Service"}
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-accent/10 border border-border/70">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-brand" /> Scheduled Date &amp; Time
+                        </div>
+                        <div className="text-xs font-extrabold text-foreground mt-1">
+                          {activeBooking.date} at {activeBooking.slot_time?.substring(0, 5)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Customer Booking Notes */}
+                    {activeBooking.notes && (
+                      <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-1">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-400">Customer Booking Notes</div>
+                        <div className="text-xs text-foreground italic font-medium">"{activeBooking.notes}"</div>
+                      </div>
+                    )}
+
+                    {/* Internal Staff Notes & Team Timeline */}
+                    <div className="p-3.5 rounded-2xl bg-background border border-border/70 space-y-2.5">
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                        <span className="flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5 text-brand" /> Internal Staff Notes &amp; Log</span>
+                        <span className="text-[9px] text-brand font-bold bg-brand/10 px-2 py-0.5 rounded-md">Team Only</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Type internal note (e.g. Verified passport, requested invoice)..."
+                          value={staffNoteText}
+                          onChange={(e) => setStaffNoteText(e.target.value)}
+                          className="text-xs h-9 rounded-xl bg-accent/10 border-border/70"
+                          onKeyDown={async (e) => {
+                            if (e.key === "Enter" && staffNoteText.trim()) {
+                              handleSaveStaffNote();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="brand"
+                          className="h-9 text-xs font-extrabold shrink-0 rounded-xl px-4"
+                          onClick={handleSaveStaffNote}
+                        >
+                          Add Note
+                        </Button>
+                      </div>
+                      {activeBooking.internal_notes ? (
+                        <div className="text-xs text-foreground bg-accent/20 p-3 rounded-xl border border-border/60 font-medium space-y-1">
+                          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Note Log</div>
+                          <div>{activeBooking.internal_notes}</div>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-muted-foreground italic text-center py-1">No internal staff notes recorded yet.</div>
+                      )}
+                    </div>
+
+                    {/* Customer Feedback Card (if submitted) */}
+                    {activeBooking.feedback_rating ? (
+                      <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-2">
+                        <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                          <Star className="h-4 w-4 fill-amber-400 text-amber-400" /> Customer Rating: {activeBooking.feedback_rating} / 5 Stars
+                        </div>
+                        {activeBooking.feedback_text && (
+                          <div className="text-xs text-muted-foreground italic bg-background p-3 rounded-xl border border-border/60">
+                            "{activeBooking.feedback_text}"
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-2xl border border-dashed border-border/70 bg-muted/10 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span className="truncate">Feedback Link: <code className="font-mono text-[10px] font-bold text-foreground">{getNetworkOrigin()}/feedback/{activeBooking.booking_reference}</code></span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[10px] font-extrabold rounded-lg shrink-0 border-brand/30 text-brand hover:bg-brand/10"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${getNetworkOrigin()}/feedback/${activeBooking.booking_reference}`);
+                            toast.success("Feedback link copied!");
+                          }}
+                        >
+                          Copy Feedback Link
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-24 text-center text-xs text-muted-foreground border border-dashed rounded-3xl bg-card p-6">
+                  Select an appointment from the left list stream to view customer workbench.
+                </div>
+              )}
+            </div>
+
           </div>
         )}
       </div>
@@ -1437,8 +1953,8 @@ export function BranchConsoleView({
   }
 
   return (
-    <div className="grid gap-5">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:gap-5">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 xl:grid-cols-4">
         <StatCard label="Waiting" value={<CountUp value={stats.waiting} />} hint={branch.openHours} />
         <StatCard label="Served today" value={<CountUp value={stats.served} />} />
         <StatCard label="Avg wait" value={<CountUp value={Math.round(stats.avgWait)} suffix=" min" />} />
@@ -1446,23 +1962,27 @@ export function BranchConsoleView({
       </div>
 
       <Reveal>
-        <div className="panel flex flex-wrap items-center gap-3 p-5">
-          <span className="text-sm font-medium">Customer touchpoints</span>
-          <Button asChild size="sm" variant="outline">
-            <a href={`/${companySlug}/branches/${branchSlug}/join`} target="_blank" rel="noopener noreferrer">
-              <QrCode className="h-4 w-4" /> Join page
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <a href={`/${companySlug}/branches/${branchSlug}/display`} target="_blank" rel="noopener noreferrer">
-              <MonitorPlay className="h-4 w-4" /> Display board
-            </a>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <a href={`/${companySlug}/branches/${branchSlug}/kiosk`} target="_blank" rel="noopener noreferrer">
-              Kiosk mode
-            </a>
-          </Button>
+        <div className="panel p-3.5 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-muted-foreground">Customer touchpoints</span>
+            <div className="grid grid-cols-3 gap-2 w-full sm:w-auto">
+              <Button asChild size="sm" variant="outline" className="text-xs px-2 sm:px-3 h-8">
+                <a href={`/${companySlug}/branches/${branchSlug}/join`} target="_blank" rel="noopener noreferrer">
+                  <QrCode className="h-3.5 w-3.5 mr-1" /> Join page
+                </a>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="text-xs px-2 sm:px-3 h-8">
+                <a href={`/${companySlug}/branches/${branchSlug}/display`} target="_blank" rel="noopener noreferrer">
+                  <MonitorPlay className="h-3.5 w-3.5 mr-1" /> Display
+                </a>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="text-xs px-2 sm:px-3 h-8">
+                <a href={`/${companySlug}/branches/${branchSlug}/kiosk`} target="_blank" rel="noopener noreferrer">
+                  Kiosk mode
+                </a>
+              </Button>
+            </div>
+          </div>
         </div>
       </Reveal>
 
@@ -1651,7 +2171,7 @@ export function QueryHistoryView({
       `"${t.created_at || t.createdAt || ''}"`
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e: string[]) => e.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -1743,12 +2263,12 @@ export function QueryHistoryView({
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="grid grid-cols-1 sm:flex items-center gap-2 w-full md:w-auto">
           {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={(e: any) => setStatusFilter(e.target.value)}
-            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto"
           >
             <option value="ALL">All Statuses</option>
             <option value="served">✅ Resolved Only</option>
@@ -1759,7 +2279,7 @@ export function QueryHistoryView({
           <select
             value={feedbackFilter}
             onChange={(e: any) => setFeedbackFilter(e.target.value)}
-            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-border/60 text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto"
           >
             <option value="ALL">All Feedback</option>
             <option value="RATED">⭐ With Star Rating</option>
@@ -1773,7 +2293,7 @@ export function QueryHistoryView({
               setDateFilter(e.target.value);
               if (e.target.value !== "CUSTOM") setCustomDate("");
             }}
-            className="h-9 px-3 text-xs font-black rounded-xl bg-primary/10 text-primary border border-primary/30 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-9 px-3 text-xs font-black rounded-xl bg-primary/10 text-primary border border-primary/30 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto"
           >
             <option value="TODAY">📅 Today (Default)</option>
             <option value="YESTERDAY">📅 Yesterday</option>
@@ -1788,7 +2308,7 @@ export function QueryHistoryView({
               type="date"
               value={customDate}
               onChange={(e) => setCustomDate(e.target.value)}
-              className="h-9 px-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-border text-foreground"
+              className="h-9 px-2 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-border text-foreground w-full sm:w-auto"
             />
           )}
         </div>
@@ -1797,13 +2317,14 @@ export function QueryHistoryView({
       {/* High-Density Data Table */}
       <div className="bg-white dark:bg-slate-900 border border-border/60 shadow-soft rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[700px] text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/80 dark:bg-slate-800/60 border-b border-border/60 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
                 <th className="p-3 pl-4">Token #</th>
                 <th className="p-3">Customer &amp; Contact</th>
                 <th className="p-3">Service &amp; Desk</th>
                 <th className="p-3">Disposition</th>
+                <th className="p-3">Operator Note</th>
                 <th className="p-3">Email Dispatch</th>
                 <th className="p-3">Customer Feedback &amp; Reply</th>
                 <th className="p-3 pr-4 text-right">Time</th>
@@ -1812,7 +2333,7 @@ export function QueryHistoryView({
             <tbody className="divide-y divide-border/40 text-xs font-medium">
               {filteredTickets.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                  <td colSpan={8} className="text-center py-12 text-muted-foreground">
                     <MessageSquare className="h-6 w-6 text-muted-foreground mx-auto opacity-40 mb-2" />
                     <p className="font-bold text-xs">No matching query records found for {dateFilter === "TODAY" ? "Today" : dateFilter}</p>
                     <p className="text-[11px] opacity-75 mt-0.5">Change the date filter above to view previous or past days data.</p>
@@ -1862,6 +2383,20 @@ export function QueryHistoryView({
                         )}
                       </td>
 
+                      {/* Operator Note */}
+                      <td className="p-3 min-w-[180px]">
+                        {t.note || t.message ? (
+                          <div className="bg-brand/5 dark:bg-brand/10 border border-brand/20 rounded-xl p-2 text-[11px] text-foreground font-medium flex items-start gap-1.5">
+                            <FileText className="h-3.5 w-3.5 text-brand shrink-0 mt-0.5" />
+                            <span className="line-clamp-2">{t.note || t.message}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground italic flex items-center gap-1">
+                            <FileText className="h-3 w-3 opacity-40" /> No notes added
+                          </span>
+                        )}
+                      </td>
+
                       {/* Email Status */}
                       <td className="p-3 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
@@ -1902,6 +2437,251 @@ export function QueryHistoryView({
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ServingCustomerDeskPanel({
+  desk,
+  current,
+  queue,
+  actions,
+  setIsTransferModalOpen,
+  refresh,
+}: {
+  desk: any;
+  current: any;
+  queue: any[];
+  actions: any;
+  setIsTransferModalOpen: (open: boolean) => void;
+  refresh: () => Promise<void>;
+}) {
+  const [noteText, setNoteText] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isNoteSaved, setIsNoteSaved] = useState(false);
+
+  useEffect(() => {
+    if (current) {
+      setNoteText(current.note || current.message || "");
+      setIsNoteSaved(false);
+    } else {
+      setNoteText("");
+      setIsNoteSaved(false);
+    }
+  }, [current?.id, current?.note, current?.message]);
+
+  const handleSaveNote = async () => {
+    if (!current) return;
+    setIsSavingNote(true);
+    try {
+      if (actions.updateTicketNote) {
+        await actions.updateTicketNote(current.id, noteText);
+      } else {
+        await apiFetch(`/api/tickets/${current.id}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ message: noteText, note: noteText }),
+        });
+        await refresh();
+      }
+      toast.success(`Note saved for token ${current.number}`);
+      setIsNoteSaved(true);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save note");
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  return (
+    <div className="panel overflow-hidden">
+      <div className="bg-brand px-6 py-8 text-center text-primary-foreground">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80">
+          {desk.label} · now serving
+        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={current?.number ?? "idle"}
+            initial={{ y: 22, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -22, opacity: 0 }}
+            className="mt-1 font-display text-6xl font-bold"
+          >
+            {current ? <FlipNumber value={current.number} /> : "—"}
+          </motion.div>
+        </AnimatePresence>
+        <div className="mt-2 text-sm opacity-85 font-medium">
+          {current ? current.customerName : "Ready for the next visitor"}
+        </div>
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Button
+            variant="brand"
+            size="lg"
+            disabled={!!current || queue.length === 0}
+            onClick={async () => {
+              try {
+                const res: any = await actions.callNext(desk.id);
+                if (res?.number) {
+                  toast.success(`Called token ${res.number}`);
+                } else if (res?.message) {
+                  toast.info(res.message);
+                } else {
+                  toast.success("Next visitor called");
+                }
+              } catch (err: any) {
+                toast.error(err.message || "Failed to call next visitor");
+              }
+            }}
+            className="w-full shadow-lg shadow-brand/20 font-bold"
+          >
+            <PhoneCall className="h-4 w-4 mr-1.5" /> Call Next
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={!current}
+            onClick={async () => {
+              if (!current) return;
+              try {
+                await actions.setTicketStatus(current.id, "skipped");
+                toast.info(`Skipped ticket ${current.number}`);
+              } catch (err: any) {
+                toast.error(err.message || "Failed to skip ticket");
+              }
+            }}
+            className="w-full font-semibold"
+          >
+            <SkipForward className="h-4 w-4 mr-1.5" /> Skip
+          </Button>
+        </div>
+
+        {/* Customer Note / Remarks Field */}
+        {current && (
+          <div className="rounded-2xl border border-brand/20 bg-brand/5 dark:bg-brand/10 p-3.5 space-y-2.5 shadow-sm">
+            <div className="flex items-center justify-between text-xs font-bold text-foreground">
+              <span className="flex items-center gap-1.5">
+                <FileText className="h-4 w-4 text-brand" />
+                Customer Note & Operator Remarks
+              </span>
+              {isNoteSaved && (
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  <Check className="h-3 w-3" /> Saved
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Textarea
+                value={noteText}
+                onChange={(e) => {
+                  setNoteText(e.target.value);
+                  setIsNoteSaved(false);
+                }}
+                placeholder="Add visit notes, customer query details, special instructions, or resolution remarks..."
+                className="min-h-[72px] text-xs resize-none rounded-xl border-border/60 bg-background/90 focus-visible:ring-brand/30 shadow-inner"
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="brand"
+                  disabled={isSavingNote}
+                  onClick={handleSaveNote}
+                  className="h-8 text-xs font-bold px-3 rounded-lg shadow-sm gap-1.5"
+                >
+                  {isSavingNote ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving Note...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" /> Save Note
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Visitor Service Resolution & Transfer Controls */}
+        <div className="border-t border-border/60 pt-4 space-y-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+            <span>Visitor Disposition Options</span>
+            {current && <span className="text-brand font-semibold">Active: {current.number} ({current.customerName})</span>}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {/* 1. Resolved */}
+            <button
+              type="button"
+              disabled={!current}
+              onClick={async () => {
+                if (!current) return;
+                try {
+                  await actions.setTicketStatus(current.id, "served", noteText);
+                  toast.success(`Ticket ${current.number} (${current.customerName}) marked as Resolved!`);
+                } catch (err: any) {
+                  toast.error(err.message || "Failed to resolve ticket");
+                }
+              }}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
+                current
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500 shadow-sm cursor-pointer"
+                  : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
+              )}
+            >
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              <span>Resolved</span>
+            </button>
+
+            {/* 2. Escalated */}
+            <button
+              type="button"
+              disabled={!current}
+              onClick={async () => {
+                if (!current) return;
+                try {
+                  await actions.setTicketStatus(current.id, "hold", noteText);
+                  toast.warning(`Ticket ${current.number} (${current.customerName}) Escalated for supervisor review.`);
+                } catch (err: any) {
+                  toast.error(err.message || "Failed to escalate ticket");
+                }
+              }}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
+                current
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 hover:border-amber-500 shadow-sm cursor-pointer"
+                  : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
+              )}
+            >
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <span>Escalated</span>
+            </button>
+
+            {/* 3. Transfer */}
+            <button
+              type="button"
+              disabled={!current}
+              onClick={() => {
+                if (current) setIsTransferModalOpen(true);
+              }}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-bold transition-all",
+                current
+                  ? "border-brand/40 bg-brand/10 text-brand hover:bg-brand/20 hover:border-brand shadow-sm cursor-pointer"
+                  : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
+              )}
+            >
+              <ArrowRightLeft className="h-5 w-5 text-brand" />
+              <span>Transfer</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

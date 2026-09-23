@@ -419,7 +419,7 @@ function SignupPage() {
 
   return (
     <div className={cn(
-      "grid min-h-screen lg:h-screen bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-y-auto lg:overflow-hidden",
+      "min-h-screen lg:h-screen lg:overflow-hidden bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans flex flex-col lg:grid",
       step === 1 ? "grid-cols-1" : "lg:grid-cols-[11fr_9fr]"
     )}>
       
@@ -445,9 +445,9 @@ function SignupPage() {
         }
       `}</style>
 
-      {/* Left Panel: Video & Showcase (55%) */}
+      {/* Left Panel: Video & Showcase (55%) - STICKY FULL HEIGHT */}
       <div className={cn(
-        "relative hidden overflow-hidden bg-[#0B0F19] h-full",
+        "relative hidden overflow-hidden bg-[#0B0F19] h-full lg:h-screen lg:sticky lg:top-0",
         step !== 1 && "lg:block"
       )}>
         <video 
@@ -496,10 +496,10 @@ function SignupPage() {
         </div>
       </div>
 
-      {/* Right/Main Panel: Form Wizard */}
+      {/* Right/Main Panel: Form Wizard - SCROLLABLE INDEPENDENTLY */}
       <div className={cn(
-        "relative flex flex-col z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] min-h-screen lg:h-screen lg:overflow-y-auto",
-        step === 1 ? "justify-start px-4 sm:px-6 lg:px-8" : "justify-center px-6 sm:px-12 lg:px-16 xl:px-20"
+        "relative flex flex-col z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] min-h-screen lg:h-screen lg:overflow-y-auto py-8 sm:py-12 lg:py-16 justify-start",
+        step === 1 ? "px-4 sm:px-8 lg:px-12" : "px-6 sm:px-12 lg:px-16 xl:px-20"
       )}>
 
         {/* Soft Radial Ambient Glow */}
@@ -700,56 +700,56 @@ function SignupPage() {
                         icon={User}
                       />
                       
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="sm:col-span-1">
+                      <div className="space-y-4">
+                        <FloatingInput
+                          id="email"
+                          label="Work Email"
+                          type="email"
+                          value={form.email}
+                          onChange={(v) => setFormKey("email", v)}
+                          error={touched && !!errors.email}
+                          errorMessage={errors.email}
+                          placeholder="admin@company.com"
+                          icon={Mail}
+                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <FloatingInput
-                            id="email"
-                            label="Work Email"
-                            type="email"
-                            value={form.email}
-                            onChange={(v) => setFormKey("email", v)}
-                            error={touched && !!errors.email}
-                            errorMessage={errors.email}
-                            placeholder="admin@company.com"
-                            icon={Mail}
+                            id="password"
+                            label="Password"
+                            type={showPassword ? "text" : "password"}
+                            value={form.password}
+                            onChange={(v) => setFormKey("password", v)}
+                            error={touched && !!errors.password}
+                            errorMessage={errors.password}
+                            placeholder="••••••••"
+                            icon={Lock}
+                            rightElement={
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="text-muted-foreground/60 hover:text-foreground transition-colors outline-none cursor-pointer flex items-center justify-center p-1"
+                                aria-label={showPassword ? "Hide password" : "Show password"}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="h-4 w-4" />
+                                ) : (
+                                  <Eye className="h-4 w-4" />
+                                )}
+                              </button>
+                            }
+                          />
+                          <FloatingInput
+                            id="confirmPassword"
+                            label="Confirm Password"
+                            type={showPassword ? "text" : "password"}
+                            value={form.confirmPassword}
+                            onChange={(v) => setFormKey("confirmPassword", v)}
+                            error={touched && !!errors.confirmPassword}
+                            errorMessage={errors.confirmPassword}
+                            placeholder="••••••••"
+                            icon={Lock}
                           />
                         </div>
-                        <FloatingInput
-                          id="password"
-                          label="Password"
-                          type={showPassword ? "text" : "password"}
-                          value={form.password}
-                          onChange={(v) => setFormKey("password", v)}
-                          error={touched && !!errors.password}
-                          errorMessage={errors.password}
-                          placeholder="••••••••"
-                          icon={Lock}
-                          rightElement={
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className="text-muted-foreground/60 hover:text-foreground transition-colors outline-none cursor-pointer flex items-center justify-center p-1"
-                              aria-label={showPassword ? "Hide password" : "Show password"}
-                            >
-                              {showPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
-                                <Eye className="h-4 w-4" />
-                              )}
-                            </button>
-                          }
-                        />
-                        <FloatingInput
-                          id="confirmPassword"
-                          label="Confirm Password"
-                          type={showPassword ? "text" : "password"}
-                          value={form.confirmPassword}
-                          onChange={(v) => setFormKey("confirmPassword", v)}
-                          error={touched && !!errors.confirmPassword}
-                          errorMessage={errors.confirmPassword}
-                          placeholder="••••••••"
-                          icon={Lock}
-                        />
                       </div>
                     </div>
 
@@ -949,8 +949,8 @@ function SignupPage() {
                           {Object.entries(companyAddons).map(([key, qty]) => {
                             if (qty <= 0) return null;
                             const comp = state.planComponents.find((c) => c.key === key);
-                            const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key);
-                            const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : 0);
+                            const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key === "sms_integration" ? "SMS Integration" : key);
+                            const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : key === "sms_integration" ? 500 : 0);
                             const cost = qty * price;
                             return (
                               <div key={key} className="flex justify-between">

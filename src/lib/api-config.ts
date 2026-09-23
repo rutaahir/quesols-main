@@ -22,3 +22,17 @@ export const getWsUrl = (path: string): string => {
   // Otherwise, fallback to direct port 8000 WS access
   return `ws://${window.location.hostname}:8000${path}`;
 };
+
+export const getNetworkOrigin = (): string => {
+  if (typeof window === "undefined") {
+    return "http://192.168.1.12:8080";
+  }
+  const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  const port = window.location.port ? `:${window.location.port}` : "";
+  
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${protocol}//192.168.1.12${port || ":8080"}`;
+  }
+  return window.location.origin;
+};

@@ -105,8 +105,16 @@ class OnlineBooking(BaseModel):
     notes = models.TextField(blank=True, default="")
     date = models.DateField()
     slot_time = models.TimeField()
+    customer_photo = models.TextField(blank=True, default="")
     booking_reference = models.CharField(max_length=50, unique=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="confirmed")
+    
+    desk = models.ForeignKey("queuing.Desk", on_delete=models.SET_NULL, null=True, blank=True, related_name="online_bookings")
+    escalated_notes = models.TextField(blank=True, default="")
+    internal_notes = models.TextField(blank=True, default="")
+    feedback_rating = models.IntegerField(null=True, blank=True)
+    feedback_text = models.TextField(blank=True, default="")
+    feedback_submitted_at = models.DateTimeField(null=True, blank=True)
 
     objects = TenantManager()
     all_objects = models.Manager()
@@ -134,6 +142,13 @@ class OnlineBooking(BaseModel):
 
 
 class BookingPageConfig(BaseModel):
+    PHOTO_MODE_CHOICES = [
+        ("none", "Disabled"),
+        ("capture", "Live Camera Capture Only"),
+        ("upload", "File Upload Only"),
+        ("both", "Capture or Upload"),
+    ]
+
     company = models.OneToOneField("companies.Company", on_delete=models.CASCADE, related_name="booking_config")
     logo_url = models.TextField(blank=True, default="")
     portal_name = models.CharField(max_length=255, blank=True, default="")
@@ -142,6 +157,9 @@ class BookingPageConfig(BaseModel):
     enabled_customer_fields = models.JSONField(default=list, blank=True)
     enabled_booking_fields = models.JSONField(default=list, blank=True)
     enabled_notification_channels = models.JSONField(default=list, blank=True)
+    photo_mode = models.CharField(max_length=20, choices=PHOTO_MODE_CHOICES, default="none")
+    photo_required = models.BooleanField(default=False)
+    form_field_configs = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.company.name} booking config"

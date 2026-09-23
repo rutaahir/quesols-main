@@ -6,6 +6,7 @@ class Desk(BaseModel):
     STATUS_CHOICES = [
         ("open", "Open"),
         ("paused", "Paused"),
+        ("break", "On Break"),
         ("offline", "Offline"),
     ]
 
@@ -122,7 +123,11 @@ class TokenSequence(BaseModel):
                 seq.last_number += 1
                 clean_prefix = (prefix or "").strip()
                 candidate = f"{clean_prefix}{seq.last_number:03d}" if clean_prefix else f"{seq.last_number:03d}"
-                exists = Ticket.objects.filter(branch=branch, token_number=candidate, created_at__date=today).exists()
+                exists = Ticket.objects.filter(
+                    branch=branch,
+                    token_number=candidate,
+                    status__in=["waiting", "called", "serving", "hold"]
+                ).exists()
                 if not exists:
                     seq.save(update_fields=["last_number"])
                     return candidate
@@ -194,6 +199,7 @@ class Ticket(BaseModel):
     customer_email = models.CharField(max_length=255, null=True, blank=True)
     customer_phone = EncryptedCharField(max_length=50, null=True, blank=True)
     customer_phone_index = models.CharField(max_length=64, db_index=True, null=True, blank=True)
+    customer_photo = models.TextField(blank=True, default="")
     tracking_code = models.CharField(max_length=64, unique=True, null=True, blank=True, default=generate_tracking_code)
     customer_consented_at = models.DateTimeField(null=True, blank=True)
     distance_at_checkin_meters = models.IntegerField(null=True, blank=True)
@@ -291,6 +297,42 @@ class KotNotificationLog(BaseModel):
 
     def __str__(self):
         return f"Log {self.ticket.token_number} - {self.channel} ({self.status})"
+
+class OperatorAttendance(BaseModel):
+    STATUS_CHOICES = [
+        ("checked_in", "Checked In"),
+        ("on_break", "On Break"),
+        ("checked_out", "Checked Out"),
+    ]
+
+    user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="attendances")
+    branch = models.ForeignKey("branches.Branch", on_delete=models.CASCADE, related_name="attendances")
+    company = models.ForeignKey("companies.Company", on_delete=models.CASCADE, related_name="attendances")
+    desk = models.ForeignKey(Desk, on_delete=models.SET_NULL, null=True, blank=True, related_name="attendances")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="checked_in")
+    check_in_time = models.DateTimeField(auto_now_add=True)
+    check_out_time = models.DateTimeField(null=True, blank=True)
+    break_start_time = models.DateTimeField(null=True, blank=True)
+    total_break_seconds = models.IntegerField(default=0)
+    break_count = models.IntegerField(default=0)
+    notes = models.TextField(null=True, blank=True)
+
+    objects = TenantManager()
+    all_objects = models.Manager()
+
+    def __str__(self):
+        return f"{self.user.email} - {self.branch.name} ({self.status})"
+
+class OperatorBreakLog(BaseModel):
+    attendance = models.ForeignKey(OperatorAttendance, on_delete=models.CASCADE, related_name="breaks")
+    break_start = models.DateTimeField(auto_now_add=True)
+    break_end = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.IntegerField(default=0)
+    reason = models.CharField(max_length=100, default="Tea / Lunch Break")
+
+    def __str__(self):
+        return f"Break for {self.attendance.user.email} ({self.reason})"
 
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver

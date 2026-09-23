@@ -5,6 +5,7 @@ import {
   Building2,
   CalendarDays,
   CreditCard,
+  FileText,
   LayoutDashboard,
   MonitorPlay,
   ScrollText,
@@ -49,6 +50,7 @@ const NAV: Record<string, NavItem[]> = {
   company_admin: [
     { id: "overview", label: "Company overview", icon: LayoutDashboard },
     { id: "branches", label: "Branches", icon: Building2 },
+    { id: "online_booking_fields", label: "Online Booking Form", icon: FileText },
     { id: "staff", label: "Team", icon: Users },
     { id: "alerts", label: "Alert rules", icon: Bell },
     { id: "branding", label: "Branding", icon: Settings },

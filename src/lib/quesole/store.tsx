@@ -61,17 +61,29 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     headers.set("Content-Type", "application/json");
   }
   
+  const isPublicPath =
+    path.startsWith("/api/public/") ||
+    path.includes("/by-slug/");
+
   const accessToken = localStorage.getItem("quesole.access_token");
-  if (accessToken && !path.startsWith("/api/public/")) {
+  if (accessToken && (!isPublicPath || path.includes("company-booking-config"))) {
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
-  
+
   let response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
   });
-  
-  if (response.status === 401 && path !== "/api/auth/login/") {
+
+  // If request failed with 401/403 on a public path (due to an expired/invalid token in localStorage), retry cleanly without Authorization header
+  if ((response.status === 401 || response.status === 403) && isPublicPath) {
+    const cleanHeaders = new Headers(headers);
+    cleanHeaders.delete("Authorization");
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: cleanHeaders,
+    });
+  } else if (response.status === 401 && path !== "/api/auth/login/") {
     const refreshToken = localStorage.getItem("quesole.refresh_token");
     if (refreshToken) {
       const refreshRes = await fetch(`${API_BASE}/api/auth/refresh/`, {
@@ -179,7 +191,8 @@ interface Ctx {
   actions: {
     joinQueue: (input: { branchId: string; serviceId: string; customerName: string; contact: string; customerEmail?: string; channel?: "qr" | "kiosk" | "remote" | "onscreen" | "sms" | "whatsapp"; note?: string }) => Promise<string>;
     callNext: (deskId: string) => Promise<any>;
-    setTicketStatus: (ticketId: string, status: Ticket["status"]) => Promise<void>;
+    setTicketStatus: (ticketId: string, status: Ticket["status"], note?: string) => Promise<void>;
+    updateTicketNote: (ticketId: string, note: string) => Promise<void>;
     transferTicket: (ticketId: string, deskId: string) => Promise<void>;
     createDesk: (input: { branchId: string; name: string }) => Promise<string>;
     updateDesk: (deskId: string, input: { name?: string; label?: string; isActive?: boolean; serviceIds?: string[]; assignedStaffId?: string | null; assignedStaffIds?: string[]; isOnlineBookingDesk?: boolean }) => Promise<void>;
@@ -782,7 +795,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         channel?: "qr" | "kiosk" | "remote" | "onscreen" | "sms" | "whatsapp";
       }) {
         const branchObj = stateRef.current.branches.find(b => String(b.id) === String(input.branchId));
-        const activeMethod = input.method || String(branchObj?.method || "1");
+        const activeMethod = input.channel === "whatsapp" ? "4" : input.channel === "sms" ? "3" : input.channel === "kiosk" ? "2" : (input.method || String(branchObj?.method || "1"));
 
         const res = await apiFetch("/api/public/join/", {
           method: "POST",
@@ -799,7 +812,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           })
         });
         loadData();
-        return String(res.id);
+        return res;
       },
 
       async callNext(deskId: string) {
@@ -822,7 +835,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         return res;
       },
 
-      async setTicketStatus(ticketId: string, status: Ticket["status"]) {
+      async setTicketStatus(ticketId: string, status: Ticket["status"], note?: string) {
         let actionStr = "serve";
         if (status === "served") actionStr = "complete";
         if (status === "skipped") actionStr = "skip";
@@ -832,14 +845,30 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           ...prev,
           tickets: prev.tickets.map((t) =>
             String(t.id) === String(ticketId)
-              ? { ...t, status, servedAt: status === "served" ? Date.now() : t.servedAt }
+              ? { ...t, status, note: note !== undefined ? note : t.note, message: note !== undefined ? note : (t as any).message, servedAt: status === "served" ? Date.now() : t.servedAt }
               : t
           )
         }));
 
         await apiFetch(`/api/tickets/${ticketId}/action/`, {
           method: "POST",
-          body: JSON.stringify({ action: actionStr })
+          body: JSON.stringify({ action: actionStr, notes: note || "", note: note || "" })
+        });
+        await loadData();
+      },
+
+      async updateTicketNote(ticketId: string, note: string) {
+        setState((prev) => ({
+          ...prev,
+          tickets: prev.tickets.map((t) =>
+            String(t.id) === String(ticketId)
+              ? { ...t, note, message: note }
+              : t
+          )
+        }));
+        await apiFetch(`/api/tickets/${ticketId}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ message: note, note: note })
         });
         await loadData();
       },
@@ -877,6 +906,12 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       },
 
       async setDeskStatus(deskId: string, status: Desk["status"]) {
+        setState((prev) => ({
+          ...prev,
+          desks: prev.desks.map((d) =>
+            String(d.id) === String(deskId) ? { ...d, status } : d
+          )
+        }));
         await apiFetch(`/api/desks/${deskId}/`, {
           method: "PATCH",
           body: JSON.stringify({ status })
@@ -1730,9 +1765,17 @@ export function ticketsOf(ticketsOrState: QuesoleState | Ticket[] | any, branchO
 }
 
 export function waitingOf(ticketsOrState: QuesoleState | Ticket[] | any, branchOrServiceId?: string) {
-  return ticketsOf(ticketsOrState, branchOrServiceId)
+  const list = ticketsOf(ticketsOrState, branchOrServiceId)
     .filter((t) => t.status === "waiting")
     .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+  const seenIds = new Set<string>();
+  return list.filter((t) => {
+    const id = String(t.id);
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
 }
 
 export function servingOf(ticketsOrState: QuesoleState | Ticket[] | any, branchOrServiceId?: string) {

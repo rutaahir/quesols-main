@@ -29,7 +29,8 @@ from queuing.views import (
     PublicTicketDetailView,
     PublicTicketFeedbackView,
     KotMessageTemplateViewSet,
-    KotNotificationLogViewSet
+    KotNotificationLogViewSet,
+    OperatorAttendanceViewSet
 )
 
 router = DefaultRouter()
@@ -51,6 +52,7 @@ router.register("queue-methods", QueueMethodViewSet, basename="queue-methods")
 router.register("tickets", TicketViewSet, basename="tickets")
 router.register("kot-message-templates", KotMessageTemplateViewSet, basename="kot-message-templates")
 router.register("kot-notification-logs", KotNotificationLogViewSet, basename="kot-notification-logs")
+router.register("operator/attendance", OperatorAttendanceViewSet, basename="operator-attendance")
 
 # Phase 3 ViewSets
 from notifications.views import AlertRuleViewSet, AlertEventViewSet, NotificationViewSet, NotificationTemplateViewSet
@@ -91,8 +93,8 @@ urlpatterns = [
     path("api/tickets/manual-issue/", ManualTicketIssueView.as_view(), name="tickets_manual_issue"),
     path("api/public/tracking/<str:tracking_code>/", PublicTrackingView.as_view(), name="public_tracking"),
     path("api/public/ticket/<str:ticket_id>/", PublicTicketDetailView.as_view(), name="public_ticket_detail"),
-    path("api/public/display/<str:branch_id>/", PublicDisplayView.as_view(), name="public_display"),
-    path("api/public/tickets/<str:tracking_code>/cancel/", PublicTicketCancelView.as_view(), name="public_ticket_cancel"),
+    path("api/public/tickets/<str:ticket_id>/", PublicTicketDetailView.as_view(), name="public_tickets_detail"),
+    path("api/public/ticket/<str:tracking_code>/feedback/", PublicTicketFeedbackView.as_view(), name="public_ticket_feedback_singular"),
     path("api/public/tickets/<str:tracking_code>/feedback/", PublicTicketFeedbackView.as_view(), name="public_ticket_feedback"),
     
     # Phase 3 reporting actions

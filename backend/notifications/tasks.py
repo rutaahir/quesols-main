@@ -112,6 +112,41 @@ def dispatch_notification(user, company, branch, trigger_type, title, body, chan
         logger.warning(f"[PUSH MOCK GATEWAY] Delivering push to {user.email}: {body}")
 
 
+def send_sms_notification(phone_number, body):
+    return _dispatch_sms(phone_number, body)
+
+
+def send_whatsapp_notification(phone_number, body):
+    """
+    Dispatch WhatsApp message via Twilio / MSG91 / WhatsApp Business API or console log fallback.
+    """
+    from django.conf import settings
+    if not phone_number:
+        logger.debug("[WhatsApp] Skipping dispatch: no phone number provided.")
+        return
+
+    clean_phone = phone_number.strip().replace(" ", "").replace("-", "")
+    if not clean_phone.startswith("+") and len(clean_phone) == 10:
+        clean_phone = f"+91{clean_phone}"
+
+    tw_from = getattr(settings, "TWILIO_WHATSAPP_FROM", None) or getattr(settings, "TWILIO_FROM_NUMBER", None)
+
+    if hasattr(settings, "TWILIO_ACCOUNT_SID") and getattr(settings, "TWILIO_ACCOUNT_SID", None) and tw_from:
+        try:
+            from twilio.rest import Client
+            client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            from_wa = tw_from if tw_from.startswith("whatsapp:") else f"whatsapp:{tw_from}"
+            to_wa = clean_phone if clean_phone.startswith("whatsapp:") else f"whatsapp:{clean_phone}"
+            message = client.messages.create(body=body, from_=from_wa, to=to_wa)
+            logger.info(f"[WhatsApp Twilio] Sent to {clean_phone} — SID: {message.sid}")
+            return
+        except Exception as e:
+            logger.error(f"[WhatsApp Twilio Error] {e}")
+
+    # Default console / mock fallback
+    logger.info(f"[WHATSAPP DISPATCH SUCCESS] → {clean_phone}: {body}")
+
+
 def _dispatch_sms(phone_number, body):
     """
     Route an SMS message through the backend configured via SMS_BACKEND setting.

@@ -316,17 +316,6 @@ function Kiosk() {
     );
   }
 
-  if (state.branches.length === 0) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-6 text-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <p className="text-sm font-medium text-muted-foreground">Loading kiosk system…</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!branch) throw notFound();
 
   const showLockScreen = !isDeviceUnlocked;

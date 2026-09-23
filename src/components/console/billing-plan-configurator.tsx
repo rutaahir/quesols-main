@@ -216,6 +216,7 @@ export function BillingPlanConfigurator({
     }
     return {
       whatsapp_integration: 0,
+      sms_integration: 0,
     };
   });
 
@@ -327,11 +328,8 @@ export function BillingPlanConfigurator({
     if (propMode !== "registration" && currentCompany) {
       async function loadBookingConfig() {
         try {
-          const res = await fetch(`http://${window.location.hostname}:8000/api/public/company-booking-config/`, {
-            headers: { "Authorization": `Bearer ${localStorage.getItem("quesole.access_token")}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
+          const data = await apiFetch("/api/company-booking-config/");
+          if (data) {
             setLogoUrl(data.logo_url || "");
             setPortalName(data.portal_name || "");
             setPrimaryColor(data.primary_color || "#7C3AED");
@@ -642,12 +640,8 @@ export function BillingPlanConfigurator({
   // Save Booking config details
   const saveBookingPageConfig = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/api/public/company-booking-config/`, {
+      await apiFetch("/api/company-booking-config/", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("quesole.access_token")}`
-        },
         body: JSON.stringify({
           logo_url: logoUrl,
           portal_name: portalName,
@@ -914,8 +908,8 @@ export function BillingPlanConfigurator({
                   .filter(([_, qty]) => qty > 0)
                   .map(([key, qty]) => {
                     const comp = state.planComponents.find((c) => c.key === key);
-                    const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key);
-                    const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : 0);
+                    const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key === "sms_integration" ? "SMS Integration" : key);
+                    const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : key === "sms_integration" ? 500 : 0);
                     const cost = qty * price;
                     return `
                       <tr>
@@ -2138,7 +2132,8 @@ export function BillingPlanConfigurator({
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       {[
-                        { key: "whatsapp_integration", title: "WhatsApp Integration", desc: "Deliver live queue digital tickets directly inside WhatsApp chat.", defaultPrice: 1500 }
+                        { key: "whatsapp_integration", title: "WhatsApp Integration", desc: "Deliver live queue digital tickets directly inside WhatsApp chat.", defaultPrice: 1500 },
+                        { key: "sms_integration", title: "SMS Integration", desc: "Enable SMS OTP verification and text message notifications for your customers.", defaultPrice: 500 }
                       ].map((addon) => {
                         const comp = state.planComponents.find((c) => c.key === addon.key);
                         const price = comp ? Number(comp.price_per_unit) : addon.defaultPrice;
@@ -2367,8 +2362,8 @@ export function BillingPlanConfigurator({
                   {Object.entries(companyAddons).map(([key, qty]) => {
                     if (qty <= 0) return null;
                     const comp = state.planComponents.find((c) => c.key === key);
-                    const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key);
-                    const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : 0);
+                    const label = comp?.label || (key === "whatsapp_integration" ? "WhatsApp Integration" : key === "sms_integration" ? "SMS Integration" : key);
+                    const price = comp ? Number(comp.price_per_unit) : (key === "whatsapp_integration" ? 1500 : key === "sms_integration" ? 500 : 0);
                     const cost = qty * price;
                     return (
                       <div key={key} className="flex justify-between">

@@ -150,7 +150,7 @@ export function Hero() {
   }, []);
 
   return (
-    <section id="hero-section" ref={ref} className="relative isolate flex h-screen min-h-[600px] flex-col justify-center overflow-hidden pt-16 lg:pt-20">
+    <section id="hero-section" ref={ref} className="relative isolate flex min-h-[85vh] lg:h-screen flex-col justify-center overflow-hidden pt-20 pb-10 lg:pt-24 lg:pb-16">
       {/* Background Video - Full Width with true CSS masking */}
       <div className="absolute inset-0 -z-20 overflow-hidden" aria-hidden>
         <video
@@ -160,11 +160,11 @@ export function Hero() {
           loop
           muted
           playsInline
-          className="h-full w-full object-cover video-mask"
+          className="h-full w-full object-cover video-mask opacity-60 lg:opacity-100"
         />
       </div>
 
-      <div className="mx-auto grid w-full max-w-7xl flex-1 items-center gap-10 px-5 pb-14 lg:grid-cols-[58fr_42fr] lg:gap-14 lg:px-8">
+      <div className="mx-auto grid w-full max-w-7xl flex-1 items-center gap-8 px-4 pb-8 lg:grid-cols-[58fr_42fr] lg:gap-14 lg:px-8">
         {/* Left Column: Copy floating above running background video */}
         <m.div
           style={{ y: textY }}
@@ -175,10 +175,10 @@ export function Hero() {
             className="inline-flex items-center gap-2 rounded-full border border-border bg-surface/90 px-3.5 py-1.5 text-xs font-semibold text-muted-foreground shadow-sm"
           >
             <span className="h-1.5 w-1.5 animate-breathe rounded-full bg-coral" />
-            Smart Queue Management. Better Experinace.
+            Smart Queue Management. Better Experience.
           </m.span>
 
-          <h1 className="mt-6 font-display text-[3.25rem] font-bold leading-[0.95] tracking-[-0.04em] sm:text-6xl lg:text-[4.75rem] text-foreground">
+          <h1 className="mt-4 sm:mt-6 font-display text-3xl sm:text-5xl lg:text-[4.75rem] font-bold leading-[1.05] sm:leading-[0.95] tracking-[-0.04em] text-foreground">
             <m.span {...enter(0.15)} className="inline-block">
               The Queue,{" "}
             </m.span>{" "}
@@ -189,19 +189,20 @@ export function Hero() {
 
           <m.p
             {...enter(0.35)}
-            className="mt-6 text-lg leading-relaxed text-muted-foreground"
+            className="mt-4 sm:mt-6 text-base sm:text-lg leading-relaxed text-muted-foreground"
           >
             Smart queuing made flexible—generate tokens online or offline through QR, displays, WhatsApp or digital tickets, and intelligently route customers across services and operators.
           </m.p>
 
-          <m.div {...enter(0.6)} className="mt-8 flex flex-wrap items-center gap-3">
+          <m.div {...enter(0.6)} className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <Magnetic>
               <m.div
                 initial={{ scale: 0.95 }}
                 animate={{ scale: 1 }}
                 transition={{ duration: 0.45, ease: EASE, delay: 0.6 }}
+                className="w-full sm:w-auto"
               >
-                <Button asChild size="lg" variant="brand" className="group shadow-md">
+                <Button asChild size="lg" variant="brand" className="group shadow-md w-full sm:w-auto justify-center">
                   <Link to="/pricing">
                     Check All Plans
                     <ArrowRight className="h-4 w-4 transition-transform duration-150 group-hover:translate-x-[3px]" />
@@ -209,25 +210,25 @@ export function Hero() {
                 </Button>
               </m.div>
             </Magnetic>
-            <Button size="lg" variant="glass" className="shadow-sm" onClick={() => setDemoOpen(true)}>
+            <Button size="lg" variant="glass" className="shadow-sm w-full sm:w-auto justify-center" onClick={() => setDemoOpen(true)}>
               <Play className="h-4 w-4 fill-current" /> Watch 60-second Demo
             </Button>
           </m.div>
 
           <m.ul
             {...enter(0.9)}
-            className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"
+            className="mt-6 sm:mt-8 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"
           >
             {["Minimal Hardware required", "Instant setup", "99.9% SLA uptime"].map((t) => (
               <li key={t} className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald" /> {t}
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald shrink-0" /> {t}
               </li>
             ))}
           </m.ul>
 
           <m.dl
             {...enter(1.05)}
-            className="mt-8 grid max-w-lg grid-cols-3 gap-3"
+            className="mt-6 sm:mt-8 grid w-full max-w-lg grid-cols-3 gap-2 sm:gap-3"
           >
             <HeroStat label="Served today" value={1248} />
             <HeroStat label="Avg wait" value={6.7} decimals={1} suffix=" min" />
@@ -247,8 +248,8 @@ export function Hero() {
 
 function ScrollCue() {
   return (
-    <div className="pointer-events-none flex justify-center pb-6">
-      <div className="relative h-10 w-px overflow-hidden bg-border">
+    <div className="pointer-events-none flex justify-center pb-4 sm:pb-6">
+      <div className="relative h-8 sm:h-10 w-px overflow-hidden bg-border">
         <motion.span
           className="absolute left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-primary"
           animate={{ y: [-4, 36], opacity: [0, 1, 0] }}
@@ -287,11 +288,11 @@ function HeroStat({
   }, [decimals, inView, value]);
 
   return (
-    <div ref={ref} className="panel px-4 py-3">
-      <dt className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+    <div ref={ref} className="panel px-2 py-3 sm:px-4 sm:py-3.5 text-center sm:text-left overflow-hidden">
+      <dt className="text-[9px] sm:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
         {label}
       </dt>
-      <dd className="mt-1 font-display text-xl font-bold sm:text-2xl">
+      <dd className="mt-0.5 font-display text-sm sm:text-2xl font-extrabold text-foreground tracking-tight">
         <CountUp value={v} decimals={decimals} suffix={suffix} duration={1.5} />
       </dd>
     </div>
@@ -736,7 +737,7 @@ export function LiveQueueDemo() {
         </Reveal>
 
         {/* Right Column: Staggered Stats Panel */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5 w-full">
           <DashStatCard
             label="Served today"
             value={served}
@@ -747,21 +748,6 @@ export function LiveQueueDemo() {
                 ↑ 18% vs yesterday
               </span>
             }
-            badgeColorClass="bg-emerald/10"
-            flashActive={showStatFlash}
-          />
-          <DashStatCard
-            label="People ahead"
-            value={queue.length}
-            icon={Users}
-            colorClass="bg-emerald/10 text-emerald"
-            subBadge="Across all counters"
-          />
-          <DashStatCard
-            label="Estimated wait"
-            value={queue.length * 2}
-            suffix=" min"
-            icon={Timer}
             colorClass="bg-sky/10 text-sky"
             subBadge="Average wait time"
           />

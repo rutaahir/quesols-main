@@ -333,6 +333,9 @@ class CompanyBranchesSummaryView(APIView):
                 elif key == "whatsapp_integration":
                     from queuing.models import QueueMethod
                     used = 1 if QueueMethod.objects.filter(branch=br, method="4", is_enabled=True).exists() else 0
+                elif key in ["sms_integration", "sms_pack"]:
+                    from queuing.models import QueueMethod
+                    used = 1 if QueueMethod.objects.filter(branch=br, method="3", is_enabled=True).exists() else 0
                 
                 nested_allocations[key] = {
                     "used": used,

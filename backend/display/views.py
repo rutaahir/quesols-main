@@ -17,6 +17,7 @@ from display.serializers import (
     DisplayTerminalSlotSerializer,
 )
 
+
 class PublicDisplayTerminalListView(APIView):
     permission_classes = [AllowAny]
 
@@ -25,7 +26,124 @@ class PublicDisplayTerminalListView(APIView):
         if not branch_id:
             return Response({"error": "branch_id parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
         terminals = DisplayTerminal.objects.filter(branch_id=branch_id, status="active").order_by("terminal_identifier")
+
+        # Auto-provision default slots for terminals that have no slots
+        for terminal in terminals:
+            if not terminal.slots.exists():
+                self._auto_provision_default_slot(terminal)
+
         return Response(PublicDisplayTerminalSerializer(terminals, many=True).data, status=status.HTTP_200_OK)
+
+    def _auto_provision_default_slot(self, terminal):
+        """Create one default slot containing all branch desks if none exist."""
+        try:
+            from queuing.models import Desk
+            branch_desks = Desk.objects.filter(branch=terminal.branch)
+            if branch_desks.exists():
+                slot = DisplayTerminalSlot.objects.create(terminal=terminal, order=1)
+                slot.desks.set(branch_desks)
+                slot.save()
+        except Exception as e:
+            print(f"Auto-provision slot error for terminal {terminal.id}: {e}")
+
+
+class PublicDisplayDataView(APIView):
+    """Returns desks, services and active tickets for a branch - used by the display board."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, branch_id):
+        try:
+            from queuing.models import Desk, Ticket
+
+            desks = Desk.objects.filter(branch_id=branch_id)
+            desks_data = []
+            for d in desks:
+                service_ids = []
+                try:
+                    service_ids = list(d.desk_services.values_list("service_id", flat=True))
+                except Exception:
+                    pass
+                desks_data.append({
+                    "id": str(d.id),
+                    "label": d.name,
+                    "name": d.name,
+                    "status": d.status,
+                    "branchId": str(d.branch_id),
+                    "is_active": getattr(d, "is_active", True),
+                    "serviceIds": [str(sid) for sid in service_ids],
+                })
+
+            # Services
+            services_data = []
+            try:
+                from services.models import Service
+                services = Service.objects.filter(branch_id=branch_id)
+                services_data = [
+                    {"id": str(s.id), "name": s.name, "prefix": getattr(s, "prefix", "")}
+                    for s in services
+                ]
+            except Exception:
+                pass
+
+            # Active tickets
+            active_tickets = Ticket.objects.filter(
+                branch_id=branch_id,
+                status__in=["waiting", "serving", "called"]
+            )
+            tickets_data = []
+            for t in active_tickets:
+                tickets_data.append({
+                    "id": str(t.id),
+                    "branch": str(t.branch_id),
+                    "token_number": t.token_number,
+                    "status": t.status,
+                    "service": str(t.service_id) if getattr(t, "service_id", None) else "",
+                    "desk": str(t.desk_id) if getattr(t, "desk_id", None) else None,
+                    "predicted_desk": str(t.predicted_desk_id) if getattr(t, "predicted_desk_id", None) else None,
+                    "created_at": t.created_at.isoformat() if getattr(t, "created_at", None) else None,
+                    "called_at": t.called_at.isoformat() if getattr(t, "called_at", None) else None,
+                    "served_at": t.served_at.isoformat() if getattr(t, "served_at", None) else None,
+                })
+
+            return Response({
+                "desks": desks_data,
+                "services": services_data,
+                "tickets": tickets_data,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PublicVerifyDisplaySessionView(APIView):
+    """Validates a display terminal session token server-side on page load to prevent localStorage bypass."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        terminal_id = request.data.get("terminal_id")
+        session_token = request.data.get("session_token")
+
+        if not terminal_id or not session_token:
+            return Response({"valid": False, "reason": "Missing credentials."}, status=status.HTTP_200_OK)
+
+        try:
+            terminal = DisplayTerminal.objects.get(id=terminal_id, status="active")
+        except DisplayTerminal.DoesNotExist:
+            return Response({"valid": False, "reason": "Terminal not found."}, status=status.HTTP_200_OK)
+
+        if terminal.session_token != session_token:
+            return Response({"valid": False, "reason": "Session token mismatch."}, status=status.HTTP_200_OK)
+
+        if not terminal.is_session_active():
+            return Response({"valid": False, "reason": "Session expired."}, status=status.HTTP_200_OK)
+
+        # Refresh last_seen to keep session alive
+        terminal.last_seen = timezone.now()
+        terminal.save(update_fields=["last_seen"])
+
+        return Response({"valid": True}, status=status.HTTP_200_OK)
 
 
 class DisplayTerminalLoginView(APIView):
@@ -53,7 +171,6 @@ class DisplayTerminalLoginView(APIView):
             return Response({"error": "Display terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
 
         if str(terminal.passcode).strip() == str(passcode).strip():
-            # Reset failed attempts on success
             cache.delete(lockout_key)
 
             old_token = terminal.session_token
@@ -132,14 +249,12 @@ class RegenerateDisplayPasscodeView(APIView):
         except DisplayTerminal.DoesNotExist:
             return Response({"error": "Display terminal not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Ensure user has access to terminal company
         if request.user.role != "super_admin" and terminal.company_id != request.user.company_id:
             return Response({"error": "Unauthorized access."}, status=status.HTTP_403_FORBIDDEN)
 
         new_passcode = "".join(str(random.randint(0, 9)) for _ in range(4))
         terminal.passcode = new_passcode
 
-        # Clear session & evict active connection
         old_token = terminal.session_token
         terminal.session_token = None
         terminal.connected_at = None
@@ -184,7 +299,7 @@ class DisplayTerminalViewSet(viewsets.ModelViewSet):
             for b in Branch.objects.filter(company=request.user.company):
                 try:
                     provision_displays_for_branch(b)
-                except Exception as e:
+                except Exception:
                     pass
 
         return super().list(request, *args, **kwargs)
@@ -207,7 +322,6 @@ class DisplayTerminalViewSet(viewsets.ModelViewSet):
         if not branch:
             raise ValidationError("You must specify a branch to create a display terminal.")
 
-        # Check display quota
         from billing.models import CompanyPlanAllocation
         comp_alloc = CompanyPlanAllocation.objects.filter(
             company=user.company, branch=branch, plan_component__key="live_display_screens"

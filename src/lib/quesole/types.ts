@@ -81,7 +81,7 @@ export interface Desk {
   staffIds?: string[];
   currentOperatorId?: string | null;
   currentOperatorEmail?: string | null;
-  status: "open" | "paused" | "offline";
+  status: "open" | "paused" | "break" | "offline";
   isActive?: boolean | undefined;
   isOnlineBookingDesk?: boolean;
 }
@@ -132,6 +132,7 @@ export interface Ticket {
   customerName: string;
   contact: string;
   customerEmail?: string | null | undefined;
+  customerPhoto?: string | undefined;
   channel?: "qr" | "kiosk" | "remote" | "sms" | "whatsapp" | "onscreen" | undefined;
   method?: string | number | undefined;
   note?: string | undefined;

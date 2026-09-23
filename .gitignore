@@ -51,3 +51,7 @@ backend/scratch_mysql8/
 ~$*.xlsx
 ~$*.docx
 ~$*.pptx
+
+# Local credential/note files
+msu credentials.txt
+

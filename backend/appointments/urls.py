@@ -23,6 +23,7 @@ router.register("time-slots", TimeSlotViewSet, basename="time-slots")
 router.register("online-bookings", OnlineBookingViewSet, basename="online-bookings")
 
 urlpatterns = [
+    path("company-booking-config/", BookingPageConfigView.as_view(), name="company-booking-config-admin"),
     path("public/company-booking-config/", BookingPageConfigView.as_view(), name="company-booking-config"),
     path("public/appointments/otp/send/", OtpSendView.as_view(), name="otp-send"),
     path("public/appointments/otp/verify/", OtpVerifyView.as_view(), name="otp-verify"),

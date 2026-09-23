@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
+import { getNetworkOrigin } from "@/lib/api-config";
 import { Button } from "@/components/ui/button";
 import {
   useQuesole,
@@ -35,7 +36,7 @@ import {
   apiFetch,
 } from "@/lib/quesole/store";
 import type { Branch, QueueMethod, AlertEvent } from "@/lib/quesole/types";
-import { CountUp, Reveal } from "@/components/quesole/motion";
+import { CountUp, Reveal, motion } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
 
 const METHOD_LABEL: Record<QueueMethod, string> = {
@@ -260,19 +261,24 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
       )}
 
       {/* --- TOP REFRESH & NOTIFICATIONS HEADER BAR --- */}
-      <div className="flex items-center justify-between pb-1 border-b border-border/40">
-        <div>
-          <h2 className="font-display text-xl font-bold tracking-tight text-foreground">Company Overview</h2>
-          <p className="text-xs text-muted-foreground">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-border/40">
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex items-center gap-2">
+            <h2 className="font-display text-xl sm:text-2xl font-black tracking-tight text-foreground">Company Overview</h2>
+            <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live System
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground truncate">
             {company.name} · Multi-branch operations command center
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
           {/* Notification bell with badge */}
           <div className="relative">
             <button
               onClick={() => setNotificationsOpen((v) => !v)}
-              className="relative rounded-xl border border-border bg-surface p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              className="relative rounded-xl border border-border bg-surface p-2 sm:p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all hover:scale-105 active:scale-95 shadow-2xs"
               title="Notifications & Alerts"
             >
               <Bell className="h-4 w-4" />
@@ -285,7 +291,7 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
 
             {/* Notification Popover Drawer */}
             {notificationsOpen && (
-              <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-border bg-surface p-4 shadow-2xl animate-in zoom-in-95">
+              <div className="absolute right-0 z-50 mt-2 w-72 sm:w-80 rounded-2xl border border-border bg-surface p-4 shadow-2xl animate-in zoom-in-95">
                 <div className="flex items-center justify-between border-b border-border/60 pb-3 mb-3">
                   <div className="flex items-center gap-2">
                     <Bell className="h-4 w-4 text-brand" />
@@ -338,75 +344,86 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
             size="sm"
             onClick={handleManualRefresh}
             disabled={isLoading}
-            className="h-9 rounded-xl text-xs font-medium"
+            className="h-8 sm:h-9 rounded-xl text-xs font-semibold px-3.5 hover:scale-105 active:scale-95 transition-all shadow-2xs"
           >
-            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5 text-muted-foreground", isLoading && "animate-spin")} />
+            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5 text-brand", isLoading && "animate-spin")} />
             Sync
           </Button>
         </div>
       </div>
 
-      {/* --- ONLINE BOOKING LINK CARD --- */}
+      {/* --- ONLINE BOOKING LINK HERO CARD --- */}
       {hasMethod4Active && (
         <Reveal>
-          <div className="panel bg-gradient-to-br from-indigo-500/5 via-surface to-brand/5 border-brand/20 p-6 shadow-md relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex-1 space-y-3">
-              <div className="flex items-center gap-2 text-brand">
-                <Globe className="h-5 w-5 animate-pulse" />
-                <span className="font-display text-sm font-bold uppercase tracking-wider">Your Online Booking Link</span>
+          <div className="panel bg-gradient-to-r from-indigo-500/10 via-surface to-purple-500/10 border-indigo-500/30 p-4 sm:p-6 shadow-lg relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 backdrop-blur-md group hover:border-indigo-500/50 transition-all">
+            {/* Background Decorative Ambient Glow */}
+            <div className="absolute -top-16 -right-16 h-48 w-48 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none group-hover:bg-indigo-500/20 transition-all duration-500" />
+            
+            <div className="flex-1 space-y-3 w-full min-w-0 relative z-10">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-500">
+                    <Globe className="h-4 w-4 animate-pulse" />
+                  </div>
+                  <span className="font-display text-xs sm:text-sm font-bold uppercase tracking-wider text-foreground">Your Online Booking Link</span>
+                </div>
+                <a 
+                  href={`/${company.slug}/online-booking`} 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="rounded-lg border border-indigo-500/30 bg-surface/80 px-2.5 py-1 text-[11px] font-bold text-indigo-500 hover:bg-indigo-500/10 transition-colors flex items-center gap-1 shrink-0 shadow-2xs"
+                  title="Open Customer Booking Flow"
+                >
+                  Preview <ExternalLink className="h-3 w-3" />
+                </a>
               </div>
-              <p className="text-xs text-muted-foreground max-w-xl">
-                Share this direct, direct booking link with your customers or print/display the QR code at your branches.
+              <p className="text-xs text-muted-foreground max-w-xl leading-relaxed">
+                Share this direct booking link with your customers or print/display the QR code at your branches.
               </p>
               
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-2">
-                <div className="flex-1 flex items-center gap-2 rounded-xl border border-border bg-accent/20 px-3.5 py-2.5 font-mono text-xs select-all text-foreground overflow-x-auto">
-                  {window.location.origin}/{company.slug}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-2 w-full min-w-0">
+                <div className="flex-1 flex items-center gap-2 rounded-xl border border-border/80 bg-background/80 px-3.5 py-2 font-mono text-[11px] sm:text-xs select-all text-foreground overflow-hidden min-w-0 shadow-2xs">
+                  <span className="truncate w-full font-semibold">{window.location.origin}/{company.slug}/online-booking</span>
                 </div>
                 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 gap-2 w-full sm:w-auto shrink-0">
                   <Button
                     variant="outline"
-                    className="rounded-xl h-10 px-4 text-xs font-semibold shrink-0 gap-1.5"
+                    size="sm"
+                    className="rounded-xl h-9 px-3.5 text-xs font-bold gap-1.5 justify-center w-full hover:border-brand/40"
                     onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/${company.slug}`);
+                      navigator.clipboard.writeText(`${window.location.origin}/${company.slug}/online-booking`);
                       toast.success("Booking link copied to clipboard!");
                     }}
                   >
-                    <Copy className="h-3.5 w-3.5" />
+                    <Copy className="h-3.5 w-3.5 text-brand" />
                     Copy Link
                   </Button>
                   <Button
                     variant="outline"
-                    className="rounded-xl h-10 px-4 text-xs font-semibold shrink-0 gap-1.5 hover:bg-brand/10 hover:text-brand"
+                    size="sm"
+                    className="rounded-xl h-9 px-3.5 text-xs font-bold gap-1.5 hover:bg-brand/10 hover:text-brand justify-center w-full"
                     onClick={() => setIsEditSlugOpen(true)}
                   >
-                    <Edit3 className="h-3.5 w-3.5" />
+                    <Edit3 className="h-3.5 w-3.5 text-purple-500" />
                     Edit Slug
                   </Button>
-                  <a 
-                    href={`/${company.slug}`} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="rounded-xl border border-border bg-surface p-2.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors shrink-0"
-                    title="Open Booking Flow"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
                 </div>
               </div>
             </div>
 
             {/* QR Code Container */}
-            <div className="flex flex-col items-center gap-2 border-l border-border/40 pl-6 shrink-0">
-              <div className="bg-white p-2.5 rounded-2xl shadow-sm border border-border/40">
+            <div className="flex flex-col items-center gap-2 border-t md:border-t-0 md:border-l border-border/40 pt-4 md:pt-0 md:pl-6 shrink-0 w-full md:w-auto relative z-10">
+              <div className="bg-white p-2.5 rounded-2xl shadow-md border border-border/40 group-hover:scale-105 transition-transform duration-300">
                 <QRCodeSVG 
-                  value={`${window.location.origin}/${company.slug}`} 
+                  value={`${getNetworkOrigin()}/${company.slug}/online-booking`} 
                   size={100}
                   level="H"
                 />
               </div>
-              <span className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase">Scan to Book</span>
+              <span className="text-[10px] font-extrabold text-muted-foreground tracking-wider uppercase flex items-center gap-1">
+                <Sparkles className="h-3 w-3 text-indigo-500" /> Scan to Book
+              </span>
             </div>
           </div>
         </Reveal>
@@ -415,8 +432,8 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
       {/* --- EDIT SLUG DIALOG --- */}
       {isEditSlugOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="panel w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between border-b border-border/60 pb-4 mb-4">
+          <div className="panel w-full max-w-md p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3 mb-4">
               <h3 className="font-display text-base font-bold text-foreground">Edit Booking Link Slug</h3>
               <button 
                 onClick={() => setIsEditSlugOpen(false)} 
@@ -477,17 +494,18 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
         </div>
       )}
 
-      {/* --- 1. TOP KPI ROW (4 REBUILT CARDS WITH TRENDS & SPARKLINES) --- */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* --- 1. TOP KPI ROW WITH THEMED CARDS --- */}
+      <div className="grid gap-2.5 sm:gap-4 grid-cols-2 lg:grid-cols-4">
         {/* KPI 1: WAITING NOW */}
         <KpiTile
           label="WAITING NOW"
           value={hasError ? "—" : <CountUp value={stats.waiting} />}
           hint={`${stats.branches} branches active`}
           trend={stats.waitingTrend}
-          trendInverted={true} // WAITING going down is GOOD (green)
+          trendInverted={true}
           sparkline={[8, 12, 10, 15, 11, stats.waiting]}
           onClick={() => setView("branches")}
+          accent="indigo"
         />
 
         {/* KPI 2: SERVED TODAY */}
@@ -495,9 +513,10 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
           label="SERVED TODAY"
           value={hasError ? "—" : <CountUp value={stats.served} />}
           trend={stats.servedTrend}
-          trendInverted={false} // SERVED going up is GOOD (green)
+          trendInverted={false}
           sparkline={[30, 45, 50, 62, 70, stats.served]}
           onClick={() => setView("branches")}
+          accent="emerald"
         />
 
         {/* KPI 3: AVG WAIT */}
@@ -505,9 +524,10 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
           label="AVG WAIT"
           value={hasError ? "—" : <CountUp value={Math.round(stats.avgWait)} suffix="m" />}
           trend={stats.avgWaitTrend}
-          trendInverted={true} // AVG WAIT going down is GOOD (green)
+          trendInverted={true}
           sparkline={[18, 16, 15, 14, 13, Math.round(stats.avgWait)]}
           onClick={() => setView("branches")}
+          accent="amber"
         />
 
         {/* KPI 4: STAFF ONLINE */}
@@ -519,35 +539,36 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
           trendInverted={false}
           sparkline={[2, 3, 4, 4, 5, stats.staffOnline]}
           onClick={() => setView("staff")}
+          accent="cyan"
         />
       </div>
 
       {/* --- ONLINE BOOKINGS STATS ROW --- */}
       {hasOnlineBranch && (
         <Reveal>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="panel p-5 border border-border/80 bg-accent/5">
+          <div className="grid gap-2.5 sm:gap-4 grid-cols-1 sm:grid-cols-3">
+            <div className="panel p-3.5 sm:p-5 border border-border/80 bg-accent/5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Upcoming Bookings</span>
-              <div className="mt-2 text-2xl font-bold text-foreground">
+              <div className="mt-1.5 text-xl sm:text-2xl font-bold text-foreground">
                 {isLoadingBookings ? "..." : upcomingCount}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">Confirmed appointments scheduled for today and later.</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Confirmed appointments scheduled for today and later.</p>
             </div>
             
-            <div className="panel p-5 border border-border/80 bg-accent/5">
+            <div className="panel p-3.5 sm:p-5 border border-border/80 bg-accent/5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">No-Show Rate</span>
-              <div className={cn("mt-2 text-2xl font-bold", noShowRate > 25 ? "text-coral" : "text-foreground")}>
+              <div className={cn("mt-1.5 text-xl sm:text-2xl font-bold", noShowRate > 25 ? "text-coral" : "text-foreground")}>
                 {isLoadingBookings ? "..." : `${noShowRate}%`}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">Percentage of past bookings marked as No-Show.</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Percentage of past bookings marked as No-Show.</p>
             </div>
             
-            <div className="panel p-5 border border-border/80 bg-accent/5">
+            <div className="panel p-3.5 sm:p-5 border border-border/80 bg-accent/5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Completed Bookings</span>
-              <div className="mt-2 text-2xl font-bold text-foreground">
+              <div className="mt-1.5 text-xl sm:text-2xl font-bold text-foreground">
                 {isLoadingBookings ? "..." : totalCompleted}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">Total online appointments served successfully.</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Total online appointments served successfully.</p>
             </div>
           </div>
         </Reveal>
@@ -556,18 +577,18 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
       {/* --- 2. ACTIVE ALERTS STRIP (NEW - SCROLLABLE HORIZONTAL FEED) --- */}
       {activeAlerts.length > 0 && (
         <Reveal>
-          <div className="rounded-2xl border border-coral/30 bg-coral/5 p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2.5">
+          <div className="rounded-2xl border border-coral/30 bg-coral/5 p-3.5 sm:p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-coral animate-bounce" />
                 <span className="font-display text-xs font-bold uppercase tracking-wider text-coral">
                   Critical Alerts Requiring Attention ({activeAlerts.length})
                 </span>
               </div>
-              <span className="text-[10px] text-muted-foreground">Click alert to jump to branch</span>
+              <span className="text-[10px] text-muted-foreground hidden sm:inline">Click alert to jump to branch</span>
             </div>
 
-            <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-thin">
+            <div className="flex gap-2.5 overflow-x-auto pb-1 no-scrollbar">
               {activeAlerts.map((al) => {
                 const branch = branches.find((b) => String(b.id) === String(al.branchId));
                 return (
@@ -575,18 +596,18 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
                     key={al.id}
                     onClick={() => scrollToBranch(al.branchId)}
                     className={cn(
-                      "flex shrink-0 cursor-pointer items-center gap-3 rounded-xl border bg-surface p-3 transition-all hover:scale-[1.02] shadow-sm",
+                      "flex shrink-0 cursor-pointer items-center gap-3 rounded-xl border bg-surface p-2.5 text-xs transition-all hover:scale-[1.02] shadow-sm max-w-[260px]",
                       al.severity === "critical" ? "border-l-4 border-l-coral border-border" : "border-l-4 border-l-amber-500 border-border"
                     )}
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-xs text-foreground">{al.title}</span>
-                        <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="font-semibold text-xs text-foreground truncate">{al.title}</span>
+                        <span className="rounded-md bg-accent px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground shrink-0">
                           {branch?.name ?? "Branch"}
                         </span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{al.detail}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{al.detail}</p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </div>
@@ -597,10 +618,10 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
         </Reveal>
       )}
 
-      {/* --- 3. BRANCH PERFORMANCE SECTION (REBUILT WITH SORTING & SPARK LINES) --- */}
+      {/* --- 3. BRANCH PERFORMANCE SECTION --- */}
       <Reveal>
-        <div className="panel p-6 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-5">
+        <div className="panel p-3.5 sm:p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-5">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 <Building2 className="h-4 w-4 text-brand" /> Branch Performance Matrix
@@ -608,23 +629,23 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
               <p className="text-xs text-muted-foreground mt-0.5">Real-time status, wait queues, desk loads and service methods</p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar max-w-full pb-1 sm:pb-0">
               {/* Sort selector */}
-              <div className="flex items-center gap-1.5 rounded-xl border border-border bg-accent/30 p-1 text-xs">
-                <Filter className="h-3.5 w-3.5 ml-1.5 text-muted-foreground" />
+              <div className="flex items-center gap-1 rounded-xl border border-border bg-accent/30 p-1 text-xs shrink-0">
+                <Filter className="h-3.5 w-3.5 ml-1 text-muted-foreground shrink-0" />
                 <button
                   onClick={() => setSortBy("wait")}
                   className={cn(
-                    "rounded-lg px-2.5 py-1 font-medium transition-colors",
+                    "rounded-lg px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap",
                     sortBy === "wait" ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  By wait time
+                  By wait
                 </button>
                 <button
                   onClick={() => setSortBy("name")}
                   className={cn(
-                    "rounded-lg px-2.5 py-1 font-medium transition-colors",
+                    "rounded-lg px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap",
                     sortBy === "name" ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -633,11 +654,11 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
                 <button
                   onClick={() => setSortBy("alerts")}
                   className={cn(
-                    "rounded-lg px-2.5 py-1 font-medium transition-colors",
+                    "rounded-lg px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap",
                     sortBy === "alerts" ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  Alerts first
+                  Alerts
                 </button>
               </div>
 
@@ -645,15 +666,15 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
                 variant="ghost"
                 size="sm"
                 onClick={() => setView("branches")}
-                className="h-8 text-xs text-brand hover:text-brand/80"
+                className="h-8 text-xs text-brand hover:text-brand/80 shrink-0 px-2"
               >
-                View all branches →
+                All branches →
               </Button>
             </div>
           </div>
 
           {/* Cards Grid */}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
             {sortedBranches.map((b, idx) => {
               const s = branchStats(state, b.id);
               const branchAlerts = activeAlerts.filter((al) => String(al.branchId) === String(b.id));
@@ -672,29 +693,29 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
                   }}
                   style={{ animationDelay: `${idx * 100}ms` }}
                   className={cn(
-                    "group relative rounded-2xl border bg-accent/20 p-5 transition-all duration-300 hover:border-brand/50 hover:shadow-md cursor-pointer",
+                    "group relative rounded-2xl border bg-accent/20 p-3.5 sm:p-5 transition-all duration-300 hover:border-brand/50 hover:shadow-md cursor-pointer",
                     isHighlighted ? "ring-2 ring-brand border-brand bg-brand/5 scale-[1.01]" : "border-border/60"
                   )}
                 >
                   {/* Card Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-display font-bold text-base text-foreground">{b.name}</span>
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="font-display font-bold text-sm sm:text-base text-foreground truncate">{b.name}</span>
                         {branchAlerts.length > 0 && (
-                          <span className="flex h-2.5 w-2.5 rounded-full bg-coral animate-ping" title="Active alert" />
+                          <span className="flex h-2.5 w-2.5 rounded-full bg-coral animate-ping shrink-0" title="Active alert" />
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">{b.address || `${b.city}, India`}</p>
+                      <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 truncate">{b.address || `${b.city}, India`}</p>
                     </div>
 
-                    <span className="shrink-0 rounded-full bg-brand/10 border border-brand/20 px-2.5 py-1 text-[11px] font-semibold text-brand">
+                    <span className="shrink-0 rounded-full bg-brand/10 border border-brand/20 px-2 py-0.5 text-[10px] sm:text-[11px] font-semibold text-brand truncate max-w-[130px]">
                       {METHOD_LABEL[(b.method || 1) as QueueMethod]}
                     </span>
                   </div>
 
                   {/* Live Stats Row */}
-                  <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+                  <div className="mt-3 sm:mt-4 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-center">
                     <MiniStat label="WAITING" value={s.waiting} highlight={s.waiting > 5} />
                     <MiniStat label="SERVED" value={s.served} />
                     <MiniStat label="AVG WAIT" value={`${Math.round(s.avgWait)}m`} />
@@ -702,13 +723,13 @@ export function CompanyOverviewManager({ companyId, setView, onSelectBranch }: C
                   </div>
 
                   {/* Mini Sparkline Curve */}
-                  <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between">
+                  <div className="mt-3 pt-2.5 border-t border-border/40 flex items-center justify-between">
                     <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Queue load trend</span>
                     <MiniSparkline data={[2, 4, 3, 6, s.waiting]} color="#6366F1" />
                   </div>
 
                   {/* Quick Action Footer */}
-                  <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="mt-2.5 flex items-center justify-between text-xs text-muted-foreground opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <span className="text-[11px] font-medium text-brand">Manage queues & desks</span>
                     <ArrowRight className="h-3.5 w-3.5 text-brand" />
                   </div>
@@ -835,6 +856,7 @@ function KpiTile({
   trendInverted,
   sparkline,
   onClick,
+  accent = "indigo",
 }: {
   label: string;
   value: React.ReactNode;
@@ -843,30 +865,68 @@ function KpiTile({
   trendInverted?: boolean;
   sparkline?: number[];
   onClick?: () => void;
+  accent?: "indigo" | "emerald" | "amber" | "cyan";
 }) {
   const isPositive = trendInverted ? (trend ?? 0) < 0 : (trend ?? 0) > 0;
 
+  const colorMap = {
+    indigo: {
+      border: "hover:border-indigo-500/50",
+      bg: "bg-gradient-to-br from-indigo-500/5 via-surface to-surface",
+      badge: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+      stroke: "#6366F1",
+    },
+    emerald: {
+      border: "hover:border-emerald-500/50",
+      bg: "bg-gradient-to-br from-emerald-500/5 via-surface to-surface",
+      badge: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+      stroke: "#10B981",
+    },
+    amber: {
+      border: "hover:border-amber-500/50",
+      bg: "bg-gradient-to-br from-amber-500/5 via-surface to-surface",
+      badge: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+      stroke: "#F59E0B",
+    },
+    cyan: {
+      border: "hover:border-cyan-500/50",
+      bg: "bg-gradient-to-br from-cyan-500/5 via-surface to-surface",
+      badge: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+      stroke: "#06B6D4",
+    },
+  }[accent];
+
   return (
-    <div
+    <motion.div
+      whileHover={{ y: -3, scale: 1.01 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       onClick={onClick}
-      className="panel cursor-pointer p-5 transition-all hover:scale-[1.02] hover:border-brand/40 shadow-sm relative overflow-hidden group"
+      className={cn(
+        "panel cursor-pointer p-4 sm:p-5 transition-all shadow-sm hover:shadow-md relative overflow-hidden group border border-border/80",
+        colorMap.bg,
+        colorMap.border
+      )}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
-        {trend !== undefined && (
+        {trend !== undefined ? (
           <span
             className={cn(
-              "flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold",
-              isPositive ? "bg-emerald-500/10 text-emerald-500" : "bg-coral/10 text-coral"
+              "flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold border",
+              isPositive ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-coral/10 text-coral border-coral/20"
             )}
           >
             {trend > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {Math.abs(trend)}%
           </span>
+        ) : (
+          <span className={cn("rounded-full px-2 py-0.5 text-[9px] font-bold border uppercase tracking-wider", colorMap.badge)}>
+            Live
+          </span>
         )}
       </div>
 
-      <div className="mt-3 font-display text-2xl font-bold tracking-tight text-foreground tabular-nums flex items-baseline gap-2">
+      <div className="mt-2.5 font-display text-2xl sm:text-3xl font-bold tracking-tight text-foreground tabular-nums flex items-baseline gap-2">
         {value}
       </div>
 
@@ -874,18 +934,18 @@ function KpiTile({
 
       {/* SVG Sparkline at bottom */}
       {sparkline && (
-        <div className="mt-3 h-6 w-full opacity-60 group-hover:opacity-100 transition-opacity">
-          <MiniSparkline data={sparkline} color="#6366F1" />
+        <div className="mt-3 h-7 w-full opacity-70 group-hover:opacity-100 transition-opacity">
+          <MiniSparkline data={sparkline} color={colorMap.stroke} id={label.replace(/\s+/g, '-').toLowerCase()} />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
 function MiniStat({ label, value, highlight }: { label: string; value: string | number; highlight?: boolean }) {
   return (
-    <div className={cn("rounded-xl p-2.5 transition-colors", highlight ? "bg-coral/10 border border-coral/30" : "bg-surface border border-border/40")}>
-      <div className={cn("font-display text-lg font-bold tabular-nums", highlight ? "text-coral" : "text-foreground")}>
+    <div className={cn("rounded-xl p-2.5 transition-all hover:scale-[1.03]", highlight ? "bg-coral/10 border border-coral/30" : "bg-surface border border-border/40")}>
+      <div className={cn("font-display text-base sm:text-lg font-bold tabular-nums", highlight ? "text-coral" : "text-foreground")}>
         {value}
       </div>
       <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">{label}</div>
@@ -893,23 +953,32 @@ function MiniStat({ label, value, highlight }: { label: string; value: string | 
   );
 }
 
-function MiniSparkline({ data, color }: { data: number[]; color: string }) {
+function MiniSparkline({ data, color = "#6366F1", id = "spark" }: { data: number[]; color?: string; id?: string }) {
   if (!data || data.length < 2) return null;
   const max = Math.max(...data, 1);
   const min = Math.min(...data);
   const range = max - min || 1;
 
-  const points = data
-    .map((val, idx) => {
-      const x = (idx / (data.length - 1)) * 100;
-      const y = 24 - ((val - min) / range) * 20;
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const pointsArr = data.map((val, idx) => {
+    const x = (idx / (data.length - 1)) * 100;
+    const y = 24 - ((val - min) / range) * 18;
+    return { x, y };
+  });
+
+  const polylinePoints = pointsArr.map((p) => `${p.x},${p.y}`).join(" ");
+  const areaPoints = `0,24 ${polylinePoints} 100,24`;
+  const gradId = `spark-grad-${id}`;
 
   return (
-    <svg className="h-6 w-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
-      <polyline fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={points} />
+    <svg className="h-7 w-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+          <stop offset="100%" stopColor={color} stopOpacity={0.0} />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints} fill={`url(#${gradId})`} />
+      <polyline fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" points={polylinePoints} />
     </svg>
   );
 }

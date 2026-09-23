@@ -58,6 +58,7 @@ import type { QueueMethod, Branch } from "@/lib/quesole/types";
 import { CountUp, Reveal } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
 import { BranchDesksServicesManager } from "@/components/console/branch-desks-services";
+import { OnlineBookingFormConfigurator } from "@/components/console/online-booking-form-configurator";
 
 const METHOD_LABEL: Record<QueueMethod, string> = {
   1: "Single QR ticket",
@@ -126,6 +127,12 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
           <div className="h-8 w-48 rounded bg-muted/40" />
         </div>
       </div>
+    );
+  }
+
+  if (view === "online_booking_fields") {
+    return (
+      <OnlineBookingFormConfigurator companyId={companyId} companySlug={companySlug} />
     );
   }
 
@@ -2241,6 +2248,8 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               queue_sms: "Sends digital queue tokens directly to the customer's phone via SMS text message.",
               queue_whatsapp: "Sends digital queue tokens directly to the customer via WhatsApp chat message.",
               online_module: "Enables online appointment booking and remote queue joining for this branch.",
+              sms_integration: "Enable SMS OTP verification and text message notifications for your organization.",
+              whatsapp_integration: "Deliver live queue digital tickets directly inside WhatsApp chat.",
             };
 
             const virtualComponents = [
@@ -2275,7 +2284,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
             // Section definitions
             const capacityKeys = ["operator_screens", "services", "paper_roll_screens", "printed_qr"];
             const queueKeys = ["queue_qr", "queue_kiosk", "queue_sms", "queue_whatsapp"];
-            const addonKeys = ["online_module", "sms_pack", "custom_domain", "advanced_analytics", "api_integration"];
+            const addonKeys = ["online_module", "sms_integration", "sms_pack", "whatsapp_integration", "custom_domain", "advanced_analytics", "api_integration"];
 
             const capacityCards = allCards.filter(c => capacityKeys.includes(c.key));
             const queueCards = allCards.filter(c => queueKeys.includes(c.key));

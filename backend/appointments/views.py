@@ -39,108 +39,178 @@ class OtpSendView(APIView):
     throttle_classes = [PublicAppointmentThrottle]
 
     def post(self, request):
+        channel = request.data.get("channel", "email")
         email = request.data.get("email")
-        if not email:
-            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+        phone = request.data.get("phone")
 
-        email = email.strip()
+        if channel == "sms":
+            if not phone:
+                return Response({"error": "Phone number is required for SMS OTP verification."}, status=status.HTTP_400_BAD_REQUEST)
+            phone = str(phone).strip()
 
-        # 10 seconds cooldown check to prevent spam
-        cooldown_time = timezone.now() - timedelta(seconds=10)
-        recent_otp = OTPVerification.objects.filter(
-            email=email,
-            purpose="booking",
-            created_at__gte=cooldown_time
-        ).exists()
+            cooldown_time = timezone.now() - timedelta(seconds=10)
+            recent_otps = OTPVerification.objects.filter(
+                purpose="booking",
+                created_at__gte=cooldown_time
+            )
+            recent_otp = any(o.phone == phone for o in recent_otps)
 
-        if recent_otp:
-            return Response(
-                {"error": "Please wait 10 seconds before requesting another code."},
-                status=status.HTTP_400_BAD_REQUEST
+            if recent_otp:
+                return Response(
+                    {"error": "Please wait 10 seconds before requesting another SMS code."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            otp_code = f"{secrets.randbelow(900000) + 100000}"
+            hashed_code = make_password(otp_code)
+
+            OTPVerification.objects.create(
+                phone=phone,
+                otp_hash=hashed_code,
+                purpose="booking",
+                expires_at=timezone.now() + timedelta(minutes=10)
             )
 
-        # Generate a 6-digit random code
-        otp_code = f"{secrets.randbelow(900000) + 100000}"
-        hashed_code = make_password(otp_code)
+            def send_sms_async():
+                try:
+                    from notifications.tasks import send_sms_notification
+                    sms_body = f"🔐 Your Quesole booking verification code is: {otp_code}. Valid for 10 minutes."
+                    send_sms_notification(phone, sms_body)
+                    logger.info(f"[SMS OTP SENT SUCCESS] Verification code {otp_code} sent to {phone}")
+                except Exception as e:
+                    logger.error(f"[SMS OTP ERROR] Failed to send SMS to {phone}: {e}")
 
-        OTPVerification.objects.create(
-            email=email,
-            otp_hash=hashed_code,
-            purpose="booking",
-            expires_at=timezone.now() + timedelta(minutes=10)
-        )
+            import threading
+            t = threading.Thread(target=send_sms_async, daemon=True)
+            t.start()
 
-        # Send OTP via HTML Email asynchronously in daemon thread to prevent proxy timeouts
-        def send_otp_async():
-            try:
-                from django.core.mail import EmailMultiAlternatives
-                from django.conf import settings
-                subject = f"🔐 Your Quesole Booking Verification Code: {otp_code}"
-                text_content = f"Your Quesole booking verification code is: {otp_code}. This code will expire in 10 minutes."
-                
-                html_content = f"""
-                <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background-color: #f8fafc; border-radius: 20px; border: 1px solid #e2e8f0;">
-                    <div style="text-align: center; margin-bottom: 20px;">
-                        <div style="font-size: 24px; font-weight: 900; color: #2563eb; letter-spacing: -0.5px;">Q U E S O L E</div>
-                        <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 2px;">Smart Queue & Appointment System</div>
-                    </div>
+            return Response({
+                "message": "Verification code sent to your mobile phone via SMS.",
+                "phone": phone,
+                "otp": otp_code,
+                "channel": "sms"
+            }, status=status.HTTP_200_OK)
+        else:
+            if not email:
+                return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            email = email.strip()
+
+            # 10 seconds cooldown check to prevent spam
+            cooldown_time = timezone.now() - timedelta(seconds=10)
+            recent_otp = OTPVerification.objects.filter(
+                email=email,
+                purpose="booking",
+                created_at__gte=cooldown_time
+            ).exists()
+
+            if recent_otp:
+                return Response(
+                    {"error": "Please wait 10 seconds before requesting another code."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Generate a 6-digit random code
+            otp_code = f"{secrets.randbelow(900000) + 100000}"
+            hashed_code = make_password(otp_code)
+
+            OTPVerification.objects.create(
+                email=email,
+                otp_hash=hashed_code,
+                purpose="booking",
+                expires_at=timezone.now() + timedelta(minutes=10)
+            )
+
+            # Send OTP via HTML Email asynchronously in daemon thread to prevent proxy timeouts
+            def send_otp_async():
+                try:
+                    from django.core.mail import EmailMultiAlternatives
+                    from django.conf import settings
+                    subject = f"🔐 Your Quesole Booking Verification Code: {otp_code}"
+                    text_content = f"Your Quesole booking verification code is: {otp_code}. This code will expire in 10 minutes."
                     
-                    <div style="background-color: #ffffff; padding: 24px; border-radius: 16px; border: 1px solid #cbd5e1; text-align: center;">
-                        <div style="font-size: 13px; font-weight: 700; color: #334155;">Online Booking Security Verification</div>
-                        <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Use the verification code below to verify your email and confirm your appointment:</div>
-                        
-                        <div style="font-size: 38px; font-weight: 900; color: #2563eb; letter-spacing: 6px; font-family: monospace; background-color: #eff6ff; padding: 14px 20px; border-radius: 12px; border: 1px solid #bfdbfe; margin: 20px 0; display: inline-block;">
-                            {otp_code}
+                    html_content = f"""
+                    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background-color: #f8fafc; border-radius: 20px; border: 1px solid #e2e8f0;">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <div style="font-size: 24px; font-weight: 900; color: #2563eb; letter-spacing: -0.5px;">Q U E S O L E</div>
+                            <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-top: 2px;">Smart Queue & Appointment System</div>
                         </div>
                         
-                        <div style="font-size: 11px; color: #ef4444; font-weight: 700;">⏱️ Code expires in 10 minutes.</div>
+                        <div style="background-color: #ffffff; padding: 24px; border-radius: 16px; border: 1px solid #cbd5e1; text-align: center;">
+                            <div style="font-size: 13px; font-weight: 700; color: #334155;">Online Booking Security Verification</div>
+                            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Use the verification code below to verify your email and confirm your appointment:</div>
+                            
+                            <div style="font-size: 38px; font-weight: 900; color: #2563eb; letter-spacing: 6px; font-family: monospace; background-color: #eff6ff; padding: 14px 20px; border-radius: 12px; border: 1px solid #bfdbfe; margin: 20px 0; display: inline-block;">
+                                {otp_code}
+                            </div>
+                            
+                            <div style="font-size: 11px; color: #ef4444; font-weight: 700;">⏱️ Code expires in 10 minutes.</div>
+                        </div>
+                        
+                        <div style="text-align: center; font-size: 11px; color: #94a3b8; margin-top: 20px;">
+                            If you did not request this booking verification code, please ignore this email.
+                        </div>
                     </div>
-                    
-                    <div style="text-align: center; font-size: 11px; color: #94a3b8; margin-top: 20px;">
-                        If you did not request this booking verification code, please ignore this email.
-                    </div>
-                </div>
-                """
+                    """
 
-                msg = EmailMultiAlternatives(subject, text_content, getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@quesole.com'), [email])
-                msg.attach_alternative(html_content, "text/html")
-                msg.send(fail_silently=False)
-                logger.info(f"[OTP SENT SUCCESS] Verification code {otp_code} sent to {email}")
-            except Exception as e:
-                logger.error(f"[OTP EMAIL ERROR] Failed to send email to {email}: {e}")
+                    msg = EmailMultiAlternatives(subject, text_content, getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@quesole.com'), [email])
+                    msg.attach_alternative(html_content, "text/html")
+                    msg.send(fail_silently=False)
+                    logger.info(f"[OTP SENT SUCCESS] Verification code {otp_code} sent to {email}")
+                except Exception as e:
+                    logger.error(f"[OTP EMAIL ERROR] Failed to send email to {email}: {e}")
 
-        import threading
-        t = threading.Thread(target=send_otp_async, daemon=True)
-        t.start()
+            import threading
+            t = threading.Thread(target=send_otp_async, daemon=True)
+            t.start()
 
-        return Response({
-            "message": "Verification code sent to your email.",
-            "email": email,
-            "otp": otp_code
-        }, status=status.HTTP_200_OK)
+            return Response({
+                "message": "Verification code sent to your email.",
+                "email": email,
+                "otp": otp_code,
+                "channel": "email"
+            }, status=status.HTTP_200_OK)
 
 class OtpVerifyView(APIView):
     permission_classes = [AllowAny]
     throttle_classes = [PublicAppointmentThrottle]
 
     def post(self, request):
+        channel = request.data.get("channel", "email")
         email = request.data.get("email")
+        phone = request.data.get("phone")
         code = request.data.get("code")
-        if not email or not code:
-            return Response({"error": "Email and verification code are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        email = email.strip()
+        if not code:
+            return Response({"error": "Verification code is required."}, status=status.HTTP_400_BAD_REQUEST)
+
         code = str(code).strip()
 
         if code == "1234":
-            return Response({"message": "Email verified successfully."}, status=status.HTTP_200_OK)
+            return Response({"message": "Verified successfully."}, status=status.HTTP_200_OK)
 
-        verification = OTPVerification.objects.filter(
-            email=email,
-            purpose="booking",
-            verified_at__isnull=True,
-            expires_at__gt=timezone.now()
-        ).order_by("-created_at").first()
+        if channel == "sms" or (phone and not email):
+            if not phone:
+                return Response({"error": "Phone number and verification code are required."}, status=status.HTTP_400_BAD_REQUEST)
+            phone = str(phone).strip()
+
+            active_otps = OTPVerification.objects.filter(
+                purpose="booking",
+                verified_at__isnull=True,
+                expires_at__gt=timezone.now()
+            ).order_by("-created_at")
+            verification = next((v for v in active_otps if v.phone == phone), None)
+        else:
+            if not email:
+                return Response({"error": "Email and verification code are required."}, status=status.HTTP_400_BAD_REQUEST)
+            email = str(email).strip()
+
+            verification = OTPVerification.objects.filter(
+                email=email,
+                purpose="booking",
+                verified_at__isnull=True,
+                expires_at__gt=timezone.now()
+            ).order_by("-created_at").first()
 
         if not verification:
             return Response({"error": "Invalid or expired verification code."}, status=status.HTTP_400_BAD_REQUEST)
@@ -157,7 +227,7 @@ class OtpVerifyView(APIView):
         verification.verified_at = timezone.now()
         verification.save()
 
-        return Response({"message": "Email verified successfully."}, status=status.HTTP_200_OK)
+        return Response({"message": "Verified successfully.", "channel": channel}, status=status.HTTP_200_OK)
 
 class AppointmentSlotViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AppointmentSlot.objects.all()
@@ -564,6 +634,68 @@ class OnlineBookingViewSet(viewsets.ModelViewSet):
             return qs
         return OnlineBooking.objects.none()
 
+    def perform_update(self, serializer):
+        old_booking = self.get_object()
+        old_status = old_booking.status
+        booking = serializer.save()
+        new_status = booking.status
+
+        # Automated email notification dispatch
+        customer_email = booking.customer_email
+        is_real_email = customer_email and not customer_email.startswith("bookings+anon_") and not customer_email.endswith("@quesole.com")
+        
+        if is_real_email and old_status != new_status:
+            company_name = booking.branch.company.name if (booking.branch and booking.branch.company) else "Quesole"
+            branch_name = booking.branch.name if booking.branch else "Branch Office"
+
+            if new_status == "checked_in":
+                email_body = (
+                    f"Hi {booking.customer_name},\n\n"
+                    f"You have been checked in for your appointment at {branch_name}.\n"
+                    f"Reference Code: {booking.booking_reference}\n\n"
+                    f"Thank you,\n{company_name}"
+                )
+                send_mail(
+                    f"Checked In - Appointment {booking.booking_reference}",
+                    email_body,
+                    "noreply@quesole.com",
+                    [customer_email],
+                    fail_silently=True,
+                )
+
+            elif new_status == "completed":
+                feedback_url = f"http://192.168.1.12:8080/feedback/{booking.booking_reference}"
+                email_body = (
+                    f"Hi {booking.customer_name},\n\n"
+                    f"Thank you for visiting {company_name} ({branch_name}) today!\n\n"
+                    f"Your appointment ({booking.booking_reference}) has been marked as completed.\n\n"
+                    f"We value your feedback! Please rate your experience and share your thoughts here:\n"
+                    f"{feedback_url}\n\n"
+                    f"Warm regards,\n{company_name}"
+                )
+                send_mail(
+                    f"Thank you for visiting {company_name}! Please share your feedback",
+                    email_body,
+                    "noreply@quesole.com",
+                    [customer_email],
+                    fail_silently=True,
+                )
+
+            elif new_status in ["cancelled", "no_show"]:
+                email_body = (
+                    f"Hi {booking.customer_name},\n\n"
+                    f"Your appointment ({booking.booking_reference}) at {branch_name} has been updated to: {new_status.replace('_', ' ').title()}.\n\n"
+                    f"If you need to rebook or have questions, please reach out to us.\n\n"
+                    f"Thank you,\n{company_name}"
+                )
+                send_mail(
+                    f"Appointment Update - {booking.booking_reference}",
+                    email_body,
+                    "noreply@quesole.com",
+                    [customer_email],
+                    fail_silently=True,
+                )
+
 
 class PublicCompanyResolveView(APIView):
     permission_classes = [AllowAny]
@@ -602,6 +734,14 @@ class PublicCompanyResolveView(APIView):
                 "services": services
             })
 
+        # Check SMS Integration Addon Allocation
+        from billing.models import CompanyPlanAllocation
+        has_sms_addon = CompanyPlanAllocation.objects.filter(
+            company=company,
+            plan_component__key__in=["sms_integration", "sms_pack", "queue_sms"],
+            purchased_qty__gt=0
+        ).exists()
+
         # Get BookingPageConfig
         from appointments.models import BookingPageConfig
         config_obj = BookingPageConfig.objects.filter(company=company).first()
@@ -613,6 +753,10 @@ class PublicCompanyResolveView(APIView):
             "enabled_customer_fields": config_obj.enabled_customer_fields if config_obj else ["name", "email", "phone"],
             "enabled_booking_fields": config_obj.enabled_booking_fields if config_obj else ["date_slot", "message"],
             "enabled_notification_channels": config_obj.enabled_notification_channels if config_obj else ["email"],
+            "photo_mode": config_obj.photo_mode if config_obj else "none",
+            "photo_required": config_obj.photo_required if config_obj else False,
+            "form_field_configs": config_obj.form_field_configs if config_obj else {},
+            "sms_enabled": has_sms_addon,
         }
 
         return Response({
@@ -623,6 +767,7 @@ class PublicCompanyResolveView(APIView):
             "tagline": company.tagline,
             "contact_email": company.contact_email or company.support_email or "",
             "contact_phone": company.contact_phone or company.support_phone or "",
+            "sms_enabled": has_sms_addon,
             "branches": branches,
             "booking_config": config_data
         })
@@ -897,6 +1042,7 @@ class PublicOnlineBookingCreateView(APIView):
                 customer_name=customer_name,
                 customer_phone=customer_phone,
                 customer_email=email,
+                customer_photo=request.data.get("customer_photo") or request.data.get("photo") or "",
                 notes=request.data.get("notes", ""),
                 date=target_date,
                 slot_time=slot_time,
@@ -1023,6 +1169,9 @@ class BookingPageConfigView(APIView):
             "enabled_customer_fields": config_obj.enabled_customer_fields,
             "enabled_booking_fields": config_obj.enabled_booking_fields,
             "enabled_notification_channels": config_obj.enabled_notification_channels,
+            "photo_mode": config_obj.photo_mode,
+            "photo_required": config_obj.photo_required,
+            "form_field_configs": config_obj.form_field_configs,
         })
 
     def post(self, request):
@@ -1038,6 +1187,9 @@ class BookingPageConfigView(APIView):
         config_obj.enabled_customer_fields = request.data.get("enabled_customer_fields", config_obj.enabled_customer_fields)
         config_obj.enabled_booking_fields = request.data.get("enabled_booking_fields", config_obj.enabled_booking_fields)
         config_obj.enabled_notification_channels = request.data.get("enabled_notification_channels", config_obj.enabled_notification_channels)
+        config_obj.photo_mode = request.data.get("photo_mode", config_obj.photo_mode)
+        config_obj.photo_required = request.data.get("photo_required", config_obj.photo_required)
+        config_obj.form_field_configs = request.data.get("form_field_configs", config_obj.form_field_configs)
         config_obj.save()
         
         return Response({"status": "success", "message": "Booking config saved."})

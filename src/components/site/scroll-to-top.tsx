@@ -72,7 +72,7 @@ export function ScrollToTop() {
           }}
           onClick={scrollToTop}
           className={cn(
-            "fixed bottom-6 right-6 z-50",
+            "fixed bottom-4 sm:bottom-6 right-20 sm:right-24 z-50",
             "flex h-12 w-12 items-center justify-center rounded-full",
             "glass shadow-soft cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
             "border border-border/80 text-foreground transition-shadow",

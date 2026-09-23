@@ -16,12 +16,14 @@ class BranchViewSet(viewsets.ModelViewSet):
             return [IsCompanyAdminOnly()]
         if self.action in ["list", "retrieve"]:
             return [IsCompanyActiveOrPublic()]
+        if self.action in ["kot_session_lock", "kot_session_release", "verify_kiosk_password"]:
+            return [AllowAny()]
         return [IsBranchAdmin()]
 
     def get_queryset(self):
         user = self.request.user
         if not user or not user.is_authenticated:
-            if self.action in ["list", "retrieve"]:
+            if self.action in ["list", "retrieve", "kot_session_lock", "kot_session_release", "verify_kiosk_password"]:
                 return Branch.objects.filter(status="active")
             return Branch.objects.none()
         if getattr(user, "role", None) == "super_admin":

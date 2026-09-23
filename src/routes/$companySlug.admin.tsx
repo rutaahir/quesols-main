@@ -4,6 +4,7 @@ import {
   Bell,
   Building2,
   CreditCard,
+  FileText,
   LayoutDashboard,
   Users,
   Settings,
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/$companySlug/admin")({
 const NAV: NavItem[] = [
   { id: "overview", label: "Company overview", icon: LayoutDashboard },
   { id: "branches", label: "Branches", icon: Building2 },
+  { id: "online_booking_fields", label: "Online Booking Form", icon: FileText },
   { id: "staff", label: "Team", icon: Users },
   { id: "alerts", label: "Alert rules", icon: Bell },
   { id: "branding", label: "Branding", icon: Settings },

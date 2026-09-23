@@ -107,6 +107,7 @@ function KotScreen() {
   const [selectedServiceId, setSelectedServiceId] = useState(""); const [channel, setChannel] = useState<"sms" | "whatsapp">("sms");
   const [formError, setFormError] = useState<string | null>(null); const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedChannel, setConfirmedChannel] = useState<"sms" | "whatsapp">("sms"); const [confirmedPhone, setConfirmedPhone] = useState("");
+  const [confirmedWhatsappUrl, setConfirmedWhatsappUrl] = useState("");
 
   const rawMethods = branch?.enabledMethods || branch?.enabled_methods;
   const enabledMethods = (rawMethods && Array.isArray(rawMethods) && rawMethods.length > 0 ? rawMethods : [1, 2, 3, 4]).map(Number);
@@ -268,17 +269,6 @@ function KotScreen() {
 
   if (!branch) throw notFound();
 
-  if (state.branches.length === 0) return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm font-medium text-muted-foreground">Loading KOT system…</p>
-      </div>
-    </div>
-  );
-
-  if (!branch) throw notFound();
-
   if (!isKotEnabled) return (
     <div className="relative flex min-h-screen flex-col bg-background text-foreground select-none overflow-hidden">
       <BgDecoration />
@@ -329,13 +319,31 @@ function KotScreen() {
     if (isServiceMode && services.length > 0 && !selectedServiceId) { setFormError("Please select a service."); return; }
     setIsSubmitting(true);
     try {
-      await actions.joinQueue({
+      const res: any = await actions.joinQueue({
         branchId: branch.id,
         serviceId: isServiceMode ? (selectedServiceId || services[0]?.id || "") : "",
         customerName: name.trim(), contact: phone.trim(), channel,
         ...(email.trim() ? { customerEmail: email.trim() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
+
+      if (channel === "whatsapp") {
+        let waUrl = res?.whatsapp_url;
+        if (!waUrl) {
+          const cleanP = phone.trim().replace(/\D/g, "");
+          const pWithCode = cleanP.length === 10 ? `91${cleanP}` : cleanP;
+          const msg = `🎫 *Quesole Digital Token*\n\nHello ${name.trim()}!\nYour queue token for *${branch.name}* is confirmed.`;
+          waUrl = `https://api.whatsapp.com/send?phone=${pWithCode}&text=${encodeURIComponent(msg)}`;
+        }
+        setConfirmedWhatsappUrl(waUrl);
+
+        try {
+          window.open(waUrl, "_blank", "noopener,noreferrer");
+        } catch (e) {
+          console.warn("Auto-launching WhatsApp token link:", e);
+        }
+      }
+
       setConfirmedChannel(channel); setConfirmedPhone(phone.trim()); setScreen("confirmation");
     } catch (err: any) { setFormError(err.message || "Failed to create ticket. Please try again."); }
     finally { setIsSubmitting(false); }
@@ -574,7 +582,29 @@ function KotScreen() {
                   Your queue token has been sent to your <strong className="text-foreground">{confirmedChannel === "sms" ? "SMS" : "WhatsApp"}</strong>.<br />
                   <span className="font-mono text-sm text-foreground/80">{confirmedPhone}</span>
                 </p>
-                <div className="inline-flex items-center gap-2 rounded-full bg-primary/8 border border-primary/15 px-5 py-2 text-sm font-bold text-primary">
+
+                {confirmedChannel === "whatsapp" && confirmedWhatsappUrl && (
+                  <div className="pt-2 space-y-3">
+                    <div className="mx-auto w-40 h-40 bg-white p-2.5 rounded-2xl shadow-md border border-slate-200 flex flex-col items-center justify-center">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(confirmedWhatsappUrl)}`}
+                        alt="Scan QR for WhatsApp Token"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">Scan QR code with your phone camera to receive your token on WhatsApp</p>
+                    <a
+                      href={confirmedWhatsappUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-6 py-3.5 shadow-lg hover:shadow-emerald-500/20 transition-all cursor-pointer w-full"
+                    >
+                      <MessageSquare className="h-4 w-4" /> Open WhatsApp Token Chat
+                    </a>
+                  </div>
+                )}
+
+                <div className="inline-flex items-center gap-2 rounded-full bg-primary/8 border border-primary/15 px-5 py-2 text-sm font-bold text-primary mt-1">
                   <MessageSquare className="h-4 w-4" />Check your {confirmedChannel === "sms" ? "messages" : "WhatsApp"} for token &amp; queue position
                 </div>
               </div>

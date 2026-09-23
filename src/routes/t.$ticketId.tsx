@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { CheckCircle2, MapPin, Timer, Users, Loader2, Clock } from "lucide-react";
 import { Logo } from "@/components/site/logo";
-import { useQuesole, positionOf } from "@/lib/quesole/store";
+import { useQuesole, positionOf, apiFetch } from "@/lib/quesole/store";
 import { CountUp, FlipNumber, motion } from "@/components/quesole/motion";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -30,20 +30,12 @@ function TokenPage() {
   const [loading, setLoading] = useState(!storeInfo);
 
   useEffect(() => {
-    if (storeInfo) {
-      setLoading(false);
-      return;
-    }
-
     let isMounted = true;
     const fetchTicket = async () => {
       try {
-        const res = await fetch(`http://${window.location.hostname}:8000/api/public/ticket/${ticketId}/`);
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) {
-            setRemoteInfo(data);
-          }
+        const data = await apiFetch(`/api/public/ticket/${ticketId}/`);
+        if (isMounted && data) {
+          setRemoteInfo(data);
         }
       } catch (e) {
         console.error("Failed to fetch public ticket:", e);
@@ -58,7 +50,7 @@ function TokenPage() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [ticketId, storeInfo]);
+  }, [ticketId]);
 
   if (loading) {
     return (
@@ -79,6 +71,7 @@ function TokenPage() {
       deskId: remoteInfo.deskId,
       number: remoteInfo.number,
       customerName: remoteInfo.customerName,
+      customerPhoto: remoteInfo.customerPhoto || remoteInfo.customer_photo,
       contact: remoteInfo.contact,
       note: remoteInfo.note,
       status: remoteInfo.status,
@@ -145,18 +138,23 @@ function TokenPage() {
             )}
           >
             <div className="text-[11px] font-semibold uppercase tracking-[0.2em] opacity-85">
-              {isDone ? "Completed" : isNow ? "It's your turn" : "Your token"}
+              {remoteInfo?.isAppointment ? "Confirmed Appointment Pass" : isDone ? "Completed" : isNow ? "It's your turn" : "Your token"}
             </div>
-            <div className="mt-1 font-display text-7xl font-bold">
+            <div className="mt-1 font-display text-5xl sm:text-7xl font-bold tracking-tight">
               <FlipNumber value={ticket.number} />
             </div>
-            <div className="mt-2 text-sm opacity-90">
+            <div className="mt-2 text-sm opacity-90 font-medium">
               {service?.name} · {branch?.name}
             </div>
           </div>
 
           <div className="p-6 space-y-6">
-            {!isDone && (
+            {remoteInfo?.isAppointment ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Stat icon={Clock} label="Appointment Date" value={remoteInfo.appointmentDate || "Scheduled"} />
+                <Stat icon={Timer} label="Time Slot" value={remoteInfo.slotTime || "10:00"} />
+              </div>
+            ) : !isDone && (
               <div className="grid grid-cols-3 gap-3">
                 <Stat icon={Users} label="Ahead" value={ahead} />
                 <Stat icon={Clock} label="Est. Wait" value={`~${estWait}m`} />
@@ -164,20 +162,26 @@ function TokenPage() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Progress</span>
-                <span className="font-semibold text-foreground">{Math.round(progress)}%</span>
+            {!remoteInfo?.isAppointment && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Progress</span>
+                  <span className="font-semibold text-foreground">{Math.round(progress)}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-accent overflow-hidden">
+                  <div
+                    className="h-full bg-brand rounded-full transition-all duration-500"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-2 rounded-full bg-accent overflow-hidden">
-                <div
-                  className="h-full bg-brand rounded-full transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
+            )}
 
-            {isNow ? (
+            {remoteInfo?.isAppointment ? (
+              <div className="rounded-2xl bg-emerald/10 border border-emerald/30 p-4 text-emerald font-medium text-xs text-center">
+                ✓ Your appointment is confirmed! Please present this pass or reference ID <strong className="text-foreground">{ticket.number}</strong> at the reception upon arrival.
+              </div>
+            ) : isNow ? (
               <div className="rounded-2xl bg-coral/10 border border-coral/30 p-4 text-coral font-medium text-xs">
                 ⚡ Please proceed to <strong className="text-foreground">{desk?.label || "the counter"}</strong> immediately.
               </div>
@@ -192,9 +196,18 @@ function TokenPage() {
               </p>
             )}
 
-            <div className="rounded-2xl bg-accent/40 px-4 py-3 text-left text-xs text-muted-foreground">
-              <div className="font-semibold text-foreground">{ticket.customerName}</div>
-              {ticket.contact} {ticket.note ? `· ${ticket.note}` : ""}
+            <div className="rounded-2xl bg-accent/40 px-4 py-3 text-left text-xs text-muted-foreground flex items-center gap-3">
+              {(ticket.customerPhoto || remoteInfo?.customerPhoto || remoteInfo?.customer_photo) ? (
+                <img
+                  src={ticket.customerPhoto || remoteInfo?.customerPhoto || remoteInfo?.customer_photo}
+                  alt={ticket.customerName || "Customer Photo"}
+                  className="h-10 w-10 rounded-full object-cover border border-primary/30 shrink-0 shadow-sm"
+                />
+              ) : null}
+              <div>
+                <div className="font-semibold text-foreground">{ticket.customerName}</div>
+                {ticket.contact} {ticket.note ? `· ${ticket.note}` : ""}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -202,7 +215,7 @@ function TokenPage() {
 
       <footer className="py-6 text-center text-xs text-muted-foreground/70 flex items-center justify-center gap-1.5 border-t border-border/40 mt-12 bg-background/50">
         <span>Powered by</span>
-        <span className="font-extrabold tracking-tight text-foreground">Quesoles</span>
+        <Logo size={14} className="h-5 w-auto" />
       </footer>
     </div>
   );

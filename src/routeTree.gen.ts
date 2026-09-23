@@ -24,6 +24,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as CompanySlugIndexRouteImport } from './routes/$companySlug.index'
 import { Route as CompanySlugAdminRouteImport } from './routes/$companySlug.admin'
 import { Route as CompanySlugLoginRouteImport } from './routes/$companySlug.login'
+import { Route as CompanySlugOnlineBookingRouteImport } from './routes/$companySlug.online-booking'
 import { Route as FeedbackTrackingCodeRouteImport } from './routes/feedback.$trackingCode'
 import { Route as TTicketIdRouteImport } from './routes/t.$ticketId'
 import { Route as CompanySlugBranchesBranchSlugRouteImport } from './routes/$companySlug.branches.$branchSlug'
@@ -108,6 +109,12 @@ const CompanySlugLoginRoute = CompanySlugLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => CompanySlugRoute,
 } as any)
+const CompanySlugOnlineBookingRoute =
+  CompanySlugOnlineBookingRouteImport.update({
+    id: '/online-booking',
+    path: '/online-booking',
+    getParentRoute: () => CompanySlugRoute,
+  } as any)
 const FeedbackTrackingCodeRoute = FeedbackTrackingCodeRouteImport.update({
   id: '/feedback/$trackingCode',
   path: '/feedback/$trackingCode',
@@ -170,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
+  '/$companySlug/online-booking': typeof CompanySlugOnlineBookingRoute
   '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
   '/$companySlug/': typeof CompanySlugIndexRoute
@@ -194,6 +202,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
+  '/$companySlug/online-booking': typeof CompanySlugOnlineBookingRoute
   '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
   '/$companySlug': typeof CompanySlugIndexRoute
@@ -219,6 +228,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/$companySlug/admin': typeof CompanySlugAdminRoute
   '/$companySlug/login': typeof CompanySlugLoginRoute
+  '/$companySlug/online-booking': typeof CompanySlugOnlineBookingRoute
   '/feedback/$trackingCode': typeof FeedbackTrackingCodeRoute
   '/t/$ticketId': typeof TTicketIdRoute
   '/$companySlug/': typeof CompanySlugIndexRoute
@@ -246,6 +256,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/$companySlug/admin'
     | '/$companySlug/login'
+    | '/$companySlug/online-booking'
     | '/feedback/$trackingCode'
     | '/t/$ticketId'
     | '/$companySlug/'
@@ -270,6 +281,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/$companySlug/admin'
     | '/$companySlug/login'
+    | '/$companySlug/online-booking'
     | '/feedback/$trackingCode'
     | '/t/$ticketId'
     | '/$companySlug'
@@ -294,6 +306,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/$companySlug/admin'
     | '/$companySlug/login'
+    | '/$companySlug/online-booking'
     | '/feedback/$trackingCode'
     | '/t/$ticketId'
     | '/$companySlug/'
@@ -429,6 +442,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompanySlugLoginRouteImport
       parentRoute: typeof CompanySlugRoute
     }
+    '/$companySlug/online-booking': {
+      id: '/$companySlug/online-booking'
+      path: '/online-booking'
+      fullPath: '/$companySlug/online-booking'
+      preLoaderRoute: typeof CompanySlugOnlineBookingRouteImport
+      parentRoute: typeof CompanySlugRoute
+    }
     '/feedback/$trackingCode': {
       id: '/feedback/$trackingCode'
       path: '/feedback/$trackingCode'
@@ -518,6 +538,7 @@ const CompanySlugBranchesBranchSlugRouteWithChildren =
 interface CompanySlugRouteChildren {
   CompanySlugAdminRoute: typeof CompanySlugAdminRoute
   CompanySlugLoginRoute: typeof CompanySlugLoginRoute
+  CompanySlugOnlineBookingRoute: typeof CompanySlugOnlineBookingRoute
   CompanySlugIndexRoute: typeof CompanySlugIndexRoute
   CompanySlugBranchesBranchSlugRoute: typeof CompanySlugBranchesBranchSlugRouteWithChildren
 }
@@ -525,6 +546,7 @@ interface CompanySlugRouteChildren {
 const CompanySlugRouteChildren: CompanySlugRouteChildren = {
   CompanySlugAdminRoute: CompanySlugAdminRoute,
   CompanySlugLoginRoute: CompanySlugLoginRoute,
+  CompanySlugOnlineBookingRoute: CompanySlugOnlineBookingRoute,
   CompanySlugIndexRoute: CompanySlugIndexRoute,
   CompanySlugBranchesBranchSlugRoute:
     CompanySlugBranchesBranchSlugRouteWithChildren,

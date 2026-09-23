@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { ExternalLink } from "lucide-react";
 import { Logo } from "@/components/site/logo";
 
 const COLS = [
@@ -51,7 +52,6 @@ export function SiteFooter() {
         <div className="max-w-xs">
           <div className="flex items-center gap-2.5">
             <Logo size={26} />
-            <span className="font-display text-base font-bold">Quesole</span>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
             Queue, appointment and branch orchestration for teams that serve people all day,
@@ -78,9 +78,25 @@ export function SiteFooter() {
           </div>
         ))}
       </div>
-      <div className="mx-auto flex max-w-7xl flex-col gap-2 border-t border-border px-5 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between lg:px-8">
-        <p>© 2026 Quesole. Demo environment running on simulated data.</p>
-        <p>Made for service teams in Ahmedabad, Surat, Mumbai, Rajkot & Delhi.</p>
+      <div className="border-t border-border/60 bg-accent/20 py-6 px-5 text-center">
+        <div className="mx-auto flex max-w-7xl items-center justify-center">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground flex flex-wrap items-center justify-center gap-2">
+            <span>© 2026 QUESOLS</span>
+            <span className="opacity-40">•</span>
+            <span>ALL RIGHTS RESERVED</span>
+            <span className="opacity-40">•</span>
+            <span>DEVELOPED BY</span>
+            <a
+              href="https://technoadviser.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1 text-xs font-black text-white bg-gradient-to-r from-brand via-indigo-600 to-purple-600 hover:from-brand/90 hover:to-purple-500 shadow-md transition-all hover:scale-105 active:scale-95 border border-white/20"
+            >
+              TECHNOADVISER
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </p>
+        </div>
       </div>
     </footer>
   );

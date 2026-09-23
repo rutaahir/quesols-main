@@ -304,9 +304,9 @@ function CompanyLoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col lg:grid lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-y-auto">
       
-      <div className="relative flex flex-col justify-center px-6 py-12 sm:px-12 lg:px-20 xl:px-24 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19]">
+      <div className="relative flex flex-col justify-center min-h-screen px-6 py-10 sm:px-12 lg:px-20 xl:px-24 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] overflow-y-auto">
         
         <div className="absolute top-8 right-8 z-30">
           <ThemeToggle />

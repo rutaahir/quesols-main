@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from queuing.models import Desk, Service, DeskService, UserService, DeskStaffAssignment, QueueMethod, QrCode, Ticket, TicketNote, KotMessageTemplate, KotNotificationLog
+from queuing.models import Desk, Service, DeskService, UserService, DeskStaffAssignment, QueueMethod, QrCode, Ticket, TicketNote, KotMessageTemplate, KotNotificationLog, OperatorAttendance, OperatorBreakLog
 
 class DeskSerializer(serializers.ModelSerializer):
     service_ids = serializers.SerializerMethodField()
@@ -113,3 +113,24 @@ class KotNotificationLogSerializer(serializers.ModelSerializer):
         model = KotNotificationLog
         fields = "__all__"
         read_only_fields = ("company", "branch", "ticket")
+
+class OperatorBreakLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OperatorBreakLog
+        fields = "__all__"
+
+class OperatorAttendanceSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_role = serializers.CharField(source="user.role", read_only=True, default="operator")
+    desk_name = serializers.CharField(source="desk.name", read_only=True, default=None)
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+    breaks = OperatorBreakLogSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = OperatorAttendance
+        fields = "__all__"
+
+    def get_user_name(self, obj):
+        full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
+        return full_name if full_name else obj.user.email

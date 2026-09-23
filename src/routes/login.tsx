@@ -245,7 +245,7 @@ function LoginPage() {
   }
 
   return (
-    <div className="grid h-screen max-h-screen lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col lg:grid lg:grid-cols-[9fr_11fr] bg-[#FAFAFA] dark:bg-[#0B0F19] font-sans overflow-y-auto">
       
       <style>{`
         @keyframes borderRotate {
@@ -268,7 +268,7 @@ function LoginPage() {
         }
       `}</style>
 
-      <div className="relative flex flex-col justify-center px-6 py-6 sm:px-12 lg:px-16 xl:px-20 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] h-full overflow-y-auto">
+      <div className="relative flex flex-col justify-center px-6 py-10 sm:px-12 lg:px-16 xl:px-20 z-10 bg-[#FAFAFA] dark:bg-[#0B0F19] min-h-screen overflow-y-auto">
         
         <div className="absolute top-6 right-6 z-30">
           <ThemeToggle />
