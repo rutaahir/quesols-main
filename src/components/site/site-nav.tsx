@@ -31,6 +31,16 @@ export function SiteNav() {
   }, []);
 
   useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
     } else {
@@ -41,12 +51,16 @@ export function SiteNav() {
     };
   }, [open]);
 
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
   return (
     <>
       <header
         className={cn(
           "fixed inset-x-0 top-0 z-40 transition-all duration-300 font-sans",
-          scrolled ? "p-3" : "p-0"
+          scrolled ? "p-2 sm:p-3" : "p-0"
         )}
       >
         <motion.div
@@ -56,10 +70,10 @@ export function SiteNav() {
         />
         <div
           className={cn(
-            "transition-all duration-500 ease-out mx-auto w-full relative",
+            "transition-all duration-500 ease-out w-full relative",
             scrolled
-              ? "mt-2 max-w-6xl shadow-[0_20px_40px_-12px_rgba(99,102,241,0.25)] px-6 py-1.5 rounded-full"
-              : "mt-0 max-w-full border-b border-white/10 bg-slate-950/60 backdrop-blur-md px-5 py-2.5 sm:px-8 shadow-none"
+              ? "mt-1.5 sm:mt-2 max-w-6xl mx-2 sm:mx-4 xl:mx-auto shadow-[0_20px_40px_-12px_rgba(99,102,241,0.25)] px-3.5 sm:px-6 py-1.5 rounded-full"
+              : "mt-0 max-w-full border-b border-white/10 bg-slate-950/60 backdrop-blur-md px-4 sm:px-8 py-2.5 shadow-none"
           )}
         >
           {scrolled && (
@@ -91,18 +105,18 @@ export function SiteNav() {
               </div>
             </>
           )}
-          <nav className="flex items-center justify-between gap-4">
-            <Link to="/" className="flex items-center gap-2.5 hover:scale-105 transition-transform shrink-0">
+          <nav className="flex items-center justify-between gap-2 sm:gap-4">
+            <Link to="/" className="flex items-center gap-2 hover:scale-105 transition-transform shrink-0">
               {!scrolled ? (
-                <div className="bg-white rounded-full px-3.5 py-1 flex items-center justify-center shadow-sm border border-slate-200/40">
+                <div className="bg-white rounded-full px-2.5 sm:px-3.5 py-1 flex items-center justify-center shadow-sm border border-slate-200/40">
                   <Logo size={18} />
                 </div>
               ) : (
-                <Logo size={22} />
+                <Logo size={20} />
               )}
             </Link>
 
-            <div className="hidden items-center gap-1 lg:gap-1.5 md:flex">
+            <div className="hidden lg:flex items-center gap-0.5 xl:gap-1.5 shrink-1 min-w-0">
               {LINKS.map((l, idx) => (
                 <Link
                   key={l.label}
@@ -114,7 +128,7 @@ export function SiteNav() {
                   {({ isActive }) => (
                     <span
                       className={cn(
-                        "relative group flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition-all duration-200 whitespace-nowrap lg:text-sm lg:px-4 cursor-pointer",
+                        "relative group flex items-center gap-1 xl:gap-1.5 rounded-full px-2 lg:px-2.5 xl:px-4 py-1.5 text-xs font-bold transition-all duration-200 whitespace-nowrap xl:text-sm cursor-pointer",
                         isActive
                           ? (scrolled ? "text-brand font-extrabold" : "text-white font-extrabold")
                           : (scrolled ? "text-muted-foreground hover:text-brand" : "text-slate-200 hover:text-white")
@@ -130,7 +144,7 @@ export function SiteNav() {
                           transition={{ type: "spring", stiffness: 300, damping: 25 }}
                         />
                       )}
-                      <l.icon className="h-3.5 w-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200" />
+                      <l.icon className="hidden xl:inline-block h-3.5 w-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200" />
                       <span>{l.label}</span>
                       {isActive && (
                         <motion.span
@@ -150,13 +164,13 @@ export function SiteNav() {
               ))}
             </div>
 
-            <div className="hidden items-center gap-2 md:flex">
+            <div className="hidden lg:flex items-center gap-1.5 xl:gap-2 shrink-0">
               <Button
                 asChild
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "rounded-full font-bold px-4 py-2 transition-all duration-200",
+                  "rounded-full font-bold px-3 xl:px-4 py-2 text-xs xl:text-sm transition-all duration-200",
                   scrolled
                     ? "text-foreground hover:bg-accent/50"
                     : "text-slate-100 hover:bg-white/10 hover:text-white"
@@ -164,7 +178,7 @@ export function SiteNav() {
               >
                 <Link to="/login">Sign in</Link>
               </Button>
-              <Button asChild size="sm" className="rounded-full font-bold bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white shadow-lg hover:shadow-xl hover:shadow-brand/20 hover:scale-[1.03] transition-all duration-200 border-0 px-5 py-2 group">
+              <Button asChild size="sm" className="rounded-full font-bold bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white shadow-lg hover:shadow-xl hover:shadow-brand/20 hover:scale-[1.03] transition-all duration-200 border-0 px-3.5 xl:px-5 py-2 text-xs xl:text-sm group">
                 <Link to="/signup" className="flex items-center gap-1.5">
                   <span>Register</span>
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
@@ -174,7 +188,7 @@ export function SiteNav() {
 
             {/* Mobile Hamburger Trigger */}
             <button
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-slate-900/80 text-white hover:bg-slate-800 md:hidden transition-all shadow-md active:scale-95 cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border border-white/20 bg-slate-900/80 text-white hover:bg-slate-800 lg:hidden transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
               onClick={() => setOpen((prev) => !prev)}
               aria-label="Toggle menu"
             >
@@ -184,7 +198,7 @@ export function SiteNav() {
         </div>
       </header>
 
-      {/* Off-Canvas Half-Width Full-Height Side Navigation Drawer */}
+      {/* Off-Canvas Navigation Drawer */}
       <AnimatePresence>
         {open && (
           <>
@@ -194,7 +208,7 @@ export function SiteNav() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden"
             />
 
             {/* Right Side Drawer Panel */}
@@ -203,10 +217,10 @@ export function SiteNav() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", stiffness: 350, damping: 32 }}
-              className="fixed inset-y-0 right-0 z-50 w-[68vw] max-w-[290px] h-full bg-slate-950 text-white border-l border-white/15 shadow-2xl flex flex-col justify-between p-5 md:hidden overflow-y-auto"
+              className="fixed inset-y-0 right-0 z-50 w-[85vw] sm:w-[320px] max-w-[360px] h-full bg-slate-950 text-white border-l border-white/15 shadow-2xl flex flex-col justify-between p-5 lg:hidden overflow-y-auto"
             >
               {/* Header inside Side Drawer */}
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
                 <Link to="/" onClick={() => setOpen(false)} className="flex items-center gap-2">
                   <div className="bg-white rounded-full px-3 py-0.5 flex items-center justify-center shadow-md">
                     <Logo size={16} />
@@ -255,7 +269,7 @@ export function SiteNav() {
               </div>
 
               {/* Bottom CTAs Stack */}
-              <div className="pt-4 border-t border-white/10 space-y-2">
+              <div className="pt-4 border-t border-white/10 space-y-2 shrink-0">
                 <Button asChild size="sm" className="w-full h-10 rounded-xl font-bold bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 text-white shadow-lg border-0 text-xs group">
                   <Link to="/signup" onClick={() => setOpen(false)} className="flex items-center justify-center gap-1.5">
                     <span>Register</span>
@@ -270,7 +284,7 @@ export function SiteNav() {
                 </Button>
 
                 <div className="pt-1 text-center text-[10px] text-slate-400 font-medium flex items-center justify-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald animate-pulse" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span>Quesole • Operational</span>
                 </div>
               </div>
