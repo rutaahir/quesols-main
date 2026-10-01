@@ -37,13 +37,8 @@ class KioskJoinView(APIView):
         try:
             with transaction.atomic():
                 from queuing.models import TokenSequence
-                next_seq = TokenSequence.get_next_sequence_number(branch)
-
-                if numbering_style == "prefix":
-                    prefix = service.prefix or "A"
-                    token_number = f"{prefix}{next_seq:03d}"
-                else:
-                    token_number = f"{next_seq:03d}"
+                next_seq = TokenSequence.get_unique_token_number(branch, prefix=service.prefix if numbering_style == "prefix" else "")
+                token_number = str(next_seq)
 
                 ticket = Ticket.objects.create(
                     branch=branch,
