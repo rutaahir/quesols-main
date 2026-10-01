@@ -559,9 +559,9 @@ class VerifyLocationView(APIView):
         if not branch:
             return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        qm = QueueMethod.objects.filter(branch_id=branch_id, is_active=True).first()
+        qm = QueueMethod.objects.filter(branch_id=branch_id, is_enabled=True).first()
         if not qm:
-            qm = QueueMethod.objects.filter(company=branch.company, is_active=True).first()
+            qm = QueueMethod.objects.filter(company=branch.company, is_enabled=True).first()
         method_code = qm.method if qm else "1"
 
         # Method 4 (remote booking) or geofence disabled -> Always pass
