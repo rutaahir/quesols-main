@@ -647,8 +647,8 @@ class CompanyViewSet(viewsets.ModelViewSet):
 class CheckSlugView(APIView):
     permission_classes = [AllowAny]
 
-    def get(self, request):
-        slug = request.query_params.get("slug", "").strip().lower()
+    def _check(self, slug):
+        slug = (slug or "").strip().lower()
         if not slug:
             return Response({"available": False, "error": "Slug parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -657,7 +657,17 @@ class CheckSlugView(APIView):
             return Response({"available": False, "error": "Slug must only contain lowercase alphanumeric characters and hyphens."}, status=status.HTTP_400_BAD_REQUEST)
             
         exists = Company.objects.filter(slug=slug).exists()
-        return Response({"available": not exists})
+        return Response({"available": not exists, "slug": slug})
+
+    def get(self, request):
+        slug = request.query_params.get("slug", "")
+        return self._check(slug)
+
+    def post(self, request):
+        slug = request.data.get("slug") if isinstance(request.data, dict) else None
+        if not slug:
+            slug = request.query_params.get("slug", "")
+        return self._check(slug)
 
 
 class CompanyBySlugView(APIView):
