@@ -2,7 +2,8 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.db import transaction
 from django.core.files.storage import default_storage
@@ -146,7 +147,7 @@ class CompanyRegistrationView(APIView):
                     token_delivery_selections=token_delivery_selections,
                     addons={"printed_qr": total_qr}
                 )
-            except ValidationError as ve:
+            except (ValidationError, DjangoValidationError) as ve:
                 return Response(ve.detail if hasattr(ve, "detail") else {"error": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
         
         # Check for duplicate name warning
