@@ -84,6 +84,8 @@ class CompanyRegistrationView(APIView):
             raw_data["estimated_branch_count"] = 1
         if "billing_cycle" not in raw_data:
             raw_data["billing_cycle"] = "monthly"
+        if "industry" not in raw_data or not raw_data["industry"]:
+            raw_data["industry"] = "Education"
         if "terms_consent" not in raw_data:
             raw_data["terms_consent"] = True
             

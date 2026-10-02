@@ -8,20 +8,7 @@ User = get_user_model()
 
 class CompanyRegistrationSerializer(serializers.Serializer):
     company_name = serializers.CharField(min_length=2, max_length=120, required=True)
-    industry = serializers.ChoiceField(choices=[
-        ("Healthcare", "Healthcare"),
-        ("Banking", "Banking"),
-        ("Banking & Finance", "Banking & Finance"),
-        ("Government", "Government"),
-        ("Retail", "Retail"),
-        ("Retail & Service", "Retail & Service"),
-        ("Education", "Education"),
-        ("Education & Services", "Education & Services"),
-        ("Telecom", "Telecom"),
-        ("Corporate", "Corporate"),
-        ("Corporate Office", "Corporate Office"),
-        ("Other", "Other")
-    ], required=True)
+    industry = serializers.CharField(max_length=255, required=False, default="Education", allow_blank=True)
     contact_email = serializers.EmailField(required=True)
     contact_phone = serializers.CharField(max_length=50, required=True)
     address = serializers.CharField(required=True)
