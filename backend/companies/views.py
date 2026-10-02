@@ -63,6 +63,9 @@ class CompanyRegistrationView(APIView):
                 raw_data["admin_password"] = raw_data["password"]
             if "admin_confirm_password" not in raw_data:
                 raw_data["admin_confirm_password"] = raw_data["password"]
+
+        if "admin_password" in raw_data and "admin_confirm_password" not in raw_data:
+            raw_data["admin_confirm_password"] = raw_data["admin_password"]
                 
         if "phone" in raw_data:
             if "contact_phone" not in raw_data:

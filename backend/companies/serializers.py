@@ -16,6 +16,7 @@ class CompanyRegistrationSerializer(serializers.Serializer):
         ("Retail", "Retail"),
         ("Retail & Service", "Retail & Service"),
         ("Education", "Education"),
+        ("Education & Services", "Education & Services"),
         ("Telecom", "Telecom"),
         ("Corporate", "Corporate"),
         ("Corporate Office", "Corporate Office"),
