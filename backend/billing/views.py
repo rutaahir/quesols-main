@@ -385,7 +385,7 @@ class PackageViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ["create", "update", "partial_update", "destroy"]:
             return [IsSuperAdmin()]
-        return [IsCompanyAdmin()]
+        return [AllowAny()]
 
     def perform_create(self, serializer):
         package = serializer.save()
