@@ -454,8 +454,14 @@ class AppointmentRescheduleView(APIView):
 
     def post(self, request, manage_code):
         new_slot_start_str = request.data.get("new_slot_start")
+        new_date_str = request.data.get("new_date") or request.data.get("date")
+        new_time_str = request.data.get("new_slot_time") or request.data.get("new_time") or request.data.get("slot_time") or request.data.get("time")
+
+        if not new_slot_start_str and new_date_str and new_time_str:
+            new_slot_start_str = f"{new_date_str}T{new_time_str}:00" if len(new_time_str) == 5 else f"{new_date_str}T{new_time_str}"
+
         if not new_slot_start_str:
-            return Response({"error": "New slot start time is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "New slot start time (or new_date and new_slot_time) is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             appointment = Appointment.objects.get(manage_code=manage_code)
