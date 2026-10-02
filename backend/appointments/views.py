@@ -39,9 +39,11 @@ class OtpSendView(APIView):
     throttle_classes = [PublicAppointmentThrottle]
 
     def post(self, request):
-        channel = request.data.get("channel", "email")
+        phone = request.data.get("phone") or request.data.get("phone_number")
         email = request.data.get("email")
-        phone = request.data.get("phone")
+        channel = request.data.get("channel")
+        if not channel:
+            channel = "sms" if (phone and not email) else "email"
 
         if channel == "sms":
             if not phone:
@@ -176,10 +178,13 @@ class OtpVerifyView(APIView):
     throttle_classes = [PublicAppointmentThrottle]
 
     def post(self, request):
-        channel = request.data.get("channel", "email")
+        phone = request.data.get("phone") or request.data.get("phone_number")
         email = request.data.get("email")
-        phone = request.data.get("phone")
-        code = request.data.get("code")
+        channel = request.data.get("channel")
+        if not channel:
+            channel = "sms" if (phone and not email) else "email"
+
+        code = request.data.get("code") or request.data.get("otp_code") or request.data.get("verification_code")
 
         if not code:
             return Response({"error": "Verification code is required."}, status=status.HTTP_400_BAD_REQUEST)
