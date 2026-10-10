@@ -390,13 +390,6 @@ function CompanyLoginPage() {
               </div>
             </div>
 
-            {error && (
-              <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-destructive text-xs font-semibold leading-normal flex items-start gap-2.5">
-                <ShieldAlert className="h-4.5 w-4.5 shrink-0 mt-0.5" />
-                <span>{error}</span>
-              </div>
-            )}
-
             <Button
               type="submit"
               disabled={loading}

@@ -120,29 +120,74 @@ function KotScreen() {
   const [sessionLockError, setSessionLockError] = useState<string | null>(null);
 
   const [kotTerminalsList, setKotTerminalsList] = useState<any[]>([]);
-  const [selectedKotTerminalId, setSelectedKotTerminalId] = useState<string>("");
+  const [selectedKotTerminalId, setSelectedKotTerminalId] = useState<string>(() => {
+    if (typeof window !== "undefined" && branch?.id) {
+      return sessionStorage.getItem(`kot_selected_id_${branch.id}`) || localStorage.getItem(`kot_selected_id_${branch.id}`) || "";
+    }
+    return "";
+  });
 
   useEffect(() => {
     if (!branch?.id) return;
-    apiFetch(`/api/public/kot-terminals/?branch_id=${branch.id}`)
-      .then((data: any) => {
-        if (Array.isArray(data)) {
-          setKotTerminalsList(data);
-          if (data.length > 0) {
-            setSelectedKotTerminalId((prev) => prev || data[0].id);
+    const processTerminalsData = (data: any[]) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setKotTerminalsList(data);
+        const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+        const param = searchParams.get("terminal") || searchParams.get("kot") || searchParams.get("kot_id") || searchParams.get("id");
+
+        let matchedTerminal: any = null;
+        if (param) {
+          const pNorm = param.trim().toLowerCase().replace(/\s+/g, "-");
+          matchedTerminal = data.find((t: any) =>
+            String(t.id) === String(param) ||
+            t.terminal_identifier.toLowerCase() === param.toLowerCase() ||
+            t.terminal_identifier.toLowerCase().replace(/\s+/g, "") === param.toLowerCase().replace(/\s+/g, "") ||
+            t.terminal_identifier.toLowerCase().replace(/\s+/g, "-") === pNorm
+          );
+        }
+
+        let finalTerminalId = "";
+        if (matchedTerminal) {
+          finalTerminalId = String(matchedTerminal.id);
+        } else {
+          const stored = typeof window !== "undefined" ? (sessionStorage.getItem(`kot_selected_id_${branch.id}`) || localStorage.getItem(`kot_selected_id_${branch.id}`)) : null;
+          if (stored && data.some((t: any) => String(t.id) === String(stored))) {
+            finalTerminalId = String(stored);
+          } else {
+            finalTerminalId = String(data[0].id);
           }
         }
-      })
+
+        setSelectedKotTerminalId(finalTerminalId);
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(`kot_selected_id_${branch.id}`, finalTerminalId);
+          localStorage.setItem(`kot_selected_id_${branch.id}`, finalTerminalId);
+        }
+
+        // Clean URL sync without exposing database IDs
+        if (typeof window !== "undefined") {
+          const targetTerm = data.find((t: any) => String(t.id) === String(finalTerminalId)) || data[0];
+          if (targetTerm) {
+            const terminalSlug = targetTerm.terminal_identifier.toLowerCase().replace(/\s+/g, "-");
+            const currentSearch = new URLSearchParams(window.location.search);
+            if (currentSearch.get("terminal") !== terminalSlug) {
+              currentSearch.delete("kot_id");
+              currentSearch.delete("id");
+              currentSearch.delete("kot");
+              currentSearch.set("terminal", terminalSlug);
+              const newUrl = window.location.pathname + "?" + currentSearch.toString();
+              window.history.replaceState(null, "", newUrl);
+            }
+          }
+        }
+      }
+    };
+
+    apiFetch(`/api/public/kot-terminals/?branch_id=${branch.id}`)
+      .then((data: any) => processTerminalsData(data))
       .catch(() => {
         apiFetch(`/api/kot/public/kot-terminals/?branch_id=${branch.id}`)
-          .then((data: any) => {
-            if (Array.isArray(data)) {
-              setKotTerminalsList(data);
-              if (data.length > 0) {
-                setSelectedKotTerminalId((prev) => prev || data[0].id);
-              }
-            }
-          })
+          .then((data: any) => processTerminalsData(data))
           .catch((err: any) => console.error("Failed to load KOT terminals list:", err));
       });
   }, [branch?.id]);
@@ -352,10 +397,34 @@ function KotScreen() {
   const handleStaffExit = async (e: React.FormEvent) => {
     e.preventDefault(); setExitPinError(null);
     try {
-      const res = await apiFetch(`/api/branches/${branch.id}/verify-kiosk-password/`, { method: "POST", body: JSON.stringify({ password: exitPin }) });
-      if (res.verified) { setIsStaffOpen(false); setScreen("locked"); setPin(""); setExitPin(""); toast.success("KOT screen locked."); }
-      else { setExitPinError(res.error || "Incorrect password."); setExitPin(""); }
-    } catch (err: any) { setExitPinError(err.message || "Incorrect password."); setExitPin(""); }
+      const res = await apiFetch(`/api/branches/${branch.id}/verify-kiosk-password/`, {
+        method: "POST",
+        body: JSON.stringify({ password: exitPin, kot_terminal_id: selectedKotTerminalId })
+      });
+      if (res.verified) {
+        if (selectedKotTerminalId) {
+          try {
+            await apiFetch("/api/public/kot-terminals/logout/", {
+              method: "POST",
+              body: JSON.stringify({ terminal_id: selectedKotTerminalId }),
+            });
+          } catch (logoutErr) {
+            console.warn("Failed KOT terminal logout:", logoutErr);
+          }
+        }
+        setIsStaffOpen(false);
+        setScreen("locked");
+        setPin("");
+        setExitPin("");
+        toast.success("KOT screen locked — Returned to PIN screen.");
+      } else {
+        setExitPinError(res.error || "Incorrect PIN code or password. Please try again.");
+        setExitPin("");
+      }
+    } catch (err: any) {
+      setExitPinError(err.message || "Incorrect PIN code or password.");
+      setExitPin("");
+    }
   };
 
   return (
@@ -450,26 +519,25 @@ function KotScreen() {
                 <div className="space-y-1.5">
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/8 border border-primary/15 px-3 py-0.5 text-[10px] font-bold text-primary uppercase tracking-widest">KOT Check-In</div>
                   <h2 className="font-display text-3xl font-bold tracking-tight text-foreground">KOT Check-In Locked</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed">Select terminal &amp; enter PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">Enter PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
                 </div>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} className="space-y-5">
-                {kotTerminalsList.length > 1 && (
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Select KOT Terminal</Label>
-                    <select
-                      value={selectedKotTerminalId}
-                      onChange={(e) => setSelectedKotTerminalId(e.target.value)}
-                      className="w-full h-11 rounded-xl border border-border bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm px-3 text-sm font-bold text-foreground outline-none focus:border-primary"
-                    >
-                      {kotTerminalsList.map((term) => (
-                        <option key={term.id} value={term.id}>
-                          {term.terminal_identifier} ({term.is_logged_in ? "Online" : "Offline"})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {(() => {
+                  const activeKotTerminal = kotTerminalsList.find((t) => String(t.id) === String(selectedKotTerminalId)) || (kotTerminalsList.length > 0 ? kotTerminalsList[0] : null);
+                  return activeKotTerminal ? (
+                    <div className="bg-white/60 dark:bg-slate-900/60 border border-border/50 p-3.5 rounded-2xl text-center backdrop-blur-sm shadow-sm space-y-1">
+                      <div className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Terminal</div>
+                      <div className="text-sm font-black text-foreground flex items-center justify-center gap-2">
+                        <MessageSquare className="h-4 w-4 text-brand shrink-0" />
+                        <span>{activeKotTerminal.terminal_identifier}</span>
+                        <span className={cn("text-[9px] px-2.5 py-0.5 rounded-full font-bold uppercase border", activeKotTerminal.is_logged_in ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700")}>
+                          {activeKotTerminal.is_logged_in ? "Online" : "Offline"}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
                 <div className="space-y-4 flex flex-col items-center">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground self-start ml-1">Enter 4-Digit PIN</Label>
                   <SegmentedPin length={4} value={pin} onChange={(v) => { setPinError(null); setPin(v); }} error={!!pinError} />

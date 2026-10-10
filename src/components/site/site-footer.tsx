@@ -48,7 +48,7 @@ export function SiteFooter() {
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-brand opacity-60"
         aria-hidden
       />
-      <div className="mx-auto grid max-w-7xl gap-10 px-5 py-12 lg:grid-cols-[1.4fr_repeat(4,1fr)] lg:px-8">
+      <div className="mx-auto grid max-w-[1728px] w-[98%] gap-10 px-4 py-12 lg:grid-cols-[1.4fr_repeat(4,1fr)] lg:px-6">
         <div className="max-w-xs">
           <div className="flex items-center gap-2.5">
             <Logo size={26} />
@@ -78,8 +78,8 @@ export function SiteFooter() {
           </div>
         ))}
       </div>
-      <div className="border-t border-border/60 bg-accent/20 py-6 px-5 text-center">
-        <div className="mx-auto flex max-w-7xl items-center justify-center">
+      <div className="border-t border-border/60 bg-accent/20 py-6 px-4 text-center">
+        <div className="mx-auto flex max-w-[1728px] w-[98%] items-center justify-center">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground flex flex-wrap items-center justify-center gap-2">
             <span>© 2026 QUESOLS</span>
             <span className="opacity-40">•</span>

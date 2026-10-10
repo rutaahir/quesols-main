@@ -79,8 +79,8 @@ export function Section({
     <section id={id} className={cn("relative z-10 w-full overflow-hidden", TONE_BG[tone])}>
       <div
         className={cn(
-          "mx-auto w-full px-5 py-20 lg:px-8 lg:py-28",
-          wide ? "max-w-[88rem]" : "max-w-7xl",
+          "mx-auto w-full px-4 py-20 lg:px-6 lg:py-28",
+          wide ? "max-w-[1800px] w-[98%]" : "max-w-[1728px] w-[98%]",
           className,
         )}
       >
@@ -164,7 +164,7 @@ export function Hero() {
         />
       </div>
 
-      <div className="mx-auto grid w-full max-w-7xl flex-1 items-center gap-8 px-4 pb-8 lg:grid-cols-[58fr_42fr] lg:gap-14 lg:px-8">
+      <div className="mx-auto grid w-full max-w-[1728px] w-[98%] flex-1 items-center gap-8 px-4 pb-8 lg:grid-cols-[58fr_42fr] lg:gap-14 lg:px-6">
         {/* Left Column: Copy floating above running background video */}
         <m.div
           style={{ y: textY }}
@@ -329,7 +329,7 @@ export function ProblemSection() {
         }}
       />
 
-      <div className="mx-auto flex min-h-[85vh] w-full max-w-7xl flex-col justify-center px-5 py-20 lg:px-8">
+      <div className="mx-auto flex min-h-[85vh] w-full max-w-[1728px] w-[98%] flex-col justify-center px-4 py-20 lg:px-6">
         <Reveal className="max-w-3xl">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-violet shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />

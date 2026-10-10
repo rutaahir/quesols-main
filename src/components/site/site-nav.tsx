@@ -72,8 +72,8 @@ export function SiteNav() {
           className={cn(
             "transition-all duration-500 ease-out w-full relative",
             scrolled
-              ? "mt-1.5 sm:mt-2 max-w-6xl mx-2 sm:mx-4 xl:mx-auto shadow-[0_20px_40px_-12px_rgba(99,102,241,0.25)] px-3.5 sm:px-6 py-1.5 rounded-full"
-              : "mt-0 max-w-full border-b border-white/10 bg-slate-950/60 backdrop-blur-md px-4 sm:px-8 py-2.5 shadow-none"
+              ? "mt-1.5 sm:mt-2 max-w-[1728px] w-[98%] mx-auto shadow-[0_20px_40px_-12px_rgba(99,102,241,0.25)] px-3.5 sm:px-6 py-1.5 rounded-full"
+              : "mt-0 max-w-full border-b border-white/10 bg-slate-950/60 backdrop-blur-md px-3 sm:px-6 lg:px-8 py-2.5 shadow-none"
           )}
         >
           {scrolled && (

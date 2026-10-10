@@ -4,6 +4,7 @@ from rest_framework import status, viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from core.permissions import IsBranchAdmin, IsBranchAdminOnly
 
@@ -336,6 +337,12 @@ class KioskLoginView(APIView):
             return Response({"error": "Kiosk not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
 
         if kiosk.pin == pin:
+            current_token = request.data.get("session_token")
+            if kiosk.is_session_active() and kiosk.session_token != current_token:
+                return Response({
+                    "error": f"'{kiosk.kiosk_identifier}' is currently active on another device. Please log out or close it on the other device first."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Reset fails
             cache.delete(lockout_key)
 
@@ -387,18 +394,25 @@ class KioskLogoutView(APIView):
         kiosk_id = request.data.get("kiosk_id")
         session_token = request.data.get("session_token")
 
-        if not kiosk_id or not session_token:
-            return Response({"error": "kiosk_id and session_token are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not kiosk_id:
+            return Response({"error": "kiosk_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            kiosk = Kiosk.objects.get(id=kiosk_id, session_token=session_token)
-            kiosk.session_token = None
-            kiosk.connected_at = None
-            kiosk.last_seen = None
-            kiosk.save()
-            return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
-        except Kiosk.DoesNotExist:
-            return Response({"error": "Invalid session or kiosk ID."}, status=status.HTTP_400_BAD_REQUEST)
+            kiosk = None
+            if session_token:
+                kiosk = Kiosk.objects.filter(id=kiosk_id, session_token=session_token).first()
+            if not kiosk:
+                kiosk = Kiosk.objects.filter(id=kiosk_id).first()
+
+            if kiosk:
+                kiosk.session_token = None
+                kiosk.connected_at = None
+                kiosk.last_seen = None
+                kiosk.save()
+                return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+            return Response({"error": "Kiosk not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 from kot.models import KotTerminal
@@ -408,45 +422,97 @@ class KotTerminalViewSet(viewsets.ModelViewSet):
     serializer_class = KotTerminalSerializer
     permission_classes = [IsBranchAdmin]
 
+    def list(self, request, *args, **kwargs):
+        branch_id = request.query_params.get("branch_id") or request.query_params.get("branch")
+        if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+            from branches.models import Branch
+            from kot.provisioning import provision_kot_terminals_for_branch
+            try:
+                if str(branch_id).isdigit():
+                    branch = Branch.objects.get(id=branch_id)
+                else:
+                    branch = Branch.objects.get(slug=branch_id, company=request.user.company)
+                provision_kot_terminals_for_branch(branch)
+            except Exception as e:
+                print(f"Failed to auto-provision KOT terminals for branch {branch_id}: {e}")
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self):
         user = self.request.user
-        qs = KotTerminal.objects.none()
+        qs = KotTerminal.all_objects.none()
         if getattr(user, "role", None) == "super_admin":
-            qs = KotTerminal.objects.all()
-        elif getattr(user, "role", None) == "branch_admin":
-            qs = KotTerminal.objects.filter(company=user.company, branch_id=user.branch_id)
-        elif hasattr(user, "company") and user.company:
-            qs = KotTerminal.objects.filter(company=user.company)
+            qs = KotTerminal.all_objects.all()
+        elif getattr(user, "role", None) in ["company_admin", "branch_admin"] or (hasattr(user, "company") and user.company):
+            qs = KotTerminal.all_objects.filter(company=user.company)
 
         branch_id = self.request.query_params.get("branch_id") or self.request.query_params.get("branch")
-        if branch_id:
-            qs = qs.filter(branch_id=branch_id)
+        if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+            if str(branch_id).isdigit():
+                qs = qs.filter(branch_id=branch_id)
+            else:
+                qs = qs.filter(branch__slug=branch_id)
+        elif getattr(user, "role", None) == "branch_admin" and getattr(user, "branch_id", None):
+            qs = qs.filter(branch_id=user.branch_id)
         return qs
 
     def perform_create(self, serializer):
         user = self.request.user
         branch = serializer.validated_data.get("branch")
         if not branch:
-            raise ValidationError("You must specify a branch to create a KOT terminal.")
+            branch_id = self.request.data.get("branch") or self.request.data.get("branch_id")
+            if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+                from branches.models import Branch
+                if str(branch_id).isdigit():
+                    branch = Branch.objects.filter(id=branch_id, company=user.company).first()
+                else:
+                    branch = Branch.objects.filter(slug=branch_id, company=user.company).first()
+
+        if not branch:
+            raise ValidationError("You must specify a valid branch to create a KOT terminal.")
         
-        current_count = KotTerminal.objects.filter(branch=branch, status="active").count()
+        current_count = KotTerminal.all_objects.filter(branch=branch, status="active").count()
         
-        from billing.models import CompanyPlanAllocation
+        from billing.models import CompanyPlanAllocation, PlanComponent
         alloc = CompanyPlanAllocation.objects.filter(
             company=user.company, branch=branch, plan_component__key="kot_terminals"
         ).first()
-        if alloc:
+        if alloc and alloc.purchased_qty > 0:
             quota = alloc.purchased_qty
         else:
             comp_alloc = CompanyPlanAllocation.objects.filter(
                 company=user.company, branch__isnull=True, plan_component__key="kot_terminals"
             ).first()
-            quota = comp_alloc.purchased_qty if comp_alloc else getattr(user.company.package, "max_kot_terminals", 1)
+            if comp_alloc and comp_alloc.purchased_qty > 0:
+                quota = comp_alloc.purchased_qty
+            else:
+                pc = PlanComponent.objects.filter(key="kot_terminals", is_active=True).first()
+                quota = pc.default_included_qty if pc else 1
 
         if current_count >= quota:
             raise ValidationError(f"Plan limit reached: you cannot create more than {quota} active KOT terminals.")
 
-        serializer.save(company=user.company, branch=branch)
+        # If an inactive terminal exists for this branch, reactivate it
+        inactive_term = KotTerminal.all_objects.filter(branch=branch, status="inactive").order_by("id").first()
+        if inactive_term:
+            inactive_term.status = "active"
+            if not inactive_term.pin:
+                inactive_term.pin = "".join(str(random.randint(0, 9)) for _ in range(4))
+            inactive_term.save()
+            serializer.instance = inactive_term
+            return
+
+        # Ensure terminal_identifier does not conflict with existing ones
+        requested_identifier = serializer.validated_data.get("terminal_identifier")
+        existing_identifiers = set(KotTerminal.all_objects.filter(branch=branch).values_list("terminal_identifier", flat=True))
+
+        if not requested_identifier or requested_identifier in existing_identifiers:
+            next_num = 1
+            while f"KOT {next_num}" in existing_identifiers:
+                next_num += 1
+            requested_identifier = f"KOT {next_num}"
+
+        pin = serializer.validated_data.get("pin") or "".join(str(random.randint(0, 9)) for _ in range(4))
+        serializer.save(company=user.company, branch=branch, terminal_identifier=requested_identifier, pin=pin)
 
     @action(detail=True, methods=["post"], url_path="regenerate-pin")
     def regenerate_pin(self, request, pk=None):
@@ -485,7 +551,15 @@ class PublicKotTerminalListView(APIView):
         if not branch_id:
             return Response({"error": "branch_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         
-        terminals = KotTerminal.objects.filter(branch_id=branch_id, status="active").order_by("terminal_identifier")
+        from branches.models import Branch
+        from kot.provisioning import provision_kot_terminals_for_branch
+        try:
+            branch = Branch.objects.get(id=branch_id)
+            provision_kot_terminals_for_branch(branch)
+        except Exception:
+            pass
+
+        terminals = KotTerminal.all_objects.filter(branch_id=branch_id, status="active").order_by("id")
         return Response(PublicKotTerminalSerializer(terminals, many=True).data, status=status.HTTP_200_OK)
 
 class KotTerminalLoginView(APIView):
@@ -555,19 +629,26 @@ class KotTerminalLogoutView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        terminal_id = request.data.get("terminal_id") or request.data.get("kot_id")
+        terminal_id = request.data.get("terminal_id") or request.data.get("kot_id") or request.data.get("kiosk_id")
         session_token = request.data.get("session_token")
 
-        if not terminal_id or not session_token:
-            return Response({"error": "terminal_id and session_token are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not terminal_id:
+            return Response({"error": "terminal_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            terminal = KotTerminal.objects.get(id=terminal_id, session_token=session_token)
-            terminal.session_token = None
-            terminal.connected_at = None
-            terminal.last_seen = None
-            terminal.save()
-            return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
-        except KotTerminal.DoesNotExist:
-            return Response({"error": "Invalid session or terminal ID."}, status=status.HTTP_400_BAD_REQUEST)
+            terminal = None
+            if session_token:
+                terminal = KotTerminal.objects.filter(id=terminal_id, session_token=session_token).first()
+            if not terminal:
+                terminal = KotTerminal.objects.filter(id=terminal_id).first()
+
+            if terminal:
+                terminal.session_token = None
+                terminal.connected_at = None
+                terminal.last_seen = None
+                terminal.save()
+                return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+            return Response({"error": "KOT terminal not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 

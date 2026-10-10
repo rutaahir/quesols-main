@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,15 +25,52 @@ const transition = {
 export function BranchDesksServicesManager({ 
   branchId, 
   onBack,
+  setView,
   renderPlanUsageView
 }: { 
   branchId: string; 
   onBack?: () => void;
+  setView?: (view: string) => void;
   renderPlanUsageView?: (companyId: string, company: any) => React.ReactNode;
 }) {
   const { state, actions, session, refresh } = useQuesole();
   const isBranchAdmin = session?.role === "branch_admin";
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot">(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get("tab") as any;
+      if (urlTab && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot"].includes(urlTab)) {
+        return urlTab;
+      }
+      const saved = sessionStorage.getItem(`branch_active_tab_${branchId}`) || localStorage.getItem(`branch_active_tab_${branchId}`);
+      if (saved && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot"].includes(saved)) {
+        return saved as any;
+      }
+    }
+    return "overview";
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && branchId) {
+      sessionStorage.setItem(`branch_active_tab_${branchId}`, activeTab);
+      localStorage.setItem(`branch_active_tab_${branchId}`, activeTab);
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", activeTab);
+      const newSearch = params.toString();
+      const cleanUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+      window.history.replaceState(null, "", cleanUrl);
+    }
+  }, [activeTab, branchId]);
+
+  // Live auto-refresh kiosk status every 3 seconds when Kiosks tab is active
+  useEffect(() => {
+    if (activeTab !== "kiosks") return;
+    refresh();
+    const interval = setInterval(() => {
+      refresh();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activeTab, refresh]);
   const [searchServicesQuery, setSearchServicesQuery] = useState("");
   const [searchDesksQuery, setSearchDesksQuery] = useState("");
   const [searchStaffQuery, setSearchStaffQuery] = useState("");
@@ -2295,11 +2332,11 @@ export function BranchDesksServicesManager({
             </div>
             <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
               <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Online</span>
-              <span className="text-base font-black text-emerald-500 block mt-0.5">{branchKiosks.filter(k => k.is_logged_in).length}</span>
+              <span className="text-base font-black text-emerald-500 block mt-0.5">{branchKiosks.filter(k => k.is_logged_in && k.status === 'active').length}</span>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Offline</span>
-              <span className="text-base font-black text-muted-foreground block mt-0.5">{branchKiosks.filter(k => !k.is_logged_in).length}</span>
+              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Offline / Closed</span>
+              <span className="text-base font-black text-muted-foreground block mt-0.5">{branchKiosks.filter(k => !k.is_logged_in || k.status !== 'active').length}</span>
             </div>
             <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
               <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Tickets Today</span>
@@ -2313,6 +2350,7 @@ export function BranchDesksServicesManager({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {branchKiosks.map((kiosk, idx) => {
               const isPinVisible = !!visiblePins[kiosk.id];
+              const isKioskOpen = Boolean(kiosk.is_logged_in && kiosk.status === "active");
               return (
                 <div
                   key={kiosk.id}
@@ -2342,10 +2380,10 @@ export function BranchDesksServicesManager({
                           <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Status</span>
                           <span className={cn(
                             "inline-flex items-center gap-1 font-bold mt-0.5",
-                            kiosk.status === "active" ? "text-emerald-500" : "text-muted-foreground"
+                            isKioskOpen ? "text-emerald-500" : "text-muted-foreground"
                           )}>
-                            <span className={cn("h-1.5 w-1.5 rounded-full", kiosk.status === "active" ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
-                            {kiosk.status === "active" ? "Active" : "Inactive"}
+                            <span className={cn("h-1.5 w-1.5 rounded-full", isKioskOpen ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
+                            {isKioskOpen ? "Active" : "Closed"}
                           </span>
                         </div>
                         <div>
@@ -2376,26 +2414,36 @@ export function BranchDesksServicesManager({
                       <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
                         <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Kiosk Link</span>
                         <div className="flex items-center gap-2">
-                          <a
-                            href={kioskUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline font-bold flex items-center gap-1"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            <span>Open</span>
-                          </a>
-                          <button
-                            onClick={() => {
-                              const url = `${window.location.origin}${kioskUrl}`;
-                              navigator.clipboard.writeText(url);
-                              toast.success("Kiosk URL copied to clipboard!");
-                            }}
-                            className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
-                          >
-                            <Copy className="h-3 w-3" />
-                            <span>Copy</span>
-                          </button>
+                          {(() => {
+                            const terminalSlug = kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id;
+                            const singleKioskUrl = companySlug && branchSlug
+                              ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
+                              : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
+                            return (
+                              <>
+                                <a
+                                  href={singleKioskUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline font-bold flex items-center gap-1"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  <span>Open</span>
+                                </a>
+                                <button
+                                  onClick={() => {
+                                    const url = `${window.location.origin}${singleKioskUrl}`;
+                                    navigator.clipboard.writeText(url);
+                                    toast.success(`Copied unique URL for ${kiosk.kiosk_identifier}!`);
+                                  }}
+                                  className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copy</span>
+                                </button>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -2456,7 +2504,7 @@ export function BranchDesksServicesManager({
 
       {activeTab === "kot" && (session?.role === "company_admin" || session?.role === "branch_admin") && (
         <div className="animate-in fade-in-50 duration-300">
-          <KotSettingsPanel branch={branch} company={company} />
+          <KotSettingsPanel branch={branch} company={company} setView={setView} />
         </div>
       )}
 
@@ -4901,10 +4949,11 @@ export function OnlineBookingSettingsPanel({ branch, company }: OnlineBookingSet
 interface KotSettingsPanelProps {
   branch: any;
   company: any;
+  setView?: (view: string) => void;
 }
 
-export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
-  const { state, actions } = useQuesole();
+export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelProps) {
+  const { state, actions, refresh } = useQuesole();
   const companySlug = company?.slug || "";
   const branchSlug = branch?.slug || "";
   const kotUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/kot` : `/kot/${branch?.id}`;
@@ -4923,12 +4972,30 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   const isSmsActive = branch.enabledMethods?.map(Number).includes(3) || false;
   const isWhatsappActive = branch.enabledMethods?.map(Number).includes(4) || false;
 
-  const purchasedKotTerminals = branch?.allocations?.kot_terminals?.limit || company?.package?.max_kot_terminals || 1;
+  const kotBranchAlloc = state.companyAllocations.find(
+    (a) => a.component_key === "kot_terminals" && String(a.branch_id) === String(branch?.id)
+  );
+  const kotCompanyAlloc = state.companyAllocations.find(
+    (a) => a.component_key === "kot_terminals" && !a.branch_id && String(a.companyId) === String(company?.id)
+  );
+  const pcKotComp = state.planComponents.find((c) => c.key === "kot_terminals");
+  const defaultKotLimit = pcKotComp ? pcKotComp.default_included_qty : 1;
+
+  const purchasedKotTerminals = (kotBranchAlloc && kotBranchAlloc.purchased_qty > 0)
+    ? kotBranchAlloc.purchased_qty
+    : (kotCompanyAlloc && kotCompanyAlloc.purchased_qty > 0)
+    ? kotCompanyAlloc.purchased_qty
+    : (branch?.allocations?.kot_terminals?.limit || company?.package?.max_kot_terminals || defaultKotLimit);
+
+  const targetBranchId = branch?.id || branch?._id || branch?.slug;
 
   const fetchKotTerminals = async () => {
     try {
-      const data: any[] = await apiFetch(`/api/kot/terminals/?branch_id=${branch.id}`);
-      setKotTerminals(data);
+      const url = targetBranchId ? `/api/kot/terminals/?branch_id=${targetBranchId}` : `/api/kot/terminals/`;
+      const data: any = await apiFetch(url);
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.results) ? data.results : []);
+      console.log(`[KOT Terminals] Loaded ${list.length} terminals for branch ${targetBranchId}:`, list);
+      setKotTerminals(list);
     } catch (err) {
       console.error("Failed to fetch KOT terminals", err);
     }
@@ -4937,19 +5004,22 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   const fetchKotData = async () => {
     setIsLoading(true);
     try {
+      if (typeof refresh === "function") refresh();
       await fetchKotTerminals();
-      const templatesData: any[] = await apiFetch(`/api/kot-message-templates/?branch=${branch.id}`);
-      const smsT = templatesData.find((t: any) => t.channel === "sms");
-      const waT = templatesData.find((t: any) => t.channel === "whatsapp");
-      
-      setSmsTemplate(smsT || null);
-      setSmsText(smsT ? smsT.template_text : "Hi {customer_name}, your token is {token_number} (Service: {service_name}). Desk: {desk_name}. People ahead: {position}. Est wait: ~{eta} mins. Quesole Team");
-      
-      setWhatsappTemplate(waT || null);
-      setWhatsappText(waT ? waT.template_text : "Hello {customer_name}! Here is your digital ticket for {branch_name}.\nToken: {token_number}\nService: {service_name}\nPeople ahead: {position}\nEst wait: ~{eta} mins.\nLive link: {tracking_link}");
+      if (targetBranchId) {
+        const templatesData: any[] = await apiFetch(`/api/kot-message-templates/?branch=${targetBranchId}`);
+        const smsT = templatesData.find((t: any) => t.channel === "sms");
+        const waT = templatesData.find((t: any) => t.channel === "whatsapp");
+        
+        setSmsTemplate(smsT || null);
+        setSmsText(smsT ? smsT.template_text : "Hi {customer_name}, your token is {token_number} (Service: {service_name}). Desk: {desk_name}. People ahead: {position}. Est wait: ~{eta} mins. Quesole Team");
+        
+        setWhatsappTemplate(waT || null);
+        setWhatsappText(waT ? waT.template_text : "Hello {customer_name}! Here is your digital ticket for {branch_name}.\nToken: {token_number}\nService: {service_name}\nPeople ahead: {position}\nEst wait: ~{eta} mins.\nLive link: {tracking_link}");
 
-      const logsData: any[] = await apiFetch(`/api/kot-notification-logs/?branch=${branch.id}`);
-      setLogs(logsData);
+        const logsData: any[] = await apiFetch(`/api/kot-notification-logs/?branch=${targetBranchId}`);
+        setLogs(logsData);
+      }
     } catch (err) {
       console.error("Failed to load KOT settings/logs", err);
     } finally {
@@ -4958,8 +5028,10 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   };
 
   useEffect(() => {
-    fetchKotData();
-  }, [branch.id]);
+    if (branch) {
+      fetchKotData();
+    }
+  }, [branch?.id, branch?.slug]);
 
   const handleRegeneratePin = async (terminalId: string) => {
     try {
@@ -4972,13 +5044,28 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
   };
 
   const handleAddTerminal = async () => {
+    if (kotTerminals.filter(t => t.status === "active").length >= purchasedKotTerminals) {
+      toast.error(`KOT terminal quota reached (${purchasedKotTerminals} allocated). Purchase an add-on under Plan & usage to add more KOT terminals.`, {
+        action: setView ? {
+          label: "Plan & Usage",
+          onClick: () => setView("billing")
+        } : undefined
+      });
+      return;
+    }
+
+    if (!targetBranchId) {
+      toast.error("Unable to identify current branch.");
+      return;
+    }
+
     setIsAddingTerminal(true);
     try {
       const nextNumber = kotTerminals.length + 1;
       await apiFetch(`/api/kot/terminals/`, {
         method: "POST",
         body: JSON.stringify({
-          branch: branch.id,
+          branch: targetBranchId,
           terminal_identifier: `KOT ${nextNumber}`
         })
       });
@@ -5065,10 +5152,23 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
             This is a link you can share (on a poster, WhatsApp, or SMS) that lets customers check in remotely and get a digital token without needing to visit a kiosk in person.
           </p>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <span className="text-xs text-muted-foreground bg-accent/20 px-3 py-1.5 rounded-lg border border-border/40 font-bold shrink-0">
             Terminals Allocated: {kotTerminals.filter(t => t.status === "active").length} / {purchasedKotTerminals}
           </span>
+          {kotTerminals.filter(t => t.status === "active").length >= purchasedKotTerminals && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (setView) setView("billing");
+                else toast.info("Go to Plan & Usage in your sidebar to purchase add-ons.");
+              }}
+              className="h-8 gap-1.5 text-xs font-bold shrink-0 text-amber-600 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20"
+            >
+              <CreditCard className="h-3.5 w-3.5" /> Buy More KOT Terminals
+            </Button>
+          )}
           <Button
             variant="brand"
             size="sm"
@@ -5149,31 +5249,37 @@ export function KotSettingsPanel({ branch, company }: KotSettingsPanelProps) {
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
-                    <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Check-In Link</span>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={kotUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline font-bold flex items-center gap-1"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        <span>Open</span>
-                      </a>
-                      <button
-                        onClick={() => {
-                          const url = `${window.location.origin}${kotUrl}`;
-                          navigator.clipboard.writeText(url);
-                          toast.success("KOT Check-In URL copied!");
-                        }}
-                        className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
-                      >
-                        <Copy className="h-3 w-3" />
-                        <span>Copy</span>
-                      </button>
-                    </div>
-                  </div>
+                  {(() => {
+                    const terminalSlug = terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, "-") : `kot-${terminal.id}`;
+                    const terminalKotUrl = `${kotUrl}?terminal=${terminalSlug}`;
+                    return (
+                      <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
+                        <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Check-In Link</span>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={terminalKotUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline font-bold flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            <span>Open</span>
+                          </a>
+                          <button
+                            onClick={() => {
+                              const url = `${window.location.origin}${terminalKotUrl}`;
+                              navigator.clipboard.writeText(url);
+                              toast.success(`KOT Check-In URL for ${terminal.terminal_identifier} copied!`);
+                            }}
+                            className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
+                          >
+                            <Copy className="h-3 w-3" />
+                            <span>Copy</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

@@ -127,8 +127,9 @@ class BranchViewSet(viewsets.ModelViewSet):
     def verify_kiosk_password(self, request, pk=None):
         branch = self.get_object()
         password = request.data.get("password")
+        kiosk_id = request.data.get("kiosk_id")
         if not password:
-            return Response({"error": "Password is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Password or PIN is required."}, status=status.HTTP_400_BAD_REQUEST)
         
         # Lockout check to prevent brute-forcing
         from django.core.cache import cache
@@ -139,21 +140,36 @@ class BranchViewSet(viewsets.ModelViewSet):
                 "error": "Too many failed attempts. Please try again after 60 seconds."
             }, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        # Hashed check using check_password
         from django.contrib.auth.hashers import check_password
-        
-        # If no password is configured, fail closed
-        if not branch.kiosk_password_hash:
-            return Response({
-                "error": "Kiosk exit locked. Set a kiosk password from the Branch Operations console to secure and unlock exit access."
-            }, status=status.HTTP_400_BAD_REQUEST)
+        from kot.models import Kiosk, KotTerminal
 
-        # Support both plain match (for legacy fallback) and PBKDF2 hash
         is_correct = False
-        if branch.kiosk_password_hash.startswith("pbkdf2_sha256$"):
-            is_correct = check_password(password, branch.kiosk_password_hash)
-        else:
-            is_correct = (password == branch.kiosk_password_hash)
+        kot_terminal_id = request.data.get("kot_terminal_id") or request.data.get("terminal_id")
+
+        # 1. Check against specific kiosk or KOT terminal PIN code for this branch
+        if kiosk_id:
+            try:
+                is_correct = Kiosk.all_objects.filter(id=kiosk_id, branch=branch, pin=str(password)).exists()
+            except Exception:
+                pass
+        if not is_correct and kot_terminal_id:
+            try:
+                is_correct = KotTerminal.all_objects.filter(id=kot_terminal_id, branch=branch, pin=str(password)).exists()
+            except Exception:
+                pass
+
+        # 2. Check against any Kiosk or KotTerminal 4-digit PIN code for this branch
+        if not is_correct:
+            is_correct = Kiosk.all_objects.filter(branch=branch, pin=str(password)).exists()
+        if not is_correct:
+            is_correct = KotTerminal.all_objects.filter(branch=branch, pin=str(password)).exists()
+
+        # 3. Check against branch master kiosk_password_hash if configured
+        if not is_correct and branch.kiosk_password_hash:
+            if branch.kiosk_password_hash.startswith("pbkdf2_sha256$"):
+                is_correct = check_password(str(password), branch.kiosk_password_hash)
+            else:
+                is_correct = (str(password) == branch.kiosk_password_hash)
 
         if is_correct:
             cache.delete(lockout_key)
@@ -167,7 +183,7 @@ class BranchViewSet(viewsets.ModelViewSet):
                 return Response({
                     "error": "Too many failed attempts. Please try again after 60 seconds."
                 }, status=status.HTTP_429_TOO_MANY_REQUESTS)
-            return Response({"verified": False, "error": f"Invalid password. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"verified": False, "error": f"Invalid PIN or password. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"], url_path="kot-session-lock", permission_classes=[AllowAny])
     def kot_session_lock(self, request, pk=None):

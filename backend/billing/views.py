@@ -105,12 +105,29 @@ class BuyAddOnView(APIView):
         try:
             component = PlanComponent.objects.get(key=component_key, is_active=True)
         except PlanComponent.DoesNotExist:
-            from billing.models import TokenDeliveryMethod
-            try:
-                tdm = TokenDeliveryMethod.objects.get(key=component_key, is_active=True)
-                is_tdm = True
-            except TokenDeliveryMethod.DoesNotExist:
-                return Response({"error": "Plan component not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+            if component_key in ["kot_terminals", "paper_roll_screens", "operator_screens", "services"]:
+                component, _ = PlanComponent.objects.get_or_create(
+                    key=component_key,
+                    defaults={
+                        "label": "Digital KOT Check-In Terminals" if component_key == "kot_terminals" else component_key.replace("_", " ").title(),
+                        "description": "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
+                        "unit_label": "terminal" if component_key == "kot_terminals" else "unit",
+                        "price_per_unit": 490.0,
+                        "default_included_qty": 1,
+                        "is_active": True,
+                        "category": "ADDON"
+                    }
+                )
+                if not component.is_active:
+                    component.is_active = True
+                    component.save()
+            else:
+                from billing.models import TokenDeliveryMethod
+                try:
+                    tdm = TokenDeliveryMethod.objects.get(key=component_key, is_active=True)
+                    is_tdm = True
+                except TokenDeliveryMethod.DoesNotExist:
+                    return Response({"error": "Plan component not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
 
         company = user.company
         unit_price = float(tdm.price_per_branch or 0.00) if is_tdm else float(component.price_per_unit)
@@ -287,6 +304,19 @@ class CompanyBranchesSummaryView(APIView):
         rev_method_map = {m.queue_method_code: m.key for m in active_tdms if m.queue_method_code}
         
         branches = Branch.objects.filter(company=company, status="active").order_by("created_at")
+        
+        PlanComponent.objects.get_or_create(
+            key="kot_terminals",
+            defaults={
+                "label": "Digital KOT Check-In Terminals",
+                "description": "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
+                "unit_label": "terminal",
+                "price_per_unit": 490.0,
+                "default_included_qty": 1,
+                "is_active": True,
+                "category": "ADDON"
+            }
+        )
         active_components = {pc.key: pc for pc in PlanComponent.objects.filter(is_active=True)}
         
         result = []
@@ -325,7 +355,11 @@ class CompanyBranchesSummaryView(APIView):
                 elif key == "services":
                     used = Service.objects.filter(branch=br, is_active=True).count()
                 elif key == "paper_roll_screens":
-                    used = DisplayDevice.objects.filter(branch=br, layout="kiosk").count()
+                    from kot.models import Kiosk
+                    used = Kiosk.objects.filter(branch=br, status="active").count() or DisplayDevice.objects.filter(branch=br, layout="kiosk").count()
+                elif key == "kot_terminals":
+                    from kot.models import KotTerminal
+                    used = KotTerminal.objects.filter(branch=br, status="active").count()
                 elif key == "printed_qr":
                     used = QrCode.objects.filter(branch=br).count()
                 elif key == "online_module":
@@ -960,6 +994,18 @@ class BillingConfigView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
+        PlanComponent.objects.get_or_create(
+            key="kot_terminals",
+            defaults={
+                "label": "Digital KOT Check-In Terminals",
+                "description": "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
+                "unit_label": "terminal",
+                "price_per_unit": 490.0,
+                "default_included_qty": 1,
+                "is_active": True,
+                "category": "ADDON"
+            }
+        )
         st_qs = QueueSolutionType.objects.filter(is_active=True).order_by("display_order")
         pc_qs = PlanComponent.objects.filter(is_active=True).order_by("display_order")
         td_qs = TokenDeliveryMethod.objects.filter(is_active=True).order_by("display_order")

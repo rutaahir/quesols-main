@@ -31,8 +31,44 @@ function CompanyAdminDashboard() {
   const { companySlug } = Route.useParams();
   const { session } = useQuesole();
   const navigate = useNavigate();
-  const [active, setActive] = useState(NAV[0]!.id);
-  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+
+  const [active, setActive] = useState(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get("view");
+      if (urlView) return urlView;
+      const saved = sessionStorage.getItem(`admin_active_view_${companySlug}`) || localStorage.getItem(`admin_active_view_${companySlug}`);
+      if (saved) return saved;
+    }
+    return NAV[0]!.id;
+  });
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlBranchId = params.get("branchId");
+      if (urlBranchId) return urlBranchId;
+      return sessionStorage.getItem(`admin_selected_branch_${companySlug}`) || localStorage.getItem(`admin_selected_branch_${companySlug}`) || null;
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && companySlug) {
+      sessionStorage.setItem(`admin_active_view_${companySlug}`, active);
+      localStorage.setItem(`admin_active_view_${companySlug}`, active);
+      if (selectedBranchId) {
+        sessionStorage.setItem(`admin_selected_branch_${companySlug}`, selectedBranchId);
+        localStorage.setItem(`admin_selected_branch_${companySlug}`, selectedBranchId);
+      }
+      const params = new URLSearchParams(window.location.search);
+      params.set("view", active);
+      if (selectedBranchId) params.set("branchId", selectedBranchId);
+      const newSearch = params.toString();
+      const cleanUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+      window.history.replaceState(null, "", cleanUrl);
+    }
+  }, [active, selectedBranchId, companySlug]);
 
   useEffect(() => {
     if (!session) {
@@ -41,9 +77,7 @@ function CompanyAdminDashboard() {
       void navigate({ to: "/app" });
     } else if (session.role !== "company_admin") {
       // Branch admins/operators shouldn't access company admin console
-      // Redirect to their branch console
       const branch = session.branchId;
-      // We will resolve it below or fallback
     }
   }, [session, navigate, companySlug]);
 

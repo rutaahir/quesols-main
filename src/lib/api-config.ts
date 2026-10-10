@@ -2,8 +2,8 @@ export const getApiUrl = (path: string): string => {
   if (typeof window === "undefined") {
     return `http://127.0.0.1:8000${path}`;
   }
-  // If we are on HTTPS, route through Vite proxy on port 8080 (relative URL)
-  if (window.location.protocol === "https:") {
+  // If we are on HTTPS or proxy is available, route through relative URL
+  if (window.location.protocol === "https:" || window.location.port === "8081" || window.location.port === "8080") {
     return path;
   }
   // Otherwise, fallback to direct port 8000 HTTP access
@@ -15,7 +15,7 @@ export const getWsUrl = (path: string): string => {
     return `ws://127.0.0.1:8000${path}`;
   }
   // If we are on HTTPS, use secure WebSockets via the same port (relative / proxy)
-  if (window.location.protocol === "https:") {
+  if (window.location.protocol === "https:" || window.location.port === "8081" || window.location.port === "8080") {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${window.location.host}${path}`;
   }
@@ -25,14 +25,14 @@ export const getWsUrl = (path: string): string => {
 
 export const getNetworkOrigin = (): string => {
   if (typeof window === "undefined") {
-    return "http://192.168.1.12:8080";
+    return "http://192.168.1.12:8081";
   }
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
   const port = window.location.port ? `:${window.location.port}` : "";
   
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return `${protocol}//192.168.1.12${port || ":8080"}`;
+    return `${protocol}//192.168.1.12${port || ":8081"}`;
   }
   return window.location.origin;
 };

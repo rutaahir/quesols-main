@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { SiteNav } from "@/components/site/site-nav";
 import { SiteFooter } from "@/components/site/site-footer";
-import { FloatingContact } from "@/components/site/floating-contact";
 import { Reveal, motion, EASE } from "@/components/quesole/motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -174,7 +173,7 @@ function PartnershipsPage() {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="mx-auto max-w-7xl px-5 lg:px-8 mb-12"
+          className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-12"
         >
           <div className="grid gap-10 md:grid-cols-[58fr_42fr] items-center">
             {/* Left side text walkthrough */}
@@ -256,7 +255,7 @@ function PartnershipsPage() {
         </motion.section>
 
         {/* Partnership Form & Program Benefits Section */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8 mb-16">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-16">
           <div className="grid gap-8 lg:grid-cols-[1fr_1.3fr] items-start">
             
             {/* Left Column: Partnership Perks */}
@@ -538,7 +537,7 @@ function PartnershipsPage() {
         </section>
 
         {/* Bottom Horizontal Value Banner */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6">
           <Reveal delay={0.2}>
             <div className="rounded-[2.5rem] border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/50 p-6 lg:p-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4 shadow-sm backdrop-blur-md">
               {[
@@ -579,7 +578,6 @@ function PartnershipsPage() {
       </motion.main>
 
       <SiteFooter />
-      <FloatingContact />
     </div>
   );
 }

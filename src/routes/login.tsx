@@ -346,12 +346,6 @@ function LoginPage() {
               </div>
             </div>
 
-            {error && !emailError && !passwordError && (
-              <motion.p initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="text-xs font-bold text-destructive bg-destructive/10 p-3 rounded-xl border border-destructive/20 text-center">
-                {error}
-              </motion.p>
-            )}
-
             <Button 
               type="submit"
               size="lg" 

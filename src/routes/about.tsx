@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteNav } from "@/components/site/site-nav";
 import { SiteFooter } from "@/components/site/site-footer";
-import { FloatingContact } from "@/components/site/floating-contact";
 import { Reveal, Magnetic, motion, EASE } from "@/components/quesole/motion";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, ArrowRight, Layers, QrCode, Users, Cpu, ShieldCheck, HelpCircle } from "lucide-react";
@@ -57,7 +56,7 @@ function AboutPage() {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="mx-auto max-w-7xl px-5 lg:px-8 mb-10 text-center"
+          className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-10 text-center"
         >
           <div className="max-w-4xl mx-auto space-y-5">
             <motion.span
@@ -86,7 +85,7 @@ function AboutPage() {
         </motion.section>
 
         {/* Core Description Grid */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8 mb-16">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-16">
           <div className="rounded-[2.5rem] border border-border/60 bg-surface/40 p-8 backdrop-blur-md lg:p-12 shadow-[var(--shadow-lift)]">
             <div className="grid gap-8 lg:grid-cols-2 items-center">
               <Reveal>
@@ -123,7 +122,7 @@ function AboutPage() {
         </section>
 
         {/* Alternating Feature Showcases */}
-        <section id="features" className="mx-auto max-w-7xl px-5 lg:px-8 space-y-24 mb-24">
+        <section id="features" className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 space-y-24 mb-24">
           
           {/* Feature 1: QR & Kiosk Generation */}
           <div className="grid gap-10 lg:grid-cols-2 lg:gap-16 items-center">
@@ -205,7 +204,7 @@ function AboutPage() {
         </section>
 
         {/* Scalability Grid Section */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8 mb-24">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-24">
           <div className="text-center max-w-3xl mx-auto mb-14">
             <span className="text-[11px] font-bold text-brand uppercase tracking-wider">Multi-Location Scaling</span>
             <h2 className="mt-2 font-display text-3xl font-extrabold text-foreground tracking-tight sm:text-4xl">
@@ -250,7 +249,7 @@ function AboutPage() {
         </section>
 
         {/* Call to Action Banner */}
-        <section className="mx-auto max-w-5xl px-5 lg:px-8">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6">
           <Reveal>
             <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-violet-600 to-blue-600 px-8 py-16 text-center text-white shadow-xl">
               <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1.5px,transparent_1.5px)] [background-size:24px_24px]" />
@@ -276,7 +275,6 @@ function AboutPage() {
       </main>
 
       <SiteFooter />
-      <FloatingContact />
     </div>
   );
 }

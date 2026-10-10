@@ -446,7 +446,13 @@ class AppointmentManageView(APIView):
             appointment = Appointment.objects.get(manage_code=manage_code)
             return Response(AppointmentSerializer(appointment).data, status=status.HTTP_200_OK)
         except Appointment.DoesNotExist:
-            return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
+            from appointments.models import OnlineBooking
+            from appointments.serializers import OnlineBookingSerializer
+            try:
+                booking = OnlineBooking.objects.get(booking_reference=manage_code)
+                return Response(OnlineBookingSerializer(booking).data, status=status.HTTP_200_OK)
+            except OnlineBooking.DoesNotExist:
+                return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
 
 class AppointmentRescheduleView(APIView):
     permission_classes = [AllowAny]
@@ -460,15 +466,41 @@ class AppointmentRescheduleView(APIView):
         if not new_slot_start_str and new_date_str and new_time_str:
             new_slot_start_str = f"{new_date_str}T{new_time_str}:00" if len(new_time_str) == 5 else f"{new_date_str}T{new_time_str}"
 
-        if not new_slot_start_str:
-            return Response({"error": "New slot start time (or new_date and new_slot_time) is required."}, status=status.HTTP_400_BAD_REQUEST)
-
+        booking = None
+        appointment = None
         try:
             appointment = Appointment.objects.get(manage_code=manage_code)
             if appointment.status == "cancelled":
                 return Response({"error": "Cannot reschedule a cancelled appointment."}, status=status.HTTP_400_BAD_REQUEST)
         except Appointment.DoesNotExist:
-            return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
+            from appointments.models import OnlineBooking
+            try:
+                booking = OnlineBooking.objects.get(booking_reference=manage_code)
+                if booking.status == "cancelled":
+                    return Response({"error": "Cannot reschedule a cancelled appointment."}, status=status.HTTP_400_BAD_REQUEST)
+            except OnlineBooking.DoesNotExist:
+                return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
+
+        if booking:
+            try:
+                target_date = datetime.strptime(new_date_str, "%Y-%m-%d").date() if new_date_str else booking.date
+                if new_time_str:
+                    slot_time = datetime.strptime(new_time_str, "%H:%M:%S").time() if len(new_time_str) == 8 else datetime.strptime(new_time_str, "%H:%M").time()
+                    booking.slot_time = slot_time
+                booking.date = target_date
+                booking.save()
+                return Response({
+                    "message": "Appointment rescheduled successfully.",
+                    "booking_reference": booking.booking_reference,
+                    "new_date": str(booking.date),
+                    "new_slot_time": str(booking.slot_time),
+                    "status": booking.status
+                }, status=status.HTTP_200_OK)
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not new_slot_start_str:
+            return Response({"error": "New slot start time (or new_date and new_slot_time) is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             new_slot_start = timezone.is_aware(datetime.fromisoformat(new_slot_start_str)) and datetime.fromisoformat(new_slot_start_str) or timezone.make_aware(datetime.fromisoformat(new_slot_start_str))
@@ -529,12 +561,29 @@ class AppointmentCancelView(APIView):
     throttle_classes = [PublicAppointmentThrottle]
 
     def post(self, request, manage_code):
+        booking = None
+        appointment = None
         try:
             appointment = Appointment.objects.get(manage_code=manage_code)
             if appointment.status == "cancelled":
                 return Response({"error": "Appointment is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
         except Appointment.DoesNotExist:
-            return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
+            from appointments.models import OnlineBooking
+            try:
+                booking = OnlineBooking.objects.get(booking_reference=manage_code)
+                if booking.status == "cancelled":
+                    return Response({"error": "Appointment is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+            except OnlineBooking.DoesNotExist:
+                return Response({"error": "Invalid manage code."}, status=status.HTTP_404_NOT_FOUND)
+
+        if booking:
+            booking.status = "cancelled"
+            booking.save()
+            return Response({
+                "message": "Appointment cancelled successfully.",
+                "booking_reference": booking.booking_reference,
+                "status": "cancelled"
+            }, status=status.HTTP_200_OK)
 
         try:
             with transaction.atomic():

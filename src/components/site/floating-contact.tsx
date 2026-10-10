@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { MessageSquare, X, Phone, Mail, MapPin, ArrowRight, MessageCircle } from "lucide-react";
+import { motion, AnimatePresence, useScroll } from "motion/react";
+import { MessageSquare, X, Phone, Mail, MapPin, ArrowRight, MessageCircle, ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
@@ -8,15 +8,23 @@ import { Link } from "@tanstack/react-router";
 export function FloatingContact() {
   const [isOpen, setIsOpen] = useState(false);
   const [hasScrolled, setHasScrolled] = useState(false);
+  const { scrollYProgress } = useScroll();
 
   useEffect(() => {
     const handleScroll = () => {
-      setHasScrolled(window.scrollY > 300);
+      setHasScrolled(window.scrollY > 200);
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
     handleScroll();
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
 
   // Stagger configurations for child elements
   const listVariants = {
@@ -43,17 +51,18 @@ export function FloatingContact() {
   return (
     <div
       className={cn(
-        "fixed right-4 sm:right-6 bottom-4 sm:bottom-6 z-[40] font-sans flex flex-col items-end transition-all duration-300 pointer-events-auto"
+        "fixed right-4 sm:right-6 bottom-4 sm:bottom-6 z-[50] font-sans flex flex-col items-center gap-3.5 pointer-events-auto select-none"
       )}
     >
+      {/* Contact Card Popover */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.85, y: 40 }}
+            initial={{ opacity: 0, scale: 0.85, y: 25 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.85, y: 40 }}
+            exit={{ opacity: 0, scale: 0.85, y: 25 }}
             transition={{ type: "spring", stiffness: 380, damping: 28 }}
-            className="mb-3 w-[290px] sm:w-[310px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[2rem] bg-gradient-to-br from-primary via-violet to-ice p-[1.5px] shadow-[0_15px_40px_rgba(99,102,241,0.25)]"
+            className="w-[290px] sm:w-[320px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[2rem] bg-gradient-to-br from-primary via-violet to-ice p-[1.5px] shadow-[0_20px_50px_rgba(99,102,241,0.3)]"
           >
             {/* Inner Glassmorphic Container */}
             <div className="w-full h-full rounded-[1.9rem] bg-slate-950/95 backdrop-blur-xl p-4 text-white relative">
@@ -66,7 +75,6 @@ export function FloatingContact() {
                   <div className="absolute inset-0 rounded-full bg-primary/30 blur-md animate-pulse" />
                   <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-primary via-violet to-ice shadow-lg border border-white/10">
                     <MessageSquare className="h-5 w-5 fill-white/10" />
-                    {/* Pulsing rings */}
                     <div className="absolute -inset-1 rounded-full border border-primary/30 animate-ping opacity-25" />
                     <div className="absolute -inset-2 rounded-full border border-violet/10" />
                   </div>
@@ -98,7 +106,7 @@ export function FloatingContact() {
                 <div className="absolute h-1 w-1 rounded-full bg-ice shadow-[0_0_8px_#38bdf8] animate-pulse" />
               </div>
 
-              {/* Contact Rows with Stagger Animation */}
+              {/* Contact Rows */}
               <motion.div
                 variants={listVariants}
                 initial="hidden"
@@ -121,7 +129,6 @@ export function FloatingContact() {
                     </div>
                   </div>
 
-                  {/* Actions slide in on hover */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 shrink-0 transform translate-x-1.5 group-hover:translate-x-0">
                     <a
                       href="tel:+917043884422"
@@ -177,8 +184,6 @@ export function FloatingContact() {
 
                 {/* Inquiry Buttons */}
                 <motion.div variants={itemVariants} className="pt-1.5 space-y-3">
-                  
-                  {/* Send Inquiry Now Button */}
                   <Button
                     asChild
                     className="w-full h-9.5 rounded-full bg-gradient-to-r from-primary via-violet to-ice hover:opacity-95 font-bold shadow-lg border-0 cursor-pointer transform hover:scale-[1.01] active:scale-98 transition-all flex items-center justify-center gap-1.5 group text-white text-[11px] tracking-wide font-display"
@@ -189,7 +194,6 @@ export function FloatingContact() {
                     </Link>
                   </Button>
 
-                  {/* WhatsApp Quick Chat */}
                   <div className="space-y-1.5 text-center">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
                       Prefer a quick chat?
@@ -214,42 +218,102 @@ export function FloatingContact() {
         )}
       </AnimatePresence>
 
-      {/* Floating Action Button Toggle */}
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className={cn(
-          "flex h-14 w-14 items-center justify-center rounded-full text-white shadow-xl shadow-primary/20 outline-none border-none cursor-pointer select-none transition-all duration-300 hover:scale-105 active:scale-95 ml-auto",
-          isOpen
-            ? "bg-slate-800 hover:bg-slate-900"
-            : "bg-gradient-to-tr from-primary to-violet hover:shadow-[0_8px_24px_rgba(99,102,241,0.4)] animate-bounce"
+      {/* UPPER SIDE BUTTON: Scroll to Top Button with Circular Scroll Progress Ring */}
+      <AnimatePresence>
+        {hasScrolled && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.5, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, y: 15 }}
+            transition={{ type: "spring", stiffness: 300, damping: 22 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.92 }}
+            onClick={scrollToTop}
+            className="relative flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-white dark:bg-slate-900 text-violet-600 dark:text-violet-400 shadow-lg border border-slate-200/90 dark:border-slate-800 cursor-pointer outline-none transition-shadow hover:shadow-xl"
+            aria-label="Scroll back to top"
+          >
+            {/* Outer Circular Scroll Progress SVG Ring */}
+            <svg className="absolute inset-0 -rotate-90 h-full w-full p-0.5 pointer-events-none" viewBox="0 0 36 36">
+              <circle
+                cx="18"
+                cy="18"
+                r="16"
+                className="stroke-slate-200/70 dark:stroke-slate-800"
+                strokeWidth="2.5"
+                fill="none"
+              />
+              <motion.circle
+                cx="18"
+                cy="18"
+                r="16"
+                stroke="url(#scroll-ring-gradient)"
+                strokeWidth="2.5"
+                fill="none"
+                strokeLinecap="round"
+                style={{
+                  pathLength: scrollYProgress,
+                }}
+              />
+              <defs>
+                <linearGradient id="scroll-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="oklch(0.53 0.17 283)" />
+                  <stop offset="50%" stopColor="oklch(0.62 0.17 300)" />
+                  <stop offset="100%" stopColor="oklch(0.7 0.16 42)" />
+                </linearGradient>
+              </defs>
+            </svg>
+
+            {/* Up Arrow Icon */}
+            <ArrowUp className="h-5 w-5 stroke-[2.5] relative z-10" />
+          </motion.button>
         )}
-        aria-label="Toggle contact help desk"
-      >
-        <AnimatePresence mode="wait">
-          {isOpen ? (
-            <motion.div
-              key="close"
-              initial={{ rotate: -90, opacity: 0 }}
-              animate={{ rotate: 0, opacity: 1 }}
-              exit={{ rotate: 90, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-            >
-              <X className="h-6 w-6" />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="open"
-              initial={{ rotate: 90, opacity: 0 }}
-              animate={{ rotate: 0, opacity: 1 }}
-              exit={{ rotate: -90, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-            >
-              <MessageSquare className="h-6 w-6" />
-            </motion.div>
+      </AnimatePresence>
+
+      {/* DOWN SIDE BUTTON: Message / Contact Action Button */}
+      <div className="relative group">
+        {/* Concentric Pulsing Halo Rings around the Message Button */}
+        <div className="absolute inset-0 rounded-full bg-violet-600/30 blur-md animate-pulse pointer-events-none" />
+        <div className="absolute -inset-1.5 rounded-full border-2 border-violet-500/30 animate-ping pointer-events-none opacity-30" />
+        <div className="absolute -inset-2.5 rounded-full border border-violet-400/20 pointer-events-none" />
+        <div className="absolute -inset-3.5 rounded-full border border-violet-400/10 pointer-events-none" />
+
+        <button
+          type="button"
+          onClick={() => setIsOpen((prev) => !prev)}
+          className={cn(
+            "relative flex h-13 w-13 sm:h-14 sm:w-14 items-center justify-center rounded-full text-white shadow-2xl outline-none border-none cursor-pointer select-none transition-all duration-300 hover:scale-105 active:scale-95",
+            isOpen
+              ? "bg-slate-900 hover:bg-slate-950 text-white shadow-[0_10px_30px_rgba(15,23,42,0.5)]"
+              : "bg-gradient-to-br from-violet-700 via-indigo-600 to-violet-800 shadow-[0_12px_35px_rgba(124,58,237,0.5)] hover:shadow-[0_15px_40px_rgba(124,58,237,0.6)]"
           )}
-        </AnimatePresence>
-      </button>
+          aria-label="Toggle contact message dialog"
+        >
+          <AnimatePresence mode="wait">
+            {isOpen ? (
+              <motion.div
+                key="close"
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: 90, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+              >
+                <X className="h-6 w-6 stroke-[2.5]" />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="open"
+                initial={{ rotate: 90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: -90, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+              >
+                <MessageSquare className="h-6 w-6 stroke-[2]" />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </button>
+      </div>
+
     </div>
   );
 }

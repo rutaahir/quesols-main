@@ -13,7 +13,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { QuesoleProvider } from "@/lib/quesole/store";
 import { Toaster } from "@/components/ui/sonner";
-import { ScrollToTop } from "@/components/site/scroll-to-top";
+import { FloatingContact } from "@/components/site/floating-contact";
 
 function NotFoundComponent() {
   return (
@@ -130,7 +130,7 @@ function RootComponent() {
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
         <Toaster position="top-right" richColors closeButton />
-        <ScrollToTop />
+        <FloatingContact />
       </QuesoleProvider>
     </QueryClientProvider>
   );

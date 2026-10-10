@@ -157,7 +157,7 @@ function PricingPage() {
       <main className="pt-24">
         {/* Header + toggle */}
         <section className="bg-pearl">
-          <div className="mx-auto w-full max-w-7xl px-5 py-16 text-center lg:px-8 lg:py-20">
+          <div className="mx-auto w-full max-w-[1728px] w-[98%] px-4 py-16 text-center lg:px-6 lg:py-20">
             <Reveal>
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
                 <Sparkles className="h-3.5 w-3.5" /> Pricing
@@ -195,7 +195,7 @@ function PricingPage() {
 
         {/* Plan cards */}
         <section className="bg-pearl">
-          <div className="mx-auto grid w-full max-w-7xl gap-6 px-5 pb-16 lg:grid-cols-3 lg:items-start lg:px-8 lg:pb-24">
+          <div className="mx-auto grid w-full max-w-[1728px] w-[98%] gap-6 px-4 pb-16 lg:grid-cols-3 lg:items-start lg:px-6 lg:pb-24">
             {PLANS.map((p, i) => (
               <Reveal key={p.id} delay={i * 0.06} className={cn(p.recommended && "lg:-mt-6")}>
                 <div
@@ -257,7 +257,7 @@ function PricingPage() {
 
         {/* Comparison table */}
         <section className="bg-ice-tint">
-          <div className="mx-auto w-full max-w-7xl px-5 py-16 lg:px-8 lg:py-24">
+          <div className="mx-auto w-full max-w-[1728px] w-[98%] px-4 py-16 lg:px-6 lg:py-24">
             <Reveal className="mb-8 max-w-2xl">
               <h2 className="text-3xl font-bold sm:text-4xl">Compare every line item.</h2>
               <p className="mt-3 text-muted-foreground">
@@ -317,7 +317,7 @@ function PricingPage() {
 
         {/* FAQ */}
         <section className="bg-pearl">
-          <div className="mx-auto grid w-full max-w-7xl gap-10 px-5 py-16 lg:grid-cols-[38fr_62fr] lg:px-8 lg:py-24">
+          <div className="mx-auto grid w-full max-w-[1728px] w-[98%] gap-10 px-4 py-16 lg:grid-cols-[38fr_62fr] lg:px-6 lg:py-24">
             <Reveal>
               <h2 className="text-3xl font-bold sm:text-4xl">Everything else you're wondering.</h2>
               <p className="mt-3 text-muted-foreground">
@@ -347,7 +347,7 @@ function PricingPage() {
         </section>
 
         {/* Final CTA band */}
-        <section className="mx-auto w-full max-w-7xl px-5 pb-20 lg:px-8">
+        <section className="mx-auto w-full max-w-[1728px] w-[98%] px-4 pb-20 lg:px-6">
           <Reveal>
             <div className="relative overflow-hidden rounded-[2rem] bg-brand px-8 py-14 text-center text-primary-foreground">
               <h2 className="font-display text-3xl font-bold sm:text-4xl">Still deciding?</h2>

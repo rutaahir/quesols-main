@@ -1,6 +1,6 @@
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, ShieldAlert, HelpCircle, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuesole, waitingOf, apiFetch } from "@/lib/quesole/store";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -94,13 +94,16 @@ function Kiosk() {
   const [kiosksList, setKiosksList] = useState<any[]>([]);
   const [selectedKioskId, setSelectedKioskId] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem(`kiosk_selected_id_${branchId}`) || "";
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramId = searchParams.get("terminal") || searchParams.get("kiosk") || searchParams.get("kiosk_id") || searchParams.get("id");
+      if (paramId) return paramId;
+      return sessionStorage.getItem(`kiosk_selected_id_${branchId}`) || localStorage.getItem(`kiosk_selected_id_${branchId}`) || "";
     }
     return "";
   });
   const [sessionToken, setSessionToken] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem(`kiosk_session_token_${branchId}`) || null;
+      return sessionStorage.getItem(`kiosk_session_token_${branchId}`) || localStorage.getItem(`kiosk_session_token_${branchId}`) || null;
     }
     return null;
   });
@@ -152,10 +155,57 @@ function Kiosk() {
   useEffect(() => {
     if (!branch?.id) return;
     apiFetch(`/api/public/kiosks/?branch_id=${branch.id}`)
-      .then((data: any) => {
+      .then((data: any[]) => {
         setKiosksList(data);
         if (data.length > 0) {
-          setSelectedKioskId((prev) => prev || data[0].id);
+          const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+          const param = searchParams.get("terminal") || searchParams.get("kiosk") || searchParams.get("kiosk_id") || searchParams.get("id");
+
+          let matchedKiosk: any = null;
+          if (param) {
+            const pNorm = param.trim().toLowerCase().replace(/\s+/g, "-");
+            matchedKiosk = data.find((k: any) =>
+              String(k.id) === String(param) ||
+              k.kiosk_identifier.toLowerCase() === param.toLowerCase() ||
+              k.kiosk_identifier.toLowerCase().replace(/\s+/g, "") === param.toLowerCase().replace(/\s+/g, "") ||
+              k.kiosk_identifier.toLowerCase().replace(/\s+/g, "-") === pNorm
+            );
+          }
+
+          if (matchedKiosk) {
+            setSelectedKioskId(String(matchedKiosk.id));
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(`kiosk_selected_id_${branch.id}`, String(matchedKiosk.id));
+              localStorage.setItem(`kiosk_selected_id_${branch.id}`, String(matchedKiosk.id));
+            }
+          } else {
+            setSelectedKioskId((prev) => {
+              if (prev && data.some((k: any) => String(k.id) === String(prev))) {
+                return String(prev);
+              }
+              const defaultId = String(data[0].id);
+              if (typeof window !== "undefined") {
+                sessionStorage.setItem(`kiosk_selected_id_${branch.id}`, defaultId);
+                localStorage.setItem(`kiosk_selected_id_${branch.id}`, defaultId);
+              }
+              return defaultId;
+            });
+          }
+
+          // Keep human-readable terminal parameter (e.g. ?terminal=kiosk-1 or ?terminal=kiosk-2) in browser URL bar
+          if (typeof window !== "undefined" && matchedKiosk) {
+            const terminalSlug = matchedKiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, "-");
+            const currentSearch = new URLSearchParams(window.location.search);
+            if (currentSearch.get("terminal") !== terminalSlug) {
+              currentSearch.delete("kiosk_id");
+              currentSearch.delete("id");
+              currentSearch.delete("kiosk");
+              currentSearch.set("terminal", terminalSlug);
+              const newSearch = currentSearch.toString();
+              const cleanUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+              window.history.replaceState(null, "", cleanUrl);
+            }
+          }
         }
       })
       .catch((err: any) => console.error("Failed to load kiosks:", err));
@@ -229,6 +279,31 @@ function Kiosk() {
       ws.close();
     };
   }, [isDeviceUnlocked, selectedKioskId, sessionToken, branch?.id]);
+
+  // Handle unload / closing window — notify backend to close session
+  useEffect(() => {
+    if (!selectedKioskId || !sessionToken) return;
+
+    const handleUnload = () => {
+      const payload = JSON.stringify({ kiosk_id: selectedKioskId, session_token: sessionToken });
+      if (navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: "application/json" });
+        navigator.sendBeacon("/api/kot/public/kiosks/logout/", blob);
+      } else {
+        fetch("/api/kot/public/kiosks/logout/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    };
+
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [selectedKioskId, sessionToken]);
 
   // State 3: Auto-print on entering Confirmation state
   useEffect(() => {
@@ -407,20 +482,33 @@ function Kiosk() {
     try {
       const res = await apiFetch(`/api/branches/${branch.id}/verify-kiosk-password/`, {
         method: "POST",
-        body: JSON.stringify({ password: enteredPin })
+        body: JSON.stringify({ password: enteredPin, kiosk_id: selectedKioskId })
       });
       if (res.verified) {
-        toast.success("Kiosk unlocked — Returning to Branch Console");
+        if (selectedKioskId) {
+          try {
+            await apiFetch("/api/kot/public/kiosks/logout/", {
+              method: "POST",
+              body: JSON.stringify({ kiosk_id: selectedKioskId, session_token: sessionToken }),
+            });
+          } catch (err) {
+            console.warn("Failed kiosk logout on unlock:", err);
+          }
+        }
+        toast.success("Kiosk logged out — Returned to PIN lock screen");
         setIsStaffLockOpen(false);
+        setIsDeviceUnlocked(false);
+        setSessionToken(null);
+        setInitPin("");
         localStorage.removeItem(`kiosk_unlocked_${branchId}`);
         localStorage.removeItem(`kiosk_session_token_${branchId}`);
-        void navigate({ to: "/app" });
+        sessionStorage.removeItem(`kiosk_session_token_${branchId}`);
       } else {
-        setPinError(res.error || "Incorrect password. Please try again.");
+        setPinError(res.error || "Incorrect PIN or password. Please try again.");
         setEnteredPin("");
       }
     } catch (err: any) {
-      setPinError(err.message || "Incorrect password or exit is locked.");
+      setPinError(err.message || "Incorrect PIN or password.");
       setEnteredPin("");
     }
   };
@@ -1057,7 +1145,7 @@ function KioskLockScreen({
           <div className="space-y-2">
             <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Kiosk Terminal</Label>
             <div className="w-full h-12 px-4 flex items-center justify-between rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-semibold text-sm">
-              <span>{kiosksList.find((k: any) => k.id === selectedKioskId)?.kiosk_identifier || kiosksList[0]?.kiosk_identifier || "None"}</span>
+              <span>{kiosksList.find((k: any) => String(k.id) === String(selectedKioskId))?.kiosk_identifier || kiosksList[0]?.kiosk_identifier || "None"}</span>
               <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
                 Selected
               </span>

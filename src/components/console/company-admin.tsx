@@ -142,6 +142,7 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
       <BranchDesksServicesManager
         branchId={targetBranchId}
         onBack={() => setView?.("branches")}
+        setView={setView}
         renderPlanUsageView={(companyId, company) => (
           <CompanyItemizedPlanUsageView companyId={companyId} company={company} />
         )}
@@ -2240,6 +2241,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
             // Improved descriptions for clarity
             const descriptionOverrides: Record<string, string> = {
               paper_roll_screens: "Physical walk-in kiosk hardware terminals purchased for on-site customer registration.",
+              kot_terminals: "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
               printed_qr: "Countable physical display posters/standees purchased for QR self-ticketing at the branch.",
               operator_screens: "Operator desk seats for staff to manage queue calls and serve customers.",
               services: "Configurable service lines that customers can join when checking in at this branch.",
@@ -2251,6 +2253,15 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               sms_integration: "Enable SMS OTP verification and text message notifications for your organization.",
               whatsapp_integration: "Deliver live queue digital tickets directly inside WhatsApp chat.",
             };
+
+            const hasKotComp = baseComponents.some(c => c.key === "kot_terminals");
+            const kotFallbackComp = {
+              id: "virtual-kot", key: "kot_terminals", label: "Digital KOT Check-In Terminals",
+              description: descriptionOverrides["kot_terminals"],
+              unit_label: "terminal", default_included_qty: 1, price_per_unit: 490,
+              is_toggle: false, pricing_type: "PER_UNIT", icon_key: "credit-card"
+            };
+            const effectiveBase = hasKotComp ? baseComponents : [...baseComponents, kotFallbackComp];
 
             const virtualComponents = [
               {
@@ -2279,10 +2290,10 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               }
             ];
 
-            const allCards = activeTab === "legacy" ? baseComponents : [...baseComponents, ...virtualComponents];
+            const allCards = activeTab === "legacy" ? effectiveBase : [...effectiveBase, ...virtualComponents];
 
             // Section definitions
-            const capacityKeys = ["operator_screens", "services", "paper_roll_screens", "printed_qr"];
+            const capacityKeys = ["operator_screens", "services", "paper_roll_screens", "kot_terminals", "printed_qr"];
             const queueKeys = ["queue_qr", "queue_kiosk", "queue_sms", "queue_whatsapp"];
             const addonKeys = ["online_module", "sms_integration", "sms_pack", "whatsapp_integration", "custom_domain", "advanced_analytics", "api_integration"];
 
@@ -2322,7 +2333,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               const isToggle = c.is_toggle || pricingType === "FLAT" || pricingType === "TOGGLE_FREE" || pricingType === "TOGGLE_PAID";
               const isLimitReached = !isToggle && used >= limit && limit > 0;
               const pct = isToggle ? (limit > 0 ? 100 : 0) : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
-              const Icon = (({ operator_screens: Monitor, services: ListTree, paper_roll_screens: Printer, printed_qr: QrCode, online_module: Sparkles, queue_qr: QrCode, queue_kiosk: Printer, queue_sms: MessageSquare, queue_whatsapp: Sparkles } as Record<string, any>)[key]) || Wallet;
+              const Icon = (({ operator_screens: Monitor, services: ListTree, paper_roll_screens: Printer, kot_terminals: CreditCard, printed_qr: QrCode, online_module: Sparkles, queue_qr: QrCode, queue_kiosk: Printer, queue_sms: MessageSquare, queue_whatsapp: Sparkles } as Record<string, any>)[key]) || Wallet;
               const maxAllowed = c.max_qty_per_branch || 1;
               const kioskScreensLimit = activeBranch?.allocations?.paper_roll_screens?.limit || 0;
               const isEditingInline = inlineEditCardKey === key;

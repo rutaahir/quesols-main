@@ -42,6 +42,7 @@ from kot.models import Kiosk
 
 class KioskSerializer(serializers.ModelSerializer):
     is_logged_in = serializers.SerializerMethodField()
+    pin = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Kiosk
@@ -60,6 +61,12 @@ class KioskSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        if not validated_data.get("pin"):
+            import random
+            validated_data["pin"] = "".join(str(random.randint(0, 9)) for _ in range(4))
+        return super().create(validated_data)
 
     def get_is_logged_in(self, obj):
         return obj.is_session_active()
@@ -84,6 +91,7 @@ from kot.models import KotTerminal
 
 class KotTerminalSerializer(serializers.ModelSerializer):
     is_logged_in = serializers.SerializerMethodField()
+    pin = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = KotTerminal
@@ -102,6 +110,13 @@ class KotTerminalSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
+        validators = []
+
+    def create(self, validated_data):
+        if not validated_data.get("pin"):
+            import random
+            validated_data["pin"] = "".join(str(random.randint(0, 9)) for _ in range(4))
+        return super().create(validated_data)
 
     def get_is_logged_in(self, obj):
         return obj.is_session_active()

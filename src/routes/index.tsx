@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteNav } from "@/components/site/site-nav";
 import { SiteFooter } from "@/components/site/site-footer";
-import { FloatingContact } from "@/components/site/floating-contact";
 import {
   AlertIntelligence,
   AnalyticsSection,
@@ -60,7 +59,6 @@ function Landing() {
         <FinalCta />
       </main>
       <SiteFooter />
-      <FloatingContact />
     </div>
   );
 }

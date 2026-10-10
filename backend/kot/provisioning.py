@@ -90,23 +90,24 @@ def provision_kot_terminals_for_branch(branch):
     alloc = CompanyPlanAllocation.objects.filter(
         company=branch.company, branch=branch, plan_component__key="kot_terminals"
     ).first()
-    if alloc:
+    if alloc and alloc.purchased_qty > 0:
         N = alloc.purchased_qty
     else:
         comp_alloc = CompanyPlanAllocation.objects.filter(
             company=branch.company, branch__isnull=True, plan_component__key="kot_terminals"
         ).first()
-        if comp_alloc:
+        if comp_alloc and comp_alloc.purchased_qty > 0:
             N = comp_alloc.purchased_qty
         else:
-            pkg = getattr(branch.company, "package", None)
-            N = getattr(pkg, "max_kot_terminals", 1) if pkg else 1
+            from billing.models import PlanComponent
+            pc = PlanComponent.objects.filter(key="kot_terminals", is_active=True).first()
+            N = pc.default_included_qty if pc else 1
 
     if N < 1:
         N = 1  # At least 1 default KOT terminal for out-of-the-box usability
 
     # 2. Sync KotTerminal records
-    terminals = list(KotTerminal.objects.filter(branch=branch).order_by("id"))
+    terminals = list(KotTerminal.all_objects.filter(branch=branch).order_by("id"))
     channel_layer = get_channel_layer()
 
     for idx, term in enumerate(terminals):
@@ -141,16 +142,23 @@ def provision_kot_terminals_for_branch(branch):
     # 3. Create missing terminals while preserving initial PIN for KOT 1
     if len(terminals) < N:
         for i in range(len(terminals) + 1, N + 1):
-            if i == 1 and getattr(branch, "kiosk_password_hash", None):
-                existing_pin = branch.kiosk_password_hash
+            identifier = f"KOT {i}"
+            existing_term = KotTerminal.all_objects.filter(branch=branch, terminal_identifier=identifier).first()
+            if existing_term:
+                if existing_term.status != "active":
+                    existing_term.status = "active"
+                    existing_term.save()
             else:
-                existing_pin = "".join(str(random.randint(0, 9)) for _ in range(4))
+                if i == 1 and getattr(branch, "kiosk_password_hash", None):
+                    existing_pin = branch.kiosk_password_hash
+                else:
+                    existing_pin = "".join(str(random.randint(0, 9)) for _ in range(4))
 
-            KotTerminal.objects.create(
-                company=branch.company,
-                branch=branch,
-                terminal_identifier=f"KOT {i}",
-                pin=existing_pin,
-                status="active"
-            )
+                KotTerminal.all_objects.create(
+                    company=branch.company,
+                    branch=branch,
+                    terminal_identifier=identifier,
+                    pin=existing_pin,
+                    status="active"
+                )
 

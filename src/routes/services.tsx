@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteNav } from "@/components/site/site-nav";
 import { SiteFooter } from "@/components/site/site-footer";
-import { FloatingContact } from "@/components/site/floating-contact";
 import { Reveal, Magnetic, motion, EASE } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -131,7 +130,7 @@ function ServicesPage() {
           variants={containerVariants}
           initial="hidden"
           animate="show"
-          className="mx-auto max-w-7xl px-5 lg:px-8 mb-12 text-center"
+          className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-12 text-center"
         >
           <div className="max-w-4xl mx-auto space-y-5">
             <motion.span
@@ -160,7 +159,7 @@ function ServicesPage() {
         </motion.section>
 
         {/* Service Configurations Cards List */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8 space-y-8 mb-20">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 space-y-8 mb-20">
           {SERVICE_CONFIGS.map((config, idx) => {
             const IconComp = config.icon;
             return (
@@ -217,7 +216,7 @@ function ServicesPage() {
         </section>
 
         {/* Dynamic Visual Section: Photos Grid */}
-        <section className="mx-auto max-w-7xl px-5 lg:px-8 mb-24">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6 mb-24">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <span className="text-[11px] font-bold text-brand uppercase tracking-wider">Operational Visualizer</span>
             <h2 className="mt-2 font-display text-2xl sm:text-4xl font-extrabold text-foreground tracking-tight">
@@ -256,7 +255,7 @@ function ServicesPage() {
         </section>
 
         {/* CTA Banner */}
-        <section className="mx-auto max-w-5xl px-5 lg:px-8">
+        <section className="mx-auto max-w-[1728px] w-[98%] px-4 lg:px-6">
           <Reveal>
             <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-r from-violet-600 to-blue-600 px-8 py-16 text-center text-white shadow-xl">
               <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1.5px,transparent_1.5px)] [background-size:24px_24px]" />
@@ -282,7 +281,6 @@ function ServicesPage() {
       </main>
 
       <SiteFooter />
-      <FloatingContact />
     </div>
   );
 }
