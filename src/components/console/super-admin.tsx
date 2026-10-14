@@ -2,7 +2,8 @@ import { useState } from "react";
 import {
   Check, Search, ShieldAlert, X, Plus, Trash2, Edit2, ArrowUp, ArrowDown,
   HelpCircle, CheckCircle2, AlertTriangle, FileText, Sparkles, Monitor,
-  Globe, Printer, Building, CreditCard
+  Globe, Printer, Building, CreditCard, Users, Phone, Mail, MapPin, ExternalLink, Clock, MessageSquare,
+  Download, Eye, ArrowRight, CheckCircle, Receipt, FileCheck, Calendar
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,14 +12,23 @@ import { useQuesole, branchStats, planOf } from "@/lib/quesole/store";
 import { StatCard } from "@/components/console/shell";
 import { CountUp, Reveal } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
+import { generateAndDownloadInvoicePDF } from "@/lib/quesole/invoice-pdf";
 
-export function SuperAdminView({ view }: { view: string }) {
+export function SuperAdminView({ view, setView }: { view: string; setView?: (v: string) => void }) {
   const { state, actions } = useQuesole();
   const [q, setQ] = useState("");
 
   const mrr = state.companies.reduce((a, c) => a + c.monthlySpend, 0);
   const totalWaiting = state.branches.reduce((a, b) => a + branchStats(state, b.id).waiting, 0);
   const openUpgrades = state.upgrades.filter((u) => u.status === "open");
+
+  if (view === "invoice_requests" || view === "invoices") {
+    return <InvoiceRequestsManager />;
+  }
+
+  if (view === "leads" || view === "candidates") {
+    return <InterestedCandidatesManager />;
+  }
 
   if (view === "companies") {
     const rows = state.companies.filter((c) =>
@@ -60,40 +70,61 @@ export function SuperAdminView({ view }: { view: string }) {
                   <td className="px-5 py-3.5">{planOf(c.plan).name}</td>
                   <td className="hidden px-5 py-3.5 sm:table-cell">{c.branchIds.length}</td>
                   <td className="px-5 py-3.5">
-                    <StatusPill status={c.status} />
+                    {c.onboardingStatus === "pending_invoice_approval" ? (
+                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                        <Clock className="h-3 w-3 animate-pulse" /> Invoice Req.
+                      </span>
+                    ) : (
+                      <StatusPill status={c.status} />
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    {c.status === "pending" ? (
-                      <Button
-                        size="sm"
-                        variant="brand"
-                        onClick={() => {
-                          actions.approveCompany(c.id);
-                          toast.success(`${c.name} approved`);
-                        }}
-                      >
-                        <Check className="h-3.5 w-3.5" /> Approve
-                      </Button>
-                    ) : c.status === "active" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          actions.suspendCompany(c.id);
-                          toast(`${c.name} suspended`);
-                        }}
-                      >
-                        Suspend
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => actions.approveCompany(c.id)}
-                      >
-                        Reactivate
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      {c.planPurchase?.line_items?.length ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Download Invoice PDF"
+                          onClick={() => {
+                            window.open(`/api/companies/${c.id}/invoice-pdf/`, "_blank");
+                          }}
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                      {c.status === "pending" ? (
+                        <Button
+                          size="sm"
+                          variant="brand"
+                          onClick={() => {
+                            actions.approveCompany(c.id);
+                            toast.success(`${c.name} approved & activated`);
+                          }}
+                        >
+                          <Check className="h-3.5 w-3.5" /> Approve
+                        </Button>
+                      ) : c.status === "active" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            actions.suspendCompany(c.id);
+                            toast(`${c.name} suspended`);
+                          }}
+                        >
+                          Suspend
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => actions.approveCompany(c.id)}
+                        >
+                          Reactivate
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1527,3 +1558,1065 @@ export function PlanBuilderManager() {
     </div>
   );
 }
+
+export function InterestedCandidatesManager() {
+  const { state, actions } = useQuesole();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedCandidate, setSelectedCandidate] = useState<any | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  const candidates = state.interestedCandidates || [];
+
+  const counts = {
+    total: candidates.length,
+    interested: candidates.filter((c) => c.status === "interested").length,
+    invoice_requested: candidates.filter((c) => c.status === "invoice_requested").length,
+    plan_purchased: candidates.filter((c) => c.status === "plan_purchased").length,
+    contacted: candidates.filter((c) => c.status === "contacted").length,
+    dropped: candidates.filter((c) => c.status === "dropped").length,
+  };
+
+  const filtered = candidates.filter((c) => {
+    const query = search.toLowerCase();
+    const matchesSearch =
+      c.company_name?.toLowerCase().includes(query) ||
+      c.contact_name?.toLowerCase().includes(query) ||
+      c.email?.toLowerCase().includes(query) ||
+      c.phone?.toLowerCase().includes(query) ||
+      c.city?.toLowerCase().includes(query) ||
+      c.state?.toLowerCase().includes(query) ||
+      c.country?.toLowerCase().includes(query) ||
+      c.industry?.toLowerCase().includes(query) ||
+      c.custom_industry?.toLowerCase().includes(query);
+
+    const matchesStatus = statusFilter === "all" || c.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const handleStatusChange = async (candidateId: number, newStatus: string) => {
+    try {
+      await actions.updateCandidateStatus(candidateId, newStatus);
+      toast.success("Lead status updated successfully");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update lead status");
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    if (!selectedCandidate) return;
+    setSavingNote(true);
+    try {
+      await actions.updateCandidateStatus(selectedCandidate.id, selectedCandidate.status, noteText);
+      toast.success("Notes saved successfully");
+      setSelectedCandidate(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save notes");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case "plan_purchased":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Plan Purchased
+          </span>
+        );
+      case "contacted":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+            <Phone className="h-3.5 w-3.5" /> Contacted
+          </span>
+        );
+      case "dropped":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
+            <X className="h-3.5 w-3.5" /> Dropped
+          </span>
+        );
+      case "invoice_requested":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+            <Clock className="h-3.5 w-3.5 animate-pulse" /> Invoice Requested
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <Clock className="h-3.5 w-3.5" /> Plan Pending
+          </span>
+        );
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Metric Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Total Leads"
+          value={<CountUp value={counts.total} />}
+          hint="Completed Step 1 registration"
+        />
+        <StatCard
+          label="Plan Pending"
+          value={<CountUp value={counts.interested} />}
+          hint="Registered, plan not bought"
+        />
+        <StatCard
+          label="Plan Purchased"
+          value={<CountUp value={counts.plan_purchased} />}
+          hint="Converted to active customers"
+        />
+        <StatCard
+          label="Contacted Leads"
+          value={<CountUp value={counts.contacted} />}
+          hint="Sales followup in progress"
+        />
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search leads by company, name, email, city..."
+            className="h-10 rounded-xl pl-9 bg-card border-border/80"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          {[
+            { id: "all", label: `All (${counts.total})` },
+            { id: "interested", label: `Plan Pending (${counts.interested})` },
+            { id: "invoice_requested", label: `Invoice Req (${counts.invoice_requested})` },
+            { id: "plan_purchased", label: `Purchased (${counts.plan_purchased})` },
+            { id: "contacted", label: `Contacted (${counts.contacted})` },
+            { id: "dropped", label: `Dropped (${counts.dropped})` },
+          ].map((pill) => (
+            <button
+              key={pill.id}
+              onClick={() => setStatusFilter(pill.id)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border",
+                statusFilter === pill.id
+                  ? "bg-brand text-white border-brand shadow-sm"
+                  : "bg-card text-muted-foreground hover:text-foreground border-border/80 hover:bg-accent/40"
+              )}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Table Panel */}
+      <div className="panel overflow-hidden border border-border/60 bg-card rounded-2xl shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
+                <th className="px-5 py-3.5">Company & Industry</th>
+                <th className="px-5 py-3.5">Contact Person</th>
+                <th className="px-5 py-3.5">Location</th>
+                <th className="px-5 py-3.5">Registered</th>
+                <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-muted-foreground text-sm">
+                    <Users className="h-10 w-10 mx-auto text-muted-foreground/40 mb-2" />
+                    No interested candidates found matching your criteria.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((cand) => (
+                  <tr key={cand.id} className="hover:bg-muted/20 transition-colors">
+                    {/* Company */}
+                    <td className="px-5 py-3.5">
+                      <div className="font-semibold text-foreground flex items-center gap-2">
+                        {cand.company_name}
+                        {cand.website && (
+                          <a
+                            href={cand.website.startsWith("http") ? cand.website : `https://${cand.website}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-muted-foreground hover:text-brand"
+                            title="Visit website"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-xs text-muted-foreground font-medium">
+                          {cand.industry}
+                        </span>
+                        {cand.custom_industry && (
+                          <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-muted-foreground px-1.5 py-0.5 rounded font-mono">
+                            {cand.custom_industry}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Contact */}
+                    <td className="px-5 py-3.5">
+                      <div className="font-medium text-foreground">{cand.contact_name}</div>
+                      <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-0.5">
+                        <a href={`mailto:${cand.email}`} className="hover:text-brand flex items-center gap-1 truncate max-w-[200px]">
+                          <Mail className="h-3 w-3 shrink-0" /> {cand.email}
+                        </a>
+                        <a href={`tel:${cand.country_code}${cand.phone}`} className="hover:text-brand flex items-center gap-1">
+                          <Phone className="h-3 w-3 shrink-0" /> {cand.country_code} {cand.phone}
+                        </a>
+                      </div>
+                    </td>
+
+                    {/* Location */}
+                    <td className="px-5 py-3.5">
+                      <div className="font-medium text-foreground flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        {cand.city}, {cand.state}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[180px]">
+                        {cand.address ? `${cand.address}, ` : ""}{cand.country}
+                      </div>
+                    </td>
+
+                    {/* Registered Date */}
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                      <div>{new Date(cand.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                      <div className="text-[10px] text-muted-foreground/70">{new Date(cand.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>
+                    </td>
+
+                    {/* Status Pill */}
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      {statusBadge(cand.status)}
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2">
+                        <select
+                          value={cand.status}
+                          onChange={(e) => handleStatusChange(cand.id, e.target.value)}
+                          className="h-8 rounded-lg bg-background border border-border text-xs px-2 text-foreground font-medium outline-none cursor-pointer focus:ring-1 focus:ring-brand"
+                        >
+                          <option value="interested">Plan Pending</option>
+                          <option value="invoice_requested">Invoice Requested</option>
+                          <option value="contacted">Contacted</option>
+                          <option value="plan_purchased">Plan Purchased</option>
+                          <option value="dropped">Dropped</option>
+                        </select>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedCandidate(cand);
+                            setNoteText(cand.notes || "");
+                          }}
+                          className="h-8 px-2.5 text-xs rounded-lg gap-1"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {cand.notes ? "Note" : "+ Note"}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Note Editing Modal */}
+      {selectedCandidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div>
+                <h3 className="font-bold text-lg text-foreground">Lead Notes</h3>
+                <p className="text-xs text-muted-foreground font-medium">{selectedCandidate.company_name} — {selectedCandidate.contact_name}</p>
+              </div>
+              <button
+                onClick={() => setSelectedCandidate(null)}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* If lead submitted corporate invoice request */}
+            {selectedCandidate.plan_config?.invoice_details && (
+              <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/50 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <Receipt className="h-3.5 w-3.5 text-indigo-600" />
+                    Corporate Invoice Details
+                  </span>
+                  <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                    {selectedCandidate.plan_config.duration_months || 1} mo
+                  </span>
+                </div>
+                <div className="space-y-1 text-slate-700 dark:text-slate-300 text-[11px]">
+                  <div><strong>Billed Entity:</strong> {selectedCandidate.plan_config.invoice_details.billing_name}</div>
+                  <div><strong>Email:</strong> {selectedCandidate.plan_config.invoice_details.biller_email}</div>
+                  <div><strong>Contact:</strong> {selectedCandidate.plan_config.invoice_details.contact_person} ({selectedCandidate.plan_config.invoice_details.contact_phone})</div>
+                  <div><strong>GSTIN:</strong> {selectedCandidate.plan_config.invoice_details.gst_number || "Not Applicable"}</div>
+                  <div><strong>Address:</strong> {selectedCandidate.plan_config.invoice_details.billing_address}</div>
+                  {selectedCandidate.plan_config.invoice_details.further_instructions && (
+                    <div className="pt-1 border-t border-indigo-200/40 text-muted-foreground">
+                      <strong>Notes:</strong> {selectedCandidate.plan_config.invoice_details.further_instructions}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
+                  Internal Remarks / Follow-up Notes
+                </label>
+                <textarea
+                  rows={4}
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Enter notes about follow-up call, client needs, demo schedule, etc..."
+                  className="w-full rounded-xl bg-background border border-border p-3 text-sm text-foreground outline-none focus:border-brand focus:ring-1 focus:ring-brand resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setSelectedCandidate(null)}
+                className="rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="brand"
+                disabled={savingNote}
+                onClick={handleSaveNotes}
+                className="rounded-xl font-semibold"
+              >
+                {savingNote ? "Saving..." : "Save Note"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function InvoiceRequestsManager() {
+  const { state, actions } = useQuesole();
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState<"pending" | "approved" | "all">("pending");
+  const [selectedCompany, setSelectedCompany] = useState<any | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  // Filter companies that submitted an offline invoice inquiry or have a pending invoice approval
+  const invoiceCompanies = state.companies.filter((c) => {
+    const isPendingInvoice =
+      c.onboardingStatus === "pending_invoice_approval" ||
+      (c.status === "pending" && (c.planPurchase?.payment_status === "pending" || c.planPurchase?.total_amount));
+    const hasPurchase = Boolean(c.planPurchase?.line_items?.length);
+    return isPendingInvoice || hasPurchase;
+  });
+
+  const pendingList = invoiceCompanies.filter(
+    (c) => c.onboardingStatus === "pending_invoice_approval" || c.status === "pending"
+  );
+  const approvedList = invoiceCompanies.filter(
+    (c) => c.status === "active" && c.onboardingStatus !== "pending_invoice_approval"
+  );
+
+  const totalPendingAmount = pendingList.reduce(
+    (acc, c) => acc + (c.planPurchase?.total_amount || c.monthlySpend || 0),
+    0
+  );
+
+  const displayedList = (
+    tab === "pending" ? pendingList : tab === "approved" ? approvedList : invoiceCompanies
+  ).filter((c) => {
+    const term = q.toLowerCase();
+    return (
+      c.name.toLowerCase().includes(term) ||
+      (c.adminName || "").toLowerCase().includes(term) ||
+      (c.adminEmail || "").toLowerCase().includes(term) ||
+      (c.adminPhone || "").toLowerCase().includes(term) ||
+      (c.city || "").toLowerCase().includes(term) ||
+      (c.industry || "").toLowerCase().includes(term)
+    );
+  });
+
+  const handleApprove = async (company: any) => {
+    setApprovingId(company.id);
+    try {
+      await actions.approveCompanyInvoice(company.id);
+      toast.success("Workspace approved & activated successfully!", {
+        description: `${company.name} and administrator ${company.adminEmail || company.email} can now sign in to their console.`
+      });
+      if (selectedCompany?.id === company.id) {
+        setSelectedCompany(null);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to approve company invoice.");
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleDownloadPDF = (company: any) => {
+    const matchingCandidate = state.interestedCandidates?.find((cand: any) => 
+      String(cand.company_id) === String(company.id) || 
+      cand.email === company.adminEmail || 
+      cand.email === company.email
+    );
+    const planConfig = company.planConfig || matchingCandidate?.plan_config || {};
+    const invDetails = planConfig?.invoice_details || {};
+    const durationMonths = Number(planConfig?.duration_months || 1);
+
+    const lineItems = company.planPurchase?.line_items || [];
+    const itemizedObj: Record<string, number> = {};
+    lineItems.forEach((li: any) => {
+      itemizedObj[li.component_key] = Number(li.subtotal || li.unit_price || 0);
+    });
+
+    const total = Number(company.planPurchase?.total_amount || company.monthlySpend || 0);
+    const contractSubtotal = Math.round(total / 1.18);
+    const gstAmount = Math.max(0, total - contractSubtotal);
+
+    generateAndDownloadInvoicePDF({
+      companyName: company.name,
+      contactName: company.adminName || company.contact || "Authorized Executive",
+      email: company.adminEmail || company.email || "support@quesole.com",
+      phone: company.adminPhone || company.phone || "—",
+      city: company.city,
+      country: company.country || "India",
+      billingName: invDetails.billing_name || invDetails.billingName || company.name,
+      billingAddress: invDetails.billing_address || invDetails.billingAddress || company.address || `${company.city || ""}, ${company.country || "India"}`,
+      billerEmail: invDetails.biller_email || invDetails.billerEmail || company.adminEmail || company.email,
+      contactPerson: invDetails.contact_person || invDetails.contactPerson || company.adminName || company.contact,
+      contactPhone: invDetails.contact_phone || invDetails.contactPhone || company.adminPhone || company.phone,
+      gstNumber: invDetails.gst_number || invDetails.gstNumber || "",
+      furtherInstructions: invDetails.further_instructions || invDetails.furtherInstructions || "",
+      planTiming: {
+        termLabel: `${durationMonths} Month${durationMonths > 1 ? "s" : ""} Subscription`,
+      },
+      branches: company.branchesDetail && company.branchesDetail.length > 0
+        ? company.branchesDetail
+        : (planConfig?.branches && planConfig.branches.length > 0 ? planConfig.branches : [{ name: `${company.name} Main Branch`, operatorQty: 1, kioskQty: 1, serviceQty: 1 }]),
+      durationMonths: durationMonths,
+      itemized: itemizedObj,
+      monthlyTotal: Math.round(contractSubtotal / Math.max(1, durationMonths)),
+      contractSubtotal: contractSubtotal,
+      gstPercent: 18,
+      gstAmount: gstAmount,
+      grandTotal: total,
+    });
+    toast.success("Proforma Invoice PDF generated & downloaded!");
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2 border-b border-border/60">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+              <FileText className="h-5 w-5" />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
+              Invoice Requests & Inquiries
+            </h1>
+          </div>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Review offline proforma invoice orders, inspect customer branch requirements, and approve workspace dashboard access.
+          </p>
+        </div>
+      </div>
+
+      {/* KPI Stat Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Pending Invoices"
+          value={<CountUp value={pendingList.length} />}
+          hint="Awaiting executive approval"
+        />
+        <StatCard
+          label="Pending Contract Value"
+          value={<CountUp value={totalPendingAmount} prefix="₹" />}
+          hint="Receivable upon clearance"
+        />
+        <StatCard
+          label="Activated Workspaces"
+          value={<CountUp value={approvedList.length} />}
+          hint="Approved & active accounts"
+        />
+        <StatCard
+          label="Total Inquiries"
+          value={<CountUp value={invoiceCompanies.length} />}
+          hint="Enterprise quote submissions"
+        />
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by company, administrator, email, phone, city..."
+            className="h-11 rounded-xl pl-9"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border">
+          <button
+            onClick={() => setTab("pending")}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+              tab === "pending"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Clock className="h-3.5 w-3.5 text-amber-500" />
+            <span>Pending Review</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold">
+              {pendingList.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setTab("approved")}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+              tab === "approved"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            <span>Approved & Active</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold">
+              {approvedList.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setTab("all")}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
+              tab === "all"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            All Inquiries ({invoiceCompanies.length})
+          </button>
+        </div>
+      </div>
+
+      {/* Inquiry List Cards */}
+      <div className="space-y-4">
+        {displayedList.length === 0 ? (
+          <div className="panel p-12 text-center space-y-3">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div className="font-semibold text-foreground">No invoice inquiries found</div>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              {tab === "pending"
+                ? "All invoice inquiries have been reviewed and approved. New requests will appear here immediately."
+                : "No matching invoice records match your current filters."}
+            </p>
+          </div>
+        ) : (
+          displayedList.map((company) => {
+            const isPending =
+              company.onboardingStatus === "pending_invoice_approval" || company.status === "pending";
+            const branches = company.branchesDetail || [];
+            const grandTotal = company.planPurchase?.total_amount || company.monthlySpend || 0;
+
+            return (
+              <div
+                key={company.id}
+                className={cn(
+                  "panel p-5 sm:p-6 transition-all border space-y-5",
+                  isPending
+                    ? "border-amber-500/30 bg-amber-500/[0.02] shadow-[0_4px_20px_-4px_rgba(245,158,11,0.08)]"
+                    : "border-border/80"
+                )}
+              >
+                {/* Card Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/50">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3 className="font-bold text-base sm:text-lg text-foreground flex items-center gap-2">
+                        <Building className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        {company.name}
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground">
+                        {company.industry || "General"}
+                      </span>
+                      {company.city && (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <MapPin className="h-3.5 w-3.5" />
+                          {company.city}{company.country ? `, ${company.country}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {isPending ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                        <Clock className="h-3.5 w-3.5 animate-pulse" />
+                        Awaiting Superadmin Review
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Approved & Active
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3-Column Specifications Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  {/* Column 1: Administrator Contact */}
+                  <div className="p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-border/60 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-indigo-500" />
+                      Contact Administrator
+                    </div>
+                    <div className="font-semibold text-foreground text-sm">
+                      {company.adminName || company.contact || "Primary Admin"}
+                    </div>
+                    <div className="space-y-1 text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="h-3.5 w-3.5 shrink-0" />
+                        <a
+                          href={`mailto:${company.adminEmail || company.email}`}
+                          className="text-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline truncate"
+                        >
+                          {company.adminEmail || company.email || "—"}
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Phone className="h-3.5 w-3.5 shrink-0" />
+                        <a
+                          href={`tel:${company.adminPhone || company.phone}`}
+                          className="text-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline"
+                        >
+                          {company.adminPhone || company.phone || "—"}
+                        </a>
+                      </div>
+                      {company.address && (
+                        <div className="text-[11px] text-muted-foreground pt-1 border-t border-border/40 truncate">
+                          {company.address}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Column 2: Branches & Configuration */}
+                  <div className="p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-border/60 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5">
+                      <Monitor className="h-3.5 w-3.5 text-indigo-500" />
+                      Configuration & Setup
+                    </div>
+                    <div className="font-semibold text-foreground text-sm">
+                      {branches.length > 0 ? `${branches.length} Configured Branch${branches.length > 1 ? "es" : ""}` : "1 Primary Branch"}
+                    </div>
+                    <div className="space-y-1 text-muted-foreground">
+                      {branches.slice(0, 2).map((b: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between">
+                          <span className="font-medium text-foreground truncate">{b.name}</span>
+                          <span className="text-[11px] text-muted-foreground shrink-0">
+                            {b.mode === "SERVICE_BASED" ? "Multi-Service" : "Single Queue"}
+                          </span>
+                        </div>
+                      ))}
+                      {branches.length > 2 && (
+                        <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                          +{branches.length - 2} more branches configured
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 pt-1 border-t border-border/40 text-[11px]">
+                        <span className="px-2 py-0.5 rounded bg-muted font-medium">
+                          Solution: {company.solution || "Hybrid"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Column 3: Commercial Proposal */}
+                  <div className="p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-border/60 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5">
+                      <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
+                      Invoice Grand Total
+                    </div>
+                    <div className="font-black text-xl text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      ₹{grandTotal.toLocaleString("en-IN")}
+                    </div>
+                    <div className="space-y-1 text-muted-foreground text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span>GST Included (18%):</span>
+                        <span className="font-semibold text-foreground">
+                          ₹{Math.round(grandTotal - grandTotal / 1.18).toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Payment Terms:</span>
+                        <span className="font-bold text-amber-600 dark:text-amber-400">
+                          {isPending ? "Offline Settlement" : "Approved"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Official Corporate Billing Details Section */}
+                {(() => {
+                  const matchingCandidate = state.interestedCandidates?.find((cand: any) => 
+                    String(cand.company_id) === String(company.id) || 
+                    cand.email === company.adminEmail || 
+                    cand.email === company.email
+                  );
+                  const planConfig = company.planConfig || matchingCandidate?.plan_config || {};
+                  const inv = planConfig?.invoice_details;
+                  const durationMonths = planConfig?.duration_months || 1;
+
+                  return (
+                    <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/50 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                          <Receipt className="h-3.5 w-3.5 text-indigo-600" /> Corporate Invoicing Details
+                        </span>
+                        <span className="text-[10.5px] font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                          Term: {durationMonths} Month{durationMonths > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-slate-700 dark:text-slate-300 text-[11.5px]">
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Billing Name</span>
+                          <strong className="text-foreground">{inv?.billing_name || inv?.billingName || company.name}</strong>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Biller / Accounts Email</span>
+                          <span className="text-foreground">{inv?.biller_email || inv?.billerEmail || company.email || "—"}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">GSTIN / Tax ID</span>
+                          <span className="font-semibold text-foreground">{inv?.gst_number || inv?.gstNumber || "Not Applicable / Unregistered"}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Contact Person & Phone</span>
+                          <span className="text-foreground">{inv?.contact_person || inv?.contactPerson || company.adminName || "—"} ({inv?.contact_phone || inv?.contactPhone || company.phone || "—"})</span>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Billing Address</span>
+                          <span className="text-foreground truncate block">{inv?.billing_address || inv?.billingAddress || company.address || `${company.city || ""}, ${company.country || "India"}`}</span>
+                        </div>
+                      </div>
+                      {(inv?.further_instructions || inv?.furtherInstructions) && (
+                        <div className="pt-1.5 border-t border-indigo-200/50 dark:border-indigo-900/40 text-[11px] text-muted-foreground">
+                          <strong>Further Instructions / PO:</strong> {inv.further_instructions || inv.furtherInstructions}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Card Action Footer */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDownloadPDF(company)}
+                      className="rounded-xl h-9 text-xs font-semibold"
+                    >
+                      <Download className="mr-1.5 h-3.5 w-3.5" />
+                      Download Proforma PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelectedCompany(company)}
+                      className="rounded-xl h-9 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                    >
+                      <Eye className="mr-1.5 h-3.5 w-3.5" />
+                      Inspect Full Specs
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {isPending ? (
+                      <Button
+                        size="sm"
+                        variant="brand"
+                        disabled={approvingId === company.id}
+                        onClick={() => handleApprove(company)}
+                        className="rounded-xl h-9 text-xs font-bold px-4 shadow-md shadow-brand/20"
+                      >
+                        {approvingId === company.id ? (
+                          <>
+                            <Clock className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            Activating Account...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="mr-1.5 h-3.5 w-3.5" />
+                            Approve & Activate Workspace
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle className="h-4 w-4" /> Workspace Live & Operational
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            actions.suspendCompany(company.id);
+                            toast.info(`${company.name} suspended`);
+                          }}
+                          className="rounded-xl h-8 text-xs text-muted-foreground"
+                        >
+                          Suspend
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Detailed Inspection Modal */}
+      {selectedCompany && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-2xl bg-card border border-border p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-start justify-between border-b border-border pb-4">
+              <div>
+                <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 mb-1">
+                  Enterprise Invoice Specification
+                </div>
+                <h2 className="text-xl font-black text-foreground">
+                  {selectedCompany.name}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {selectedCompany.industry} · {selectedCompany.city}, {selectedCompany.country || "India"}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedCompany(null)}
+                className="text-muted-foreground hover:text-foreground p-1"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Administrator Details */}
+            <div className="p-4 rounded-xl bg-muted/30 border border-border/60 space-y-2 text-xs">
+              <div className="font-bold uppercase tracking-wider text-muted-foreground text-[11px]">
+                Authorized Contact Administrator
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 font-medium">
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase">Name</span>
+                  {selectedCompany.adminName || selectedCompany.contact || "Primary Admin"}
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase">Email</span>
+                  <a href={`mailto:${selectedCompany.adminEmail || selectedCompany.email}`} className="text-indigo-600 hover:underline">
+                    {selectedCompany.adminEmail || selectedCompany.email || "—"}
+                  </a>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase">Phone</span>
+                  <a href={`tel:${selectedCompany.adminPhone || selectedCompany.phone}`} className="text-indigo-600 hover:underline">
+                    {selectedCompany.adminPhone || selectedCompany.phone || "—"}
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Corporate Invoicing Details */}
+            {(() => {
+              const matchingCandidate = state.interestedCandidates?.find((cand: any) => 
+                String(cand.company_id) === String(selectedCompany.id) || 
+                cand.email === selectedCompany.adminEmail || 
+                cand.email === selectedCompany.email
+              );
+              const planConfig = selectedCompany.planConfig || matchingCandidate?.plan_config || {};
+              const inv = planConfig?.invoice_details || {};
+              const durationMonths = planConfig?.duration_months || 1;
+
+              return (
+                <div className="p-4 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/50 space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 text-[11px] flex items-center gap-1.5">
+                      <Receipt className="h-4 w-4 text-indigo-600" />
+                      Official Corporate Billing Information
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                      Term: {durationMonths} Month{durationMonths > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 font-medium text-slate-700 dark:text-slate-300">
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Billing Legal Name</span>
+                      <strong className="text-foreground">{inv.billing_name || inv.billingName || selectedCompany.name}</strong>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Biller / Accounts Email</span>
+                      <a href={`mailto:${inv.biller_email || inv.billerEmail || selectedCompany.email}`} className="text-indigo-600 hover:underline">
+                        {inv.biller_email || inv.billerEmail || selectedCompany.email || "—"}
+                      </a>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">GSTIN / Tax ID</span>
+                      <span className="font-semibold text-foreground">{inv.gst_number || inv.gstNumber || "Not Applicable / Unregistered"}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Contact Person</span>
+                      <span className="text-foreground">{inv.contact_person || inv.contactPerson || selectedCompany.adminName || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Contact Phone Number</span>
+                      <a href={`tel:${inv.contact_phone || inv.contactPhone || selectedCompany.phone}`} className="text-indigo-600 hover:underline">
+                        {inv.contact_phone || inv.contactPhone || selectedCompany.phone || "—"}
+                      </a>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-semibold">Billing Address</span>
+                      <span className="text-foreground truncate block">{inv.billing_address || inv.billingAddress || selectedCompany.address || `${selectedCompany.city || ""}, ${selectedCompany.country || "India"}`}</span>
+                    </div>
+                  </div>
+                  {(inv.further_instructions || inv.furtherInstructions) && (
+                    <div className="pt-2 border-t border-indigo-200/50 dark:border-indigo-900/40 text-[11px] text-muted-foreground">
+                      <strong>Customer Purchase Order / Further Instructions:</strong> {inv.further_instructions || inv.furtherInstructions}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Itemized Commercial Table */}
+            <div className="space-y-2">
+              <div className="font-bold text-sm text-foreground">
+                Itemized Commercial Breakdown
+              </div>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 text-muted-foreground text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="px-3.5 py-2.5 text-left">Item Description</th>
+                      <th className="px-3.5 py-2.5 text-center">Qty</th>
+                      <th className="px-3.5 py-2.5 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {selectedCompany.planPurchase?.line_items && selectedCompany.planPurchase.line_items.length > 0 ? (
+                      selectedCompany.planPurchase.line_items.map((li: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="px-3.5 py-2.5 font-medium text-foreground">
+                            {li.component_label || li.component_key}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center text-muted-foreground">
+                            {li.quantity || 1}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right font-semibold text-foreground">
+                            ₹{Number(li.subtotal || li.unit_price || 0).toLocaleString("en-IN")}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="px-3.5 py-2.5 font-medium">Standard Enterprise Workspace Deployment</td>
+                        <td className="px-3.5 py-2.5 text-center">1</td>
+                        <td className="px-3.5 py-2.5 text-right font-semibold">
+                          ₹{Number(selectedCompany.monthlySpend || 0).toLocaleString("en-IN")}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                  <tfoot className="bg-muted/20 border-t border-border font-semibold text-xs">
+                    <tr>
+                      <td colSpan={2} className="px-3.5 py-2 text-right text-muted-foreground">Grand Total (Incl. 18% GST):</td>
+                      <td className="px-3.5 py-2 text-right text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+                        ₹{Number(selectedCompany.planPurchase?.total_amount || selectedCompany.monthlySpend || 0).toLocaleString("en-IN")}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleDownloadPDF(selectedCompany)}
+                className="rounded-xl text-xs font-semibold"
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" /> Download Proforma PDF
+              </Button>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedCompany(null)}
+                  className="rounded-xl text-xs"
+                >
+                  Close
+                </Button>
+                {selectedCompany.status === "pending" ||
+                selectedCompany.onboardingStatus === "pending_invoice_approval" ? (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    disabled={approvingId === selectedCompany.id}
+                    onClick={() => handleApprove(selectedCompany)}
+                    className="rounded-xl text-xs font-bold shadow-md shadow-brand/20"
+                  >
+                    {approvingId === selectedCompany.id ? "Activating..." : "Approve & Activate Workspace"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

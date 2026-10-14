@@ -290,7 +290,7 @@ function ContactPage() {
                       <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest block">Headquarters</span>
                       <span className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-1 block">QUESOLS Technologies</span>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-sm">
-                        Mithakhali Six Roads, Ahmedabad, Gujarat, India - 380006
+                        B - 1003, Technoadviser Technologies, Titanium Business Park, Railway Underpass/Crossing, off Sarkhej - Gandhinagar Highway, near Makarba, Makarba, Ahmedabad, Gujarat 380051
                       </p>
                     </div>
                   </div>
@@ -302,7 +302,7 @@ function ContactPage() {
                 <div className="overflow-hidden rounded-[2.5rem] border border-slate-200/80 dark:border-slate-800/80 shadow-md aspect-video w-full bg-white relative group">
                   <div className="absolute top-4 left-4 z-10">
                     <a
-                      href="https://maps.google.com/?q=Mithakhali+Six+Roads,+Ahmedabad"
+                      href="https://maps.google.com/?q=Titanium+Business+Park,+Makarba,+Ahmedabad,+Gujarat+380051"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/80 bg-white/95 px-4.5 py-2 text-xs font-semibold text-slate-700 hover:text-brand shadow-md transition-all"
@@ -313,7 +313,7 @@ function ContactPage() {
                   </div>
                   <iframe
                     title="QUESOLS Office Location Map"
-                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3671.6979148011246!2d72.56214531102738!3d23.034870916053805!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x395e848aba8b2e3b%3A0x633519d1e4df6a9b!2sMithakhali%20Six%20Rd%2C%20Ahmedabad%2C%20Gujarat!5e0!3m2!1sen!2sin!4v1714562412891!5m2!1sen!2sin"
+                    src="https://maps.google.com/maps?q=Titanium+Business+Park,+Makarba,+Ahmedabad,+Gujarat+380051&t=&z=15&ie=UTF8&iwloc=&output=embed"
                     width="100%"
                     height="100%"
                     style={{ border: 0 }}

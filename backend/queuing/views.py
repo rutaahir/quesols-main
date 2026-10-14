@@ -746,6 +746,9 @@ class PublicJoinQueueView(APIView):
         # Resolve correct method and source_method based on resolved method (pre-validated)
         pass
 
+        cutoff = timezone.now() - timezone.timedelta(hours=24)
+        Ticket.objects.filter(branch_id=branch_id, status__in=["waiting", "called"], created_at__lt=cutoff).update(status="cancelled")
+
         try:
             with transaction.atomic():
                 from queuing.models import TokenSequence
@@ -770,13 +773,14 @@ class PublicJoinQueueView(APIView):
                     customer_consented_at=timezone.now(),
                     distance_at_checkin_meters=checkin_distance
                 )
-                
+
+                from queuing.services.queue_routing import assign_predicted_desk_for_ticket, rebalance_branch_queue
+                assign_predicted_desk_for_ticket(ticket)
+                ticket.save(update_fields=["predicted_desk"])
+                rebalance_branch_queue(branch)
+
+            ticket.refresh_from_db()
             broadcast_queue_update(branch_id, ticket)
-            
-            # Predict desk assignment on ticket creation
-            from queuing.services.queue_routing import assign_predicted_desk_for_ticket
-            assign_predicted_desk_for_ticket(ticket)
-            ticket.save(update_fields=["predicted_desk"])
 
             if ticket.customer_email and channel_param not in ["sms", "whatsapp"] and method not in ["3", "4"]:
                 try:
@@ -1018,12 +1022,13 @@ class ManualTicketIssueView(APIView):
                 customer_consented_at=timezone.now()
             )
 
+            from queuing.services.queue_routing import assign_predicted_desk_for_ticket, rebalance_branch_queue
+            assign_predicted_desk_for_ticket(ticket)
+            ticket.save(update_fields=["predicted_desk"])
+            rebalance_branch_queue(branch)
+
+        ticket.refresh_from_db()
         broadcast_queue_update(branch_id, ticket)
-        
-        # Predict desk assignment
-        from queuing.services.queue_routing import assign_predicted_desk_for_ticket
-        assign_predicted_desk_for_ticket(ticket)
-        ticket.save(update_fields=["predicted_desk"])
         
         return Response(TicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
 

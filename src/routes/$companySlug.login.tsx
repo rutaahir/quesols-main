@@ -251,8 +251,11 @@ function CompanyLoginPage() {
       
       if (sessionData.role === "super_admin") {
         void navigate({ to: "/app" });
-      } else if (sessionData.role === "company_admin" && companyObj?.slug) {
-        void navigate({ to: "/$companySlug/admin", params: { companySlug: companyObj.slug } });
+      } else if (sessionData.role === "company_admin" && !sessionData.hasPurchasedPlan) {
+        toast.info("Plan Selection Required", { description: "Please configure and purchase a plan to activate your dashboard." });
+        void navigate({ to: "/signup", search: { step: 1 } });
+      } else if (sessionData.role === "company_admin" && (companyObj?.slug || sessionData.companySlug)) {
+        void navigate({ to: "/$companySlug/admin", params: { companySlug: companyObj?.slug || sessionData.companySlug! } });
       } else if (
         (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
         companyObj?.slug &&

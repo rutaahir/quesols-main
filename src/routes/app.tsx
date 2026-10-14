@@ -43,6 +43,8 @@ const NAV: Record<string, NavItem[]> = {
   super_admin: [
     { id: "overview", label: "Platform overview", icon: LayoutDashboard },
     { id: "companies", label: "Companies", icon: Building2 },
+    { id: "invoice_requests", label: "Invoice Requests", icon: FileText },
+    { id: "leads", label: "Interested Candidates", icon: Users },
     { id: "upgrades", label: "Plan requests", icon: TrendingUp },
     { id: "packages", label: "Packages", icon: CreditCard },
     { id: "audit", label: "Audit log", icon: ScrollText },
@@ -88,6 +90,11 @@ function ConsolePage() {
       return;
     }
 
+    if (session.role === "company_admin" && !session.hasPurchasedPlan) {
+      void navigate({ to: "/signup", search: { step: 1 } });
+      return;
+    }
+
     const company = state.companies.find((c) => String(c.id) === String(session.companyId));
     const branch = state.branches.find((b) => String(b.id) === String(session.branchId));
 
@@ -116,7 +123,7 @@ function ConsolePage() {
 
   return (
     <ConsoleShell nav={nav} active={activeNav} onNavigate={setActive}>
-      {role === "super_admin" ? <SuperAdminView view={current} /> : null}
+      {role === "super_admin" ? <SuperAdminView view={current} setView={setActive} /> : null}
       {role === "company_admin" ? (
         session.companyId ? (
           <CompanyAdminView view={current} companyId={session.companyId} setView={setActive} />

@@ -33,11 +33,17 @@ export interface Company {
   industry: string;
   city: string;
   plan: PlanTier;
-  status: "active" | "pending" | "suspended";
+  status: "active" | "pending" | "suspended" | "rejected";
   createdAt: string;
   contact: string;
-  email: string;
+  phone?: string;
+  email?: string;
   address?: string;
+  state?: string;
+  country?: string;
+  customIndustry?: string;
+  onboardingStatus?: "pending_payment" | "pending_invoice_approval" | "active" | "suspended";
+  hasPurchasedPlan?: boolean;
   logoUrl?: string;
   tagline?: string;
   supportPhone?: string;
@@ -47,6 +53,36 @@ export interface Company {
   monthlySpend: number;
   slug?: string;
   solution?: string;
+  adminName?: string;
+  adminEmail?: string;
+  adminPhone?: string;
+  planPurchase?: any;
+  branchesDetail?: any[];
+  planConfig?: any;
+}
+
+export interface InterestedCandidate {
+  id: number;
+  company_name: string;
+  industry: string;
+  custom_industry?: string | null;
+  country: string;
+  state?: string | null;
+  city?: string | null;
+  address?: string | null;
+  contact_name: string;
+  email: string;
+  phone: string;
+  country_code: string;
+  website?: string | null;
+  status: "interested" | "invoice_requested" | "plan_purchased" | "contacted" | "dropped";
+  notes?: string | null;
+  plan_config?: any;
+  created_at: string;
+  updated_at: string;
+  company_slug?: string | null;
+  company_id?: number | null;
+  user_id?: number | null;
 }
 
 export interface Branch {
@@ -276,8 +312,13 @@ export interface Session {
   name: string;
   email: string;
   companyId: string;
+  companyName?: string;
   branchId: string;
   deskId: string;
+  hasPurchasedPlan?: boolean;
+  onboardingStatus?: string;
+  companyStatus?: string;
+  companySlug?: string;
 }
 
 export interface QueueSolutionType {

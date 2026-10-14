@@ -74,7 +74,8 @@ export function AppointmentCustomerModal({
   const deskObj = desks.find((d: any) => String(d.id) === String(booking.desk));
   const deskName = deskObj?.name || "Appointment Counter";
 
-  const feedbackUrl = `${getNetworkOrigin()}/feedback/${booking.booking_reference}`;
+  const bookingRef = booking.booking_reference || booking.reference || `QS-${booking.id}`;
+  const feedbackUrl = `${getNetworkOrigin()}/feedback/${bookingRef}`;
 
   // Update Status
   const handleUpdateStatus = async (newStatus: string) => {
@@ -84,7 +85,7 @@ export function AppointmentCustomerModal({
         method: "PATCH",
         body: JSON.stringify({ status: newStatus })
       });
-      toast.success(`Booking ${booking.booking_reference} status updated to ${newStatus.replace('_', ' ')}.`);
+      toast.success(`Booking ${bookingRef} status updated to ${newStatus.replace('_', ' ')}.`);
       onRefresh();
       onClose();
     } catch (err: any) {
@@ -488,26 +489,28 @@ export function AppointmentCustomerModal({
           {/* Tab 3: Staff Internal Notes */}
           {activeTab === "notes" && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-foreground">Add New Staff Note</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    placeholder="Type internal note for team members..."
-                    className="text-xs rounded-xl flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    variant="brand"
-                    disabled={isSubmitting || !newNote.trim()}
-                    className="rounded-xl text-xs font-bold gap-1 px-4"
-                    onClick={handleAddStaffNote}
-                  >
-                    <Send className="h-3.5 w-3.5" /> Add Note
-                  </Button>
+              {booking.status !== "completed" && (
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold text-foreground">Add New Staff Note</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newNote}
+                      onChange={(e) => setNewNote(e.target.value)}
+                      placeholder="Type internal note for team members..."
+                      className="text-xs rounded-xl flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      variant="brand"
+                      disabled={isSubmitting || !newNote.trim()}
+                      className="rounded-xl text-xs font-bold gap-1 px-4"
+                      onClick={handleAddStaffNote}
+                    >
+                      <Send className="h-3.5 w-3.5" /> Add Note
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="space-y-2 pt-2">
                 <Label className="text-xs font-bold text-foreground">Staff Notes Log</Label>

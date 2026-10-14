@@ -32,7 +32,8 @@ class CompanyRegistrationSerializer(serializers.Serializer):
     terms_consent = serializers.BooleanField(required=True)
 
     def validate_contact_email(self, value):
-        if Company.objects.filter(contact_email=value).exists():
+        existing = Company.objects.filter(contact_email=value).first()
+        if existing and existing.onboarding_status != "pending_payment":
             raise serializers.ValidationError("A company is already registered with this contact email.")
         return value
 
@@ -41,13 +42,16 @@ class CompanyRegistrationSerializer(serializers.Serializer):
             import re
             if not re.match(r'^[a-z0-9-]+$', value):
                 raise serializers.ValidationError("Slug must only contain lowercase alphanumeric characters and hyphens.")
-            if Company.objects.filter(slug=value).exists():
+            existing = Company.objects.filter(slug=value).first()
+            if existing and existing.onboarding_status != "pending_payment":
                 raise serializers.ValidationError("This company URL slug is already taken.")
         return value
 
     def validate_admin_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("A user account is already registered with this login email.")
+        existing = User.objects.filter(email=value).first()
+        if existing:
+            if not (existing.company and existing.company.onboarding_status == "pending_payment"):
+                raise serializers.ValidationError("A user account is already registered with this login email.")
         return value
 
     def validate_brand_primary_color(self, value):
@@ -82,3 +86,22 @@ class CompanyRegistrationSerializer(serializers.Serializer):
         if data.get("admin_password") != data.get("admin_confirm_password"):
             raise serializers.ValidationError({"admin_confirm_password": "Passwords do not match."})
         return data
+
+
+from companies.models import InterestedCandidate
+
+class InterestedCandidateSerializer(serializers.ModelSerializer):
+    company_slug = serializers.CharField(source="company.slug", read_only=True)
+    company_id = serializers.IntegerField(source="company.id", read_only=True)
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+
+    class Meta:
+        model = InterestedCandidate
+        fields = [
+            "id", "company_name", "industry", "custom_industry",
+            "country", "state", "city", "address",
+            "contact_name", "email", "phone", "country_code",
+            "website", "status", "notes", "created_at", "updated_at",
+            "company_slug", "company_id", "user_id", "plan_config"
+        ]
+

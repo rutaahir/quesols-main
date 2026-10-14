@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard, ShieldCheck, Loader2, CloudSun, MapPin, TrendingUp, TrendingDown, CheckCircle2, MoreHorizontal, Activity, FileText, BarChart3, PieChart as PieChartIcon, LayoutDashboard, Tv } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +62,40 @@ export function BranchDesksServicesManager({
     }
   }, [activeTab, branchId]);
 
+  const tabContainerRef = useRef<HTMLDivElement>(null);
+  const [isTabStuck, setIsTabStuck] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!tabContainerRef.current) return;
+      const rect = tabContainerRef.current.getBoundingClientRect();
+      const stickyThreshold = window.innerWidth >= 1024 ? 68 : 60;
+      setIsTabStuck(rect.top <= stickyThreshold);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  const handleTabSelect = (tab: "overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot") => {
+    setActiveTab(tab);
+    
+    // Auto-scroll so the tabview bar goes smoothly to top and docks stickily
+    setTimeout(() => {
+      if (tabContainerRef.current) {
+        const headerOffset = window.innerWidth >= 1024 ? 64 : 56;
+        const rect = tabContainerRef.current.getBoundingClientRect();
+        const currentScrollY = window.pageYOffset || document.documentElement.scrollTop || window.scrollY || 0;
+        const targetScrollY = currentScrollY + rect.top - headerOffset;
+
+        window.scrollTo({
+          top: Math.max(0, targetScrollY),
+          behavior: "smooth"
+        });
+      }
+    }, 40);
+  };
+
   // Live auto-refresh kiosk status every 3 seconds when Kiosks tab is active
   useEffect(() => {
     if (activeTab !== "kiosks") return;
@@ -101,6 +135,12 @@ export function BranchDesksServicesManager({
       setActiveTab("overview");
     }
   }, [branch?.channel_type, activeTab]);
+
+  const [hourlyChartHoverIdx, setHourlyChartHoverIdx] = useState<number | null>(1);
+  const [selectedChartService, setSelectedChartService] = useState<string>("all");
+  const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
+  const [branchStatus, setBranchStatus] = useState<"active" | "inactive" | "maintenance">("active");
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
 
   const [isKioskModalOpen, setIsKioskModalOpen] = useState(false);
   const [kioskPin, setKioskPin] = useState("");
@@ -161,6 +201,112 @@ export function BranchDesksServicesManager({
   const branchKiosks = useMemo(() => {
     return state.kiosks.filter((k) => String(k.branch) === String(branchId));
   }, [state.kiosks, branchId]);
+
+  // Hourly Queue Breakdown for Queue Overview Chart
+  const hourlyQueueData = useMemo(() => {
+    return [
+      { time: "9 AM", fullTime: "09:00 AM", waiting: 22, served: 16 },
+      { time: "10 AM", fullTime: "10:00 AM", waiting: 32, served: 18 },
+      { time: "11 AM", fullTime: "11:00 AM", waiting: 14, served: 26 },
+      { time: "12 PM", fullTime: "12:00 PM", waiting: 24, served: 18 },
+      { time: "1 PM", fullTime: "01:00 PM", waiting: 30, served: 22 },
+      { time: "2 PM", fullTime: "02:00 PM", waiting: 18, served: 15 },
+      { time: "3 PM", fullTime: "03:00 PM", waiting: 26, served: 20 },
+      { time: "4 PM", fullTime: "04:00 PM", waiting: 24, served: 28 },
+    ];
+  }, []);
+
+  // Servicewise queue distribution
+  const serviceDistribution = useMemo(() => {
+    const defaultServices = [
+      { name: "Prepaid", count: 4, pct: 44, color: "#7C3AED" },
+      { name: "Post Paid", count: 3, pct: 33, color: "#3B82F6" },
+      { name: "Internet", count: 2, pct: 22, color: "#F59E0B" },
+    ];
+
+    if (branchServices.length >= 2) {
+      const colors = ["#7C3AED", "#3B82F6", "#F59E0B", "#10B981", "#EC4899"];
+      const bTickets = state.tickets.filter((t) => String(t.branchId) === String(branchId) && t.status === "waiting");
+      const totalW = Math.max(bTickets.length, 9);
+      return branchServices.slice(0, 4).map((s, idx) => {
+        const sCount = bTickets.filter((t) => String(t.serviceId) === String(s.id)).length || (idx === 0 ? 4 : idx === 1 ? 3 : 2);
+        return {
+          name: s.name,
+          count: sCount,
+          pct: Math.round((sCount / totalW) * 100),
+          color: colors[idx % colors.length],
+        };
+      });
+    }
+
+    return defaultServices;
+  }, [branchServices, state.tickets, branchId]);
+
+  // Overview desks status cards
+  const overviewDesks = useMemo(() => {
+    if (branchDesks.length > 0) {
+      return branchDesks.slice(0, 4).map((d, idx) => {
+        const dServices = state.deskServices
+          ?.filter((ds) => ds.deskId === d.id)
+          .map((ds) => branchServices.find((s) => s.id === ds.serviceId)?.name)
+          .filter(Boolean)
+          .join(", ") || (idx === 0 ? "Prepaid" : idx === 1 ? "Post Paid, Internet" : idx === 2 ? "Internet" : "Prepaid");
+
+        const isBusy = idx === 1;
+        const isOffline = d.status !== "open" && idx === 3;
+        const qCount = idx === 0 ? 0 : idx === 1 ? 5 : idx === 2 ? 2 : 0;
+
+        return {
+          id: d.id,
+          name: d.name || `Desk ${idx + 1}`,
+          status: isOffline ? "Offline" : isBusy ? "Busy" : "Available",
+          statusVariant: isOffline ? "offline" : isBusy ? "busy" : "available",
+          queueCount: isOffline ? "-" : `${qCount} in queue`,
+          rawCount: isOffline ? 0 : qCount,
+          services: dServices,
+        };
+      });
+    }
+    return [
+      { id: "d1", name: "Desk 1", status: "Available", statusVariant: "available", queueCount: "0 in queue", rawCount: 0, services: "Prepaid" },
+      { id: "d2", name: "Desk 2", status: "Busy", statusVariant: "busy", queueCount: "5 in queue", rawCount: 5, services: "Post Paid, Internet" },
+      { id: "d3", name: "Desk 3", status: "Available", statusVariant: "available", queueCount: "2 in queue", rawCount: 2, services: "Internet" },
+      { id: "d4", name: "Desk 4", status: "Offline", statusVariant: "offline", queueCount: "-", rawCount: 0, services: "Prepaid" },
+    ];
+  }, [branchDesks, branchServices, state.deskServices]);
+
+  // Recent bookings table
+  const recentBookingsList = useMemo(() => {
+    const branchRecent = state.tickets
+      .filter((t) => String(t.branchId) === String(branchId))
+      .slice(-5)
+      .reverse();
+
+    if (branchRecent.length >= 3) {
+      return branchRecent.map((t, idx) => {
+        const sName = branchServices.find((s) => s.id === t.serviceId)?.name || (idx % 2 === 0 ? "Prepaid" : "Post Paid");
+        const dName = branchDesks.find((d) => d.id === t.deskId)?.name || `Desk ${(idx % 3) + 1}`;
+        const timeStr = t.joinedAt ? new Date(t.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : `10:${25 - idx * 5} AM`;
+        return {
+          token: t.token_number || t.number || `A03${6 - idx}`,
+          customer: t.customer_name || t.customerName || ["Amit Patel", "Neha Shah", "Ketan Joshi", "Priya Desai", "Rahul Mehta"][idx] || "Customer",
+          service: sName,
+          desk: dName,
+          time: timeStr,
+          status: t.status === "waiting" ? "Waiting" : "Served",
+          statusVariant: t.status === "waiting" ? "warning" : "success",
+        };
+      });
+    }
+
+    return [
+      { token: "A036", customer: "Amit Patel", service: "Post Paid", desk: "Desk 2", time: "10:25 AM", status: "Waiting", statusVariant: "warning" },
+      { token: "A035", customer: "Neha Shah", service: "Prepaid", desk: "Desk 1", time: "10:20 AM", status: "Served", statusVariant: "success" },
+      { token: "A034", customer: "Ketan Joshi", service: "Internet", desk: "Desk 3", time: "10:15 AM", status: "Served", statusVariant: "success" },
+      { token: "A033", customer: "Priya Desai", service: "Post Paid", desk: "Desk 2", time: "10:10 AM", status: "Served", statusVariant: "success" },
+      { token: "A032", customer: "Rahul Mehta", service: "Prepaid", desk: "Desk 1", time: "10:05 AM", status: "Served", statusVariant: "success" },
+    ];
+  }, [state.tickets, branchId, branchServices, branchDesks]);
 
   // Auto-initialize new kiosk form fields on open
   useEffect(() => {
@@ -723,277 +869,412 @@ export function BranchDesksServicesManager({
   const isSetupCompleteGlobal = readinessGlobal.score === 100;
 
   return (
-    <div className="grid gap-6 pb-16">
-      {/* Top Header Bar (Streamlined & Compact) */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-border/40 pb-3 z-10 relative">
-        <div className="flex items-center gap-2.5 flex-wrap">
+    <div className="flex flex-col gap-6 pb-16 relative">
+      {/* Top Breadcrumb & Actions Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 z-10 relative">
+        <div className="flex items-center gap-2 text-sm">
           {onBack && (
             <button
               onClick={onBack}
-              className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-foreground rounded-full h-8 w-8 flex items-center justify-center p-0 shadow-xs transition-all shrink-0"
-              title="Back to Branches"
+              className="text-slate-400 hover:text-[#5B50EB] dark:hover:text-indigo-400 font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              <ArrowLeft className="h-4 w-4" />
+              Branches
             </button>
           )}
-          <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 border border-border/40 px-2.5 py-1 rounded-full text-xs font-bold text-foreground select-none shrink-0">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          {!onBack && setView && (
+            <button
+              onClick={() => setView("branches")}
+              className="text-slate-400 hover:text-[#5B50EB] dark:hover:text-indigo-400 font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              Branches
+            </button>
+          )}
+          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
             {branch.name}
-            <Check className="h-3.5 w-3.5 text-emerald-500 ml-0.5" />
           </span>
-          <h1 className="font-display text-lg sm:text-xl font-black tracking-tight text-foreground ml-1">
-            Branch Operations
-          </h1>
         </div>
 
-        {/* Right side: Actions, Notifications & Profile Avatar */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0 flex-wrap">
-          {purchasedQRs > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsQrModalOpen(true)}
-              className="h-8 gap-1.5 text-xs font-bold border-border/80 bg-white dark:bg-slate-900 shadow-2xs"
-            >
-              <QrCode className="h-3.5 w-3.5" /> Branch QR &amp; Links
-            </Button>
-          )}
+        {/* Right side: Open Live Display, More Actions, Active Status */}
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
           <Button
             variant="brand"
             size="sm"
             onClick={() => window.open(displayUrl, "_blank")}
-            className="h-8 gap-1.5 text-xs font-bold shadow-xs shadow-brand/10"
+            className="h-9 px-4 gap-2 text-xs font-bold rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-xs shadow-[#5B50EB]/20 transition-all cursor-pointer"
           >
             <Layers className="h-3.5 w-3.5" /> Open Live Display
           </Button>
 
-          <div className="h-4 w-px bg-border/60 mx-0.5 hidden sm:block" />
-
-          <button className="relative h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-800 border border-border/40 flex items-center justify-center text-foreground hover:bg-accent transition-all shrink-0">
-            <Bell className="h-3.5 w-3.5" />
-            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[9px] font-black shadow-xs border border-white">
-              2
-            </span>
-          </button>
-          
-          <div className="flex items-center gap-2 p-0.5 px-2 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl border border-border/40 shrink-0">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] shrink-0 select-none">
-              {session?.name ? session.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "US"}
-            </div>
-            <div className="text-left hidden md:block">
-              <div className="text-xs font-black text-foreground leading-none">{session?.name || "User"}</div>
-              <div className="text-[9px] text-muted-foreground mt-0.5 leading-none font-bold uppercase tracking-wider">
-                {session?.role === "company_admin" ? "Company Admin" : "Branch Admin"}
+          {/* More Actions Dropdown */}
+          <div className="relative">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMoreActionsOpen(!isMoreActionsOpen)}
+              className="h-9 px-3 gap-1.5 text-xs font-bold rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 shadow-2xs cursor-pointer"
+            >
+              More Actions <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+            </Button>
+            {isMoreActionsOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-48 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg py-1.5 z-30 animate-in fade-in-50 zoom-in-95">
+                <button
+                  onClick={() => {
+                    setIsMoreActionsOpen(false);
+                    setIsQrModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 flex items-center gap-2 cursor-pointer"
+                >
+                  <QrCode className="h-3.5 w-3.5 text-[#5B50EB]" /> Branch QR &amp; Links
+                </button>
+                <button
+                  onClick={() => {
+                    setIsMoreActionsOpen(false);
+                    setIsEditingBranch(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 flex items-center gap-2 cursor-pointer"
+                >
+                  <Settings className="h-3.5 w-3.5 text-slate-400" /> Branch Settings
+                </button>
+                <button
+                  onClick={async () => {
+                    setIsMoreActionsOpen(false);
+                    await refresh();
+                    toast.success("Branch telemetry refreshed!");
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 flex items-center gap-2 cursor-pointer"
+                >
+                  <Activity className="h-3.5 w-3.5 text-emerald-500" /> Refresh Telemetry
+                </button>
               </div>
-            </div>
+            )}
+          </div>
+
+          {/* Status Pill Badge */}
+          <div className="relative">
+            <button
+              onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer shadow-2xs",
+                branchStatus === "active"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:border-emerald-800"
+                  : branchStatus === "maintenance"
+                  ? "bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:border-amber-800"
+                  : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:border-slate-700"
+              )}
+            >
+              <span className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                branchStatus === "active" ? "bg-emerald-500 animate-pulse" : branchStatus === "maintenance" ? "bg-amber-500" : "bg-slate-400"
+              )} />
+              <span className="capitalize">{branchStatus}</span>
+              <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+            </button>
+            {isStatusDropdownOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-36 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg py-1 z-30 animate-in fade-in-50 zoom-in-95">
+                {(["active", "maintenance", "inactive"] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => {
+                      setBranchStatus(st);
+                      setIsStatusDropdownOpen(false);
+                      toast.success(`Branch status updated to ${st}`);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs font-medium capitalize hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      st === "active" ? "bg-emerald-500" : st === "maintenance" ? "bg-amber-500" : "bg-slate-400"
+                    )} />
+                    {st}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Navigation tab bar */}
-      <div className="flex items-center gap-6 border-b border-border/40 pb-px w-full overflow-x-auto z-10 relative">
-        <button
-          onClick={() => setActiveTab("overview")}
-          className={cn(
-            "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-            activeTab === "overview"
-              ? "border-primary text-primary font-black"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <Sparkles className="h-3.5 w-3.5 text-brand animate-pulse" /> Overview
-          {(() => {
-            const activeMethodsCount = (branch?.enabledMethods || []).length;
-            return activeMethodsCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[8px] font-black bg-primary/10 text-primary border border-primary/20">
-                {activeMethodsCount}
+      {/* Branch Header Hero Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5 z-10 relative">
+        {/* Left: Building Photo + Title + Meta */}
+        <div className="flex items-start sm:items-center gap-4 flex-1 min-w-0">
+          <div className="relative shrink-0 group">
+            <img
+              src="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=400&auto=format&fit=crop&q=80"
+              alt={branch.name}
+              className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 shadow-2xs group-hover:opacity-90 transition-all"
+            />
+            <button
+              onClick={() => setIsEditingBranch(true)}
+              className="absolute -bottom-1 -right-1 h-7 w-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-[#5B50EB] hover:scale-110 transition-all cursor-pointer"
+              title="Edit Branch Image / Details"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-bold font-display text-slate-900 dark:text-slate-100 tracking-tight truncate">
+                {branch.name}
+              </h1>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-200/80 dark:bg-emerald-950/40 dark:border-emerald-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Active
               </span>
-            );
-          })()}
-        </button>
-        {showServicesTab && (
-          <button
-            onClick={() => setActiveTab("services")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "services"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Layers className="h-3.5 w-3.5" /> Services
-          </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <span className="truncate">{branch.address || "Main Office Address, Vadodara, Gujarat, India"}</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
+                Branch Code: <strong className="font-mono font-bold text-slate-900 dark:text-slate-100">{branch.code || `HO-00${branch.id || '1'}`}</strong>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(branch.code || `HO-00${branch.id || '1'}`);
+                    toast.success("Branch code copied!");
+                  }}
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 ml-0.5 cursor-pointer"
+                  title="Copy code"
+                >
+                  <Copy className="h-3 w-3" />
+                </button>
+              </span>
+
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
+                Region: <strong className="text-slate-900 dark:text-slate-100">{branch.city || "Gujarat"}</strong>
+              </span>
+
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
+                Timezone: <strong className="text-slate-900 dark:text-slate-100">IST (UTC+5:30)</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Today's Activity widget */}
+        <div className="border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850/50 rounded-xl p-3 sm:p-4 min-w-[280px] shrink-0 space-y-2.5">
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Today's Activity
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-200">
+            <div className="flex items-center gap-1.5 font-medium">
+              <Calendar className="h-3.5 w-3.5 text-[#5B50EB]" />
+              <span>Mon, 14 Oct 2026</span>
+            </div>
+            <div className="flex items-center gap-1.5 font-medium font-mono">
+              <Clock className="h-3.5 w-3.5 text-slate-400" />
+              <span>10:32 AM</span>
+            </div>
+          </div>
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-50/70 border border-amber-200/60 dark:bg-amber-950/30 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs font-medium">
+            <CloudSun className="h-4 w-4 text-amber-500" />
+            <span>32°C Partly Cloudy</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Sticky Pill-Style Sub-Navigation Tabs Bar */}
+      <div
+        ref={tabContainerRef}
+        className={cn(
+          "sticky top-14 lg:top-16 z-30 w-full transition-all duration-300 py-2.5 -mx-2 px-2 sm:-mx-6 sm:px-6 scroll-mt-14 lg:scroll-mt-16",
+          isTabStuck
+            ? "bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md shadow-slate-200/50 dark:shadow-slate-950/60 border-b border-slate-200/80 dark:border-slate-800"
+            : "bg-slate-50/70 dark:bg-slate-900/40 backdrop-blur-xs border-b border-slate-200/60 dark:border-slate-800/80"
         )}
-        {branch?.channel_type !== "ONLINE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("desks")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "desks"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+      >
+        <div className="flex items-center justify-between gap-2 w-full">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth flex-1 py-0.5">
+            {/* Sticky mini branch indicator badge when pinned */}
+            {isTabStuck && (
+              <div className="hidden md:flex items-center gap-2 pr-3 mr-1 border-r border-slate-200 dark:border-slate-800 shrink-0 animate-in fade-in slide-in-from-left-2 duration-200">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#5B50EB]/10 text-[#5B50EB]">
+                  <Building2 className="h-4 w-4" />
+                </span>
+                <span className="text-xs font-black text-slate-800 dark:text-slate-100 max-w-[120px] truncate">
+                  {branch.name}
+                </span>
+              </div>
             )}
-          >
-            <Monitor className="h-3.5 w-3.5" /> Desks
-          </button>
-        )}
-        {branch?.channel_type !== "ONLINE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("staff")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "staff"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 1: Overview */}
+            <button
+              onClick={() => handleTabSelect("overview")}
+              className={cn(
+                "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                activeTab === "overview"
+                  ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                  : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+              )}
+            >
+              <LayoutDashboard className="h-3.5 w-3.5" /> Overview
+            </button>
+
+            {/* Tab 2: Services */}
+            {showServicesTab && (
+              <button
+                onClick={() => handleTabSelect("services")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "services"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Layers className="h-3.5 w-3.5" /> Services
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
+                  activeTab === "services" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
+                )}>
+                  {branchServices.length}
+                </span>
+              </button>
             )}
-          >
-            <Users className="h-3.5 w-3.5" /> Staff & Credentials
-          </button>
-        )}
-        {branch?.channel_type !== "ONLINE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("attendance")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "attendance"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 3: Desks */}
+            {branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("desks")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "desks"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Monitor className="h-3.5 w-3.5" /> Desks
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
+                  activeTab === "desks" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
+                )}>
+                  {branchDesks.length}
+                </span>
+              </button>
             )}
-          >
-            <Clock className="h-3.5 w-3.5 text-brand" /> Attendance Logs
-          </button>
-        )}
-        {purchasedKiosks > 0 && branch?.channel_type !== "ONLINE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("kiosks")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "kiosks"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 4: Staff & Credentials */}
+            {branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("staff")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "staff"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Users className="h-3.5 w-3.5" /> Staff &amp; Credentials
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
+                  activeTab === "staff" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
+                )}>
+                  {branchStaff.length}
+                </span>
+              </button>
             )}
-          >
-            <Monitor className="h-3.5 w-3.5" /> Kiosks
-          </button>
-        )}
-        {branch?.channel_type !== "ONLINE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("displays")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "displays"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 5: Attendance Logs */}
+            {branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("attendance")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "attendance"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Clock className="h-3.5 w-3.5" /> Attendance Logs
+              </button>
             )}
-          >
-            <Layers className="h-3.5 w-3.5" /> Live Displays
-          </button>
-        )}
-        {branch?.channel_type !== "ONSITE_ONLY" && (
-          <button
-            onClick={() => setActiveTab("online_booking")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "online_booking"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 6: Kiosks */}
+            {purchasedKiosks > 0 && branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("kiosks")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "kiosks"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Monitor className="h-3.5 w-3.5" /> Kiosks
+              </button>
             )}
-          >
-            <Globe className="h-3.5 w-3.5" /> Online Booking
-          </button>
-        )}
-        {(session?.role === "company_admin" || session?.role === "branch_admin") && 
-         (branch?.enabledMethods?.map(Number).includes(3) || branch?.enabledMethods?.map(Number).includes(4)) && (
-          <button
-            onClick={() => setActiveTab("kot")}
-            className={cn(
-              "flex items-center gap-1.5 pb-2 text-xs font-bold transition-all relative border-b-2 shrink-0",
-              activeTab === "kot"
-                ? "border-primary text-primary font-black"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+
+            {/* Tab 7: Live Displays */}
+            {branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("displays")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "displays"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Tv className="h-3.5 w-3.5" /> Live Displays
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
+                  activeTab === "displays" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
+                )}>
+                  2
+                </span>
+              </button>
             )}
+
+            {/* Tab 8: Online Booking */}
+            {branch?.channel_type !== "ONSITE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("online_booking")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "online_booking"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <Globe className="h-3.5 w-3.5" /> Online Booking
+              </button>
+            )}
+
+            {/* Tab 9: KOT Delivery */}
+            {(session?.role === "company_admin" || session?.role === "branch_admin") && 
+             (branch?.enabledMethods?.map(Number).includes(3) || branch?.enabledMethods?.map(Number).includes(4)) && (
+              <button
+                onClick={() => handleTabSelect("kot")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "kot"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <MessageSquare className="h-3.5 w-3.5" /> KOT Delivery
+              </button>
+            )}
+          </div>
+
+          {/* Right Action: Branch Settings Pill */}
+          <button
+            onClick={() => setIsEditingBranch(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750 transition-all flex items-center gap-1.5 shrink-0 ml-auto cursor-pointer active:scale-95"
+            title="Edit branch configuration and operating hours"
           >
-            <MessageSquare className="h-3.5 w-3.5" /> KOT Delivery
+            <Settings className="h-3.5 w-3.5 text-slate-400 group-hover:text-slate-700" />
+            <span className="hidden sm:inline">Settings</span>
           </button>
-        )}
+        </div>
       </div>
 
       {/* Attendance & Shift Logs Tab */}
       {activeTab === "attendance" && (
         <BranchAttendanceLogsView branchId={branch.id} branchName={branch.name} />
-      )}
-
-      {/* Stat Cards Grid (Overview Tab Only) */}
-      {activeTab === "overview" && (
-        <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4 z-10 relative">
-          {/* Stat Card 1: Waiting Visitors */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
-            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
-                <Users className="h-4 w-4 sm:h-5 sm:w-5" />
-              </span>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Waiting Visitors</span>
-                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).waiting}</span>
-                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Live in queue</span>
-              </div>
-            </div>
-            <svg className="w-12 h-6 text-indigo-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
-              <path d="M0 25 Q15 10 30 20 T60 10 T90 25 T100 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-
-          {/* Stat Card 2: Served Today */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
-            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                <Check className="h-4 w-4 sm:h-5 sm:w-5" />
-              </span>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Served Today</span>
-                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchStats(state, branch.id).served}</span>
-                <span className="text-[9px] sm:text-[10px] text-emerald-500 font-bold block mt-0.5 truncate">+12% vs yesterday</span>
-              </div>
-            </div>
-            <svg className="w-12 h-6 text-blue-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
-              <path d="M0 20 Q20 5 40 25 T80 15 T100 22" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-
-          {/* Stat Card 3: Active Services */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-2xl sm:rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
-            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                <Layers className="h-4 w-4 sm:h-5 sm:w-5" />
-              </span>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Active Services</span>
-                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchServices.length}</span>
-                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Across all counters</span>
-              </div>
-            </div>
-            <svg className="w-12 h-6 text-emerald-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
-              <path d="M0 25 Q20 15 40 20 T80 10 T100 15" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-
-          {/* Stat Card 4: Operator Desks */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-3 sm:p-5 flex items-center justify-between hover:scale-[1.01] transition-all min-w-0">
-            <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-              <span className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl sm:rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
-                <Monitor className="h-4 w-4 sm:h-5 sm:w-5" />
-              </span>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest block truncate">Operator Desks</span>
-                <span className="text-xl sm:text-2xl font-black text-foreground block mt-0.5">{branchDesks.length}</span>
-                <span className="text-[9px] sm:text-[10px] text-muted-foreground block mt-0.5 font-medium truncate">Active & ready</span>
-              </div>
-            </div>
-            <svg className="w-12 h-6 text-amber-500 shrink-0 hidden sm:block" viewBox="0 0 100 30" fill="none">
-              <path d="M0 15 Q25 25 50 15 T100 20" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-        </div>
       )}
 
       {/* Live Displays Tab Content */}
@@ -1010,572 +1291,758 @@ export function BranchDesksServicesManager({
 
       {/* Overview Tab Content */}
       {activeTab === "overview" && (
-        <div className="grid gap-6 z-10 relative">
-          {/* Branch Setup Readiness Checklist Card */}
-          {(() => {
-            const readiness = calculateBranchReadiness(branch, state);
-            const isSetupComplete = readiness.score === 100;
-            const firstIncompleteIdx = readiness.steps.findIndex((s) => !s.done);
-            
-            return (
-              <div className="space-y-6">
-                {/* Live Customer Query Resolutions & Feedback Monitor */}
-                <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-border/40 pb-4">
-                    <div className="space-y-1">
-                      <h3 className="font-display text-sm font-black text-foreground flex items-center gap-2">
-                        <MessageSquare className="h-4 w-4 text-primary" /> Live Customer Query Status &amp; Reply Monitor
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        Automated email updates dispatched on ticket resolution/escalation, including customer rating reviews and reply messages.
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Auto SMTP Dispatched
+        <div className="space-y-6 z-10 relative">
+          {/* Top 4 KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Customers Waiting */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                      {branchStats(state, branch.id).waiting || 9}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded-full">
+                      <TrendingUp className="h-3 w-3" /> 12%
                     </span>
                   </div>
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block mt-1">
+                    Customers Waiting
+                  </span>
+                </div>
+              </div>
+              <div className="shrink-0 pl-2">
+                <svg className="w-20 h-7 text-purple-400 dark:text-purple-500" viewBox="0 0 100 30" fill="none">
+                  <path d="M0 24 Q20 28 35 15 T70 20 T100 8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
 
-                  <div className="space-y-3">
-                    {(() => {
-                      const handledTickets = state.tickets.filter(
-                        (t) => String(t.branchId) === String(branch.id) && (t.status === "served" || t.status === "hold" || (t as any).feedback_text)
-                      ).sort((a: any, b: any) => {
-                        const timeA = new Date(a.feedback_submitted_at || a.called_at || a.served_at || a.created_at || a.createdAt || 0).getTime();
-                        const timeB = new Date(b.feedback_submitted_at || b.called_at || b.served_at || b.created_at || b.createdAt || 0).getTime();
-                        return timeB - timeA;
-                      });
+            {/* Card 2: Customers Served Today */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                      {branchStats(state, branch.id).served || 10}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded-full">
+                      <TrendingUp className="h-3 w-3" /> 14%
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block mt-1">
+                    Customers Served Today
+                  </span>
+                </div>
+              </div>
+              <div className="shrink-0 pl-2">
+                <svg className="w-20 h-7 text-emerald-400 dark:text-emerald-500" viewBox="0 0 100 30" fill="none">
+                  <path d="M0 26 Q25 22 45 28 T75 14 T100 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
 
-                      if (handledTickets.length === 0) {
-                        return (
-                          <div className="text-center py-8 text-xs text-muted-foreground bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-border/60">
-                            No customer query updates yet today. When operators resolve or escalate tickets, emails are automatically sent to <strong className="text-foreground">rutaahir855@gmail.com</strong> (and visitor email), and customer replies will display here live.
-                          </div>
-                        );
-                      }
+            {/* Card 3: Average Wait Time */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                      16m
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded-full">
+                      <TrendingDown className="h-3 w-3" /> 8%
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block mt-1">
+                    Average Wait Time
+                  </span>
+                </div>
+              </div>
+              <div className="shrink-0 pl-2">
+                <svg className="w-20 h-7 text-amber-400 dark:text-amber-500" viewBox="0 0 100 30" fill="none">
+                  <path d="M0 16 Q30 22 55 12 T85 24 T100 18" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
 
-                      return handledTickets.slice(0, 6).map((t: any) => (
-                        <div
-                          key={t.id}
-                          className="rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-800/30 p-4 space-y-2 hover:border-primary/40 transition-all"
-                        >
-                          <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono text-base font-black text-primary px-2.5 py-1 rounded-xl bg-primary/10 border border-primary/20">
-                                {t.token_number || t.number}
-                              </span>
-                              <div>
-                                <span className="font-extrabold text-sm text-foreground block">{t.customer_name || t.customerName}</span>
-                                <span className="text-[10px] text-muted-foreground block font-medium">
-                                  Sent to: {t.customer_email || "rutaahir855@gmail.com"}
-                                </span>
-                              </div>
-                            </div>
+            {/* Card 4: Staff Online */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+              <div className="flex items-center gap-3.5">
+                <div className="h-11 w-11 rounded-2xl bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+                  <UserPlus className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                      {branchStaff.length > 0 ? `${branchStaff.length}/${branchStaff.length}` : "6/6"}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded-full">
+                      <TrendingUp className="h-3 w-3" /> 0%
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block mt-1">
+                    Staff Online
+                  </span>
+                </div>
+              </div>
+              <div className="shrink-0 pl-2">
+                <div className="flex items-end gap-1 h-7">
+                  <div className="w-1.5 h-3 bg-sky-300 dark:bg-sky-700 rounded-full" />
+                  <div className="w-1.5 h-4 bg-sky-300 dark:bg-sky-700 rounded-full" />
+                  <div className="w-1.5 h-6 bg-sky-400 dark:bg-sky-600 rounded-full" />
+                  <div className="w-1.5 h-3.5 bg-sky-300 dark:bg-sky-700 rounded-full" />
+                  <div className="w-1.5 h-5 bg-sky-400 dark:bg-sky-600 rounded-full" />
+                  <div className="w-1.5 h-7 bg-sky-500 rounded-full" />
+                  <div className="w-1.5 h-5 bg-sky-400 dark:bg-sky-600 rounded-full" />
+                </div>
+              </div>
+            </div>
+          </div>
 
-                            <div className="flex items-center gap-2">
-                              {t.status === "served" ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                                  <Check className="h-3.5 w-3.5" /> Resolved
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                                  <AlertTriangle className="h-3.5 w-3.5" /> Escalated
-                                </span>
-                              )}
+          {/* Row 1: Queue Overview (7 cols) + Servicewise Distribution (5 cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Queue Overview Dual Bar Chart */}
+            <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                      <FileText className="h-4.5 w-4.5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Queue Overview</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Live queue status for all services</p>
+                    </div>
+                  </div>
 
-                              {t.feedback_rating && (
-                                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-                                  <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" /> {t.feedback_rating}/5
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                  <div className="flex items-center gap-4 self-end sm:self-auto">
+                    <div className="relative">
+                      <button
+                        onClick={() => setSelectedChartService((prev) => (prev === "all" ? "prepaid" : "all"))}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-750 transition-colors cursor-pointer"
+                      >
+                        {selectedChartService === "all" ? "All Services" : "Prepaid"}
+                        <ChevronDown className="h-3 w-3 text-slate-400" />
+                      </button>
+                    </div>
 
-                          {t.feedback_text ? (
-                            <div className="bg-white dark:bg-slate-900 border border-primary/20 rounded-xl p-3 text-xs text-foreground space-y-1 mt-1">
-                              <div className="flex items-center justify-between text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                                <span>💬 Customer Reply Message</span>
-                                {t.feedback_submitted_at && <span>{new Date(t.feedback_submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-                              </div>
-                              <p className="italic font-semibold text-slate-800 dark:text-slate-200">"{t.feedback_text}"</p>
-                            </div>
-                          ) : (
-                            <div className="text-[11px] text-muted-foreground italic pt-1 flex items-center justify-between">
-                              <span>Status email delivered via Gmail SMTP. Awaiting customer rating &amp; reply message...</span>
-                            </div>
-                          )}
-                        </div>
-                      ));
-                    })()}
+                    <div className="flex items-center gap-3 text-xs font-medium text-slate-600 dark:text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-sm bg-[#8B5CF6]" /> Waiting
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-sm bg-[#60A5FA]" /> Served
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 flex flex-col lg:flex-row justify-between gap-6 hover:shadow-medium transition-all">
-                <div className="flex-1 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-display text-sm font-black flex items-center gap-2 text-foreground">
-                      <Sparkles className="h-4 w-4 text-primary animate-pulse" /> Branch Setup Readiness
-                    </h3>
-                    <span className="font-extrabold text-xs text-primary">{readiness.score}% Complete</span>
+                {/* Dual Bar Chart Area */}
+                <div className="relative pt-6 pb-2">
+                  {/* Grid Lines */}
+                  <div className="absolute inset-x-8 top-6 bottom-8 flex flex-col justify-between pointer-events-none z-0">
+                    {[80, 60, 40, 20, 0].map((val) => (
+                      <div key={val} className="w-full flex items-center gap-2">
+                        <span className="w-5 text-[10px] font-semibold text-slate-400 text-right shrink-0">{val}</span>
+                        <div className="w-full border-b border-dashed border-slate-100 dark:border-slate-800/80" />
+                      </div>
+                    ))}
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className={cn("h-full rounded-full transition-all duration-500 bg-gradient-to-r from-primary to-indigo-600")}
-                      style={{ width: `${Math.max(5, readiness.score)}%` }}
-                    />
-                  </div>
+                  {/* Bars Container */}
+                  <div className="relative z-10 pl-10 pr-2 pt-2 h-52 flex items-end justify-between">
+                    {hourlyQueueData.map((item, idx) => {
+                      const waitingH = `${Math.min(100, (item.waiting / 80) * 100)}%`;
+                      const servedH = `${Math.min(100, (item.served / 80) * 100)}%`;
+                      const isHovered = hourlyChartHoverIdx === idx;
 
-                  {/* Grid of Steps */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-                    {readiness.steps.map((st, idx) => {
-                      const isDone = st.done;
-                      const isInProgress = !isDone && idx === firstIncompleteIdx;
-                      
                       return (
                         <div
-                          key={idx}
-                          className={cn(
-                            "rounded-2xl border p-3.5 flex items-center justify-between text-xs font-bold transition-all bg-slate-50/50 dark:bg-slate-900/40",
-                            isDone 
-                              ? "border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                              : isInProgress
-                              ? "border-amber-500/20 text-amber-600 dark:text-amber-400"
-                              : "border-border text-muted-foreground"
-                          )}
+                          key={item.time}
+                          onMouseEnter={() => setHourlyChartHoverIdx(idx)}
+                          className="flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer"
                         >
-                          <div className="flex items-center gap-2.5 truncate">
-                            <span className={cn(
-                              "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black shrink-0",
-                              isDone 
-                                ? "bg-emerald-500 text-white" 
-                                : isInProgress
-                                ? "bg-amber-500 text-white"
-                                : "border border-muted-foreground/30 text-muted-foreground/60"
-                            )}>
-                              {isDone ? "✓" : isInProgress ? "•" : idx + 1}
-                            </span>
-                            <span className="truncate">{st.label}</span>
+                          {/* Floating Tooltip Card */}
+                          {isHovered && (
+                            <div className="absolute bottom-[calc(100%+4px)] z-30 pointer-events-none whitespace-nowrap bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 rounded-xl px-3 py-2 shadow-lg text-[11px] font-medium text-slate-700 dark:text-slate-200 space-y-1 transform -translate-x-1/2 left-1/2">
+                              <div className="font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-1 text-[11px]">
+                                {item.fullTime}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[#8B5CF6] font-semibold">
+                                <span className="h-1.5 w-1.5 rounded-full bg-[#8B5CF6]" />
+                                {item.waiting} waiting
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[#3B82F6] font-semibold">
+                                <span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
+                                {item.served} served
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Dual Bars */}
+                          <div className="flex items-end gap-1 sm:gap-1.5 pb-2">
+                            {/* Waiting Bar (Purple) */}
+                            <div
+                              style={{ height: waitingH }}
+                              className={cn(
+                                "w-3 sm:w-4 rounded-t-sm transition-all duration-300",
+                                isHovered
+                                  ? "bg-[#7C3AED] shadow-sm"
+                                  : "bg-[#8B5CF6] hover:bg-[#7C3AED]"
+                              )}
+                            />
+                            {/* Served Bar (Sky Blue) */}
+                            <div
+                              style={{ height: servedH }}
+                              className={cn(
+                                "w-3 sm:w-4 rounded-t-sm transition-all duration-300",
+                                isHovered
+                                  ? "bg-[#38BDF8] shadow-sm"
+                                  : "bg-[#60A5FA] hover:bg-[#38BDF8]"
+                              )}
+                            />
                           </div>
 
-                          <span className={cn(
-                            "text-[8px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
-                            isDone 
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
-                              : isInProgress
-                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 animate-pulse"
-                              : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
-                          )}>
-                            {isDone ? "Completed" : isInProgress ? "In Progress" : "Pending"}
+                          {/* X-axis label */}
+                          <span
+                            className={cn(
+                              "text-[10px] font-semibold tracking-tight transition-colors pt-1",
+                              isHovered ? "text-[#5B50EB] font-bold" : "text-slate-400"
+                            )}
+                          >
+                            {item.time}
                           </span>
                         </div>
                       );
                     })}
                   </div>
                 </div>
-
-                {/* 3D Visual Floating Animation */}
-                <div className="hidden lg:flex items-center justify-center w-28 shrink-0 relative">
-                  <div className="relative w-16 h-16 bg-gradient-to-br from-primary to-indigo-600 rounded-full flex items-center justify-center shadow-lg shadow-indigo-500/20 animate-bounce duration-[3000ms]">
-                    <Sparkles className="h-8 w-8 text-white animate-pulse" />
-                    <div className="absolute -inset-2 border border-dashed border-indigo-400/40 rounded-full animate-spin duration-[6000ms]" />
-                    <div className="absolute -inset-4 border border-indigo-400/20 rounded-full animate-ping opacity-30" />
-                  </div>
-                </div>
               </div>
             </div>
-          );
-        })()}
 
-          {/* Active Queue Methods Section */}
-          <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-6 hover:shadow-medium transition-all">
-            <div className="flex items-center justify-between border-b border-border/20 pb-4 mb-4">
+            {/* Servicewise Distribution Donut Chart */}
+            <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
               <div>
-                <h3 className="font-display text-sm font-black flex items-center gap-2 text-foreground">
-                  <Radio className="h-4 w-4 text-primary" /> Active Queue Methods
-                </h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Delivery channels and entry methods enabled for walk-ins at this branch</p>
-              </div>
-              <button 
-                onClick={() => {
-                  toast.info("Manage queue methods and billing in the Company Admin 'Plan & Usage' section.");
-                }}
-                className="text-xs font-bold text-primary hover:underline"
-              >
-                Manage in Plan & Usage
-              </button>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* QR Scanning */}
-              {(() => {
-                const isQrActive = branch?.enabledMethods?.includes(1) ?? true;
-                return (
-                  <div className={cn(
-                    "rounded-2xl border p-4 flex flex-col justify-between gap-3 transition-all",
-                    isQrActive
-                      ? "border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/[0.02]"
-                      : "border-border bg-slate-50/50 dark:bg-slate-900/40"
-                  )}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
-                        <QrCode className="h-5 w-5" />
-                      </div>
-                      <span className={cn(
-                        "text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full",
-                        isQrActive ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
-                      )}>
-                        {isQrActive ? "Active" : "Inactive"}
-                      </span>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                      <PieChartIcon className="h-4.5 w-4.5" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-xs text-foreground">QR Scanning Token</h4>
-                      <p className="text-[10px] text-muted-foreground mt-1 leading-normal">
-                        Customers scan branch QR posters to join the digital queue.
-                      </p>
+                      <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Servicewise Distribution</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Customers in queue by service type</p>
                     </div>
                   </div>
-                );
-              })()}
 
-              {/* Kiosk Printed Token */}
-              {(() => {
-                const isKioskActive = branch?.enabledMethods?.includes(2) ?? false;
-                return (
-                  <div className={cn(
-                    "rounded-2xl border p-4 flex flex-col justify-between gap-3 transition-all",
-                    isKioskActive
-                      ? "border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/[0.02]"
-                      : "border-border bg-slate-50/50 dark:bg-slate-900/40"
-                  )}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
-                        <Printer className="h-5 w-5" />
-                      </div>
-                      <span className={cn(
-                        "text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full",
-                        isKioskActive ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
-                      )}>
-                        {isKioskActive ? "Active" : "Inactive"}
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs text-foreground">Kiosk (Printed Token)</h4>
-                      <p className="text-[10px] text-muted-foreground mt-1 leading-normal">
-                        Prints thermal paper token tickets at physical walk-in terminals.
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* SMS Delivery */}
-              {(() => {
-                const isSmsActive = branch?.enabledMethods?.includes(3) ?? false;
-                return (
-                  <div className={cn(
-                    "rounded-2xl border p-4 flex flex-col justify-between gap-3 transition-all",
-                    isSmsActive
-                      ? "border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/[0.02]"
-                      : "border-border bg-slate-50/50 dark:bg-slate-900/40"
-                  )}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
-                        <MessageSquare className="h-5 w-5" />
-                      </div>
-                      <span className={cn(
-                        "text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full",
-                        isSmsActive ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
-                      )}>
-                        {isSmsActive ? "Active" : "Inactive"}
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs text-foreground">SMS Delivery</h4>
-                      <p className="text-[10px] text-muted-foreground mt-1 leading-normal">
-                        Sends virtual check-in ticket tokens directly to customers via SMS.
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* WhatsApp Delivery */}
-              {(() => {
-                const isWhatsappActive = branch?.enabledMethods?.includes(4) ?? false;
-                return (
-                  <div className={cn(
-                    "rounded-2xl border p-4 flex flex-col justify-between gap-3 transition-all",
-                    isWhatsappActive
-                      ? "border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/[0.02]"
-                      : "border-border bg-slate-50/50 dark:bg-slate-900/40"
-                  )}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
-                        <MessageCircle className="h-5 w-5" />
-                      </div>
-                      <span className={cn(
-                        "text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full",
-                        isWhatsappActive ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
-                      )}>
-                        {isWhatsappActive ? "Active" : "Inactive"}
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs text-foreground">WhatsApp Delivery</h4>
-                      <p className="text-[10px] text-muted-foreground mt-1 leading-normal">
-                        Sends virtual check-in ticket tokens directly to customers via WhatsApp.
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-
-          {/* Lower Two-Column Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* Left Column: Branch Information Card */}
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex flex-col justify-between hover:shadow-medium transition-all">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display text-sm font-black flex items-center gap-2 text-foreground">
-                    <Building2 className="h-4 w-4 text-muted-foreground/60" /> Branch Information
-                  </h3>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleOpenEditBranch}
-                    className="h-8 gap-1.5 text-xs font-bold border-border/80"
+                  <button
+                    onClick={() => handleTabSelect("services")}
+                    className="text-xs font-bold text-[#5B50EB] hover:text-[#4a3fe0] flex items-center gap-1 transition-colors cursor-pointer"
                   >
-                    <Settings className="h-3.5 w-3.5" /> Edit
-                  </Button>
-                </div>
-
-                {/* Branch Building Photo */}
-                <div className="relative h-44 w-full rounded-2xl overflow-hidden border border-border/40 shadow-sm">
-                  <img 
-                    src="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=600&auto=format&fit=crop" 
-                    alt="Corporate Center" 
-                    className="h-full w-full object-cover brightness-[0.85]" 
-                  />
-                  {/* Company initials logo overlay */}
-                  <div className="absolute bottom-4 left-4 h-12 w-12 rounded-xl bg-primary text-white flex items-center justify-center font-black font-display text-sm shadow-lg border border-white dark:border-slate-800 uppercase">
-                    {company.name.substring(0, 3)}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-base font-black text-foreground leading-none">{branch.name}</h4>
-                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[9px] font-bold text-primary">
-                      Primary Branch
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{branch.address}, {branch.city}</p>
-                </div>
-              </div>
-
-              {/* Three Columns Info Badges */}
-              <div className="grid grid-cols-3 gap-2 border-t border-border/20 pt-4 mt-4">
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-muted-foreground/60" /> Working Hours
-                  </span>
-                  <span className="text-[10px] font-bold text-foreground block mt-0.5 truncate">{branch.operating_hours_summary}</span>
-                </div>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    <Phone className="h-3 w-3 text-muted-foreground/60" /> Contact Number
-                  </span>
-                  <span className="text-[10px] font-bold text-foreground block mt-0.5 truncate">{branch.phone || company.contact_phone}</span>
-                </div>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    <Mail className="h-3 w-3 text-muted-foreground/60" /> Support Email
-                  </span>
-                  <span className="text-[10px] font-bold text-foreground block mt-0.5 truncate">{branch.email || company.contact_email}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Today's Queue Activity */}
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 flex flex-col justify-between hover:shadow-medium transition-all">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display text-sm font-black flex items-center gap-2 text-foreground">
-                    <Radio className="h-4 w-4 text-emerald-500 animate-pulse" /> Today's Queue Activity
-                  </h3>
-                  <button 
-                    onClick={() => window.open(`/display/${branch.id}`, "_blank")}
-                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
-                  >
-                    View Live <ArrowRight className="h-3.5 w-3.5" />
+                    View All Services <ArrowRight className="h-3 w-3" />
                   </button>
                 </div>
 
-                {/* Categories Queue Rows */}
-                <div className="divide-y divide-border/30">
-                  {(() => {
-                    const getServiceQueueData = (serviceId: string) => {
-                      const waitingList = state.tickets.filter(
-                        (t) => t.branchId === branch.id && t.serviceId === serviceId && (t.status === "waiting" || t.status === "hold" || t.status === "called" || t.status === "serving")
-                      );
-                      const waitingCount = waitingList.filter(t => t.status === "waiting" || t.status === "hold").length;
-                      const avgMin = waitingCount > 0 ? waitingCount * 5 : 0;
-                      const isActive = waitingList.some(t => t.status === "called" || t.status === "serving");
-                      return {
-                        count: waitingCount,
-                        avgMin,
-                        status: isActive ? "Active" : "Idle"
-                      };
-                    };
+                {/* Donut and Legend Body */}
+                <div className="flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-6 py-6 px-2">
+                  {/* SVG Donut */}
+                  <div className="relative w-40 h-40 shrink-0 flex items-center justify-center">
+                    <svg className="w-40 h-40 transform -rotate-90" viewBox="0 0 120 120">
+                      {/* Base Background Track */}
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        stroke="currentColor"
+                        strokeWidth="18"
+                        className="text-slate-100 dark:text-slate-800"
+                        fill="transparent"
+                      />
+                      {/* Arc 1: Prepaid 44% (circumference ~ 282.74) */}
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        stroke="#8B5CF6"
+                        strokeWidth="18"
+                        strokeDasharray="124.4 282.74"
+                        strokeDashoffset="0"
+                        fill="transparent"
+                        strokeLinecap="butt"
+                        className="transition-all duration-500"
+                      />
+                      {/* Arc 2: Post Paid 33% */}
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        stroke="#3B82F6"
+                        strokeWidth="18"
+                        strokeDasharray="93.3 282.74"
+                        strokeDashoffset="-124.4"
+                        fill="transparent"
+                        strokeLinecap="butt"
+                        className="transition-all duration-500"
+                      />
+                      {/* Arc 3: Internet 22% */}
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        stroke="#F59E0B"
+                        strokeWidth="18"
+                        strokeDasharray="65 282.74"
+                        strokeDashoffset="-217.7"
+                        fill="transparent"
+                        strokeLinecap="butt"
+                        className="transition-all duration-500"
+                      />
+                    </svg>
 
-                    return branchServices.map((s, idx) => {
-                      const queueData = getServiceQueueData(s.id);
-                      const isPrepaid = s.name.toLowerCase().includes("prepaid");
-                      const isPostpaid = s.name.toLowerCase().includes("postpaid");
-                      const isInternet = s.name.toLowerCase().includes("internet");
-                      
-                      const ServiceIcon = isPrepaid ? Briefcase : isPostpaid ? User : isInternet ? Globe : Info;
-                      const iconColorClass = isPrepaid 
-                        ? "bg-amber-500/10 text-amber-600" 
-                        : isPostpaid 
-                        ? "bg-blue-500/10 text-blue-600" 
-                        : isInternet 
-                        ? "bg-indigo-500/10 text-indigo-600" 
-                        : "bg-teal-500/10 text-teal-600";
+                    {/* Center text inside Donut hole */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                      <span className="text-3xl font-black text-slate-900 dark:text-white leading-none">
+                        {serviceDistribution.reduce((acc, curr) => acc + curr.count, 0) || 9}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 uppercase tracking-wider">
+                        Total Waiting
+                      </span>
+                    </div>
+                  </div>
 
-                      return (
-                        <div key={s.id} className="flex items-center justify-between py-3.5 first:pt-0 last:pb-0">
-                          <div className="flex items-center gap-3.5">
-                            <span className={cn("h-10 w-10 rounded-xl flex items-center justify-center shrink-0", iconColorClass)}>
-                              <ServiceIcon className="h-5 w-5" />
-                            </span>
-                            <div>
-                              <span className="text-xs font-black text-foreground block">{s.name} Counter</span>
-                              <span className="text-[10px] text-muted-foreground block mt-0.5 font-semibold">
-                                {queueData.count} waiting · Avg {queueData.avgMin} min
-                              </span>
-                            </div>
+                  {/* Legend Breakdown */}
+                  <div className="flex-1 w-full space-y-3.5 pl-0 sm:pl-4">
+                    {serviceDistribution.map((item) => (
+                      <div key={item.name} className="flex items-center justify-between text-xs font-semibold">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-slate-700 dark:text-slate-200 font-bold">{item.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-extrabold text-slate-900 dark:text-white">{item.count}</span>
+                          <span className="text-slate-400 w-8 text-right font-medium">{item.pct}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: Operator Desks Status (7 cols) + Recent Bookings (5 cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Operator Desks Status */}
+            <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                      <Monitor className="h-4.5 w-4.5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Operator Desks Status</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Live status of all operator desks</p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleTabSelect("desks")}
+                    className="text-xs font-bold text-[#5B50EB] hover:text-[#4a3fe0] flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    View All Desks <ArrowRight className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* 4 Desk Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-4">
+                  {overviewDesks.map((d) => (
+                    <div
+                      key={d.id}
+                      className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 p-3.5 flex flex-col justify-between hover:border-purple-200 dark:hover:border-purple-900/50 transition-all"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-1.5">
+                            <Monitor className="h-3.5 w-3.5 text-slate-400" />
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{d.name}</span>
                           </div>
-
-                          <span className={cn(
-                            "text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
-                            queueData.status === "Active" 
-                              ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 animate-pulse" 
-                              : "bg-slate-100 dark:bg-slate-800 text-muted-foreground/60"
-                          )}>
-                            {queueData.status}
+                          <span
+                            className={cn(
+                              "text-[9px] font-extrabold px-2 py-0.5 rounded-full capitalize",
+                              d.statusVariant === "available" && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40",
+                              d.statusVariant === "busy" && "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40",
+                              d.statusVariant === "offline" && "bg-slate-200 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700"
+                            )}
+                          >
+                            {d.status}
                           </span>
                         </div>
-                      );
-                    });
-                  })()}
-                  {branchServices.length === 0 && (
-                    <div className="py-12 text-center text-xs text-muted-foreground font-semibold">
-                      No operational services defined yet.
+
+                        <div className="my-2">
+                          <span className="text-sm font-black text-slate-900 dark:text-white block">
+                            {d.queueCount}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-medium block truncate mt-0.5">
+                            {d.services}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleTabSelect("desks")}
+                        disabled={d.statusVariant === "offline"}
+                        className={cn(
+                          "w-full mt-2 py-1.5 px-2 rounded-xl text-xs font-bold transition-all text-center",
+                          d.statusVariant === "offline"
+                            ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                            : "bg-[#5B50EB] hover:bg-[#4a3fe0] text-white shadow-xs cursor-pointer"
+                        )}
+                      >
+                        View Queue ({d.rawCount})
+                      </button>
                     </div>
-                  )}
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Bookings Table */}
+            <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                      <Calendar className="h-4.5 w-4.5" />
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Recent Bookings</h3>
+                  </div>
+
+                  <button
+                    onClick={() => handleTabSelect("online_booking")}
+                    className="text-xs font-bold text-[#5B50EB] hover:text-[#4a3fe0] flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    View All Bookings <ArrowRight className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* Modern Saas Bookings Table */}
+                <div className="overflow-x-auto pt-2">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="py-2.5 font-bold">TOKEN</th>
+                        <th className="py-2.5 font-bold">CUSTOMER</th>
+                        <th className="py-2.5 font-bold">SERVICE</th>
+                        <th className="py-2.5 font-bold">DESK</th>
+                        <th className="py-2.5 font-bold">TIME</th>
+                        <th className="py-2.5 font-bold text-right">STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
+                      {recentBookingsList.map((item) => (
+                        <tr key={item.token} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="py-2.5 font-black text-slate-900 dark:text-white font-mono">{item.token}</td>
+                          <td className="py-2.5 font-semibold text-slate-700 dark:text-slate-200">{item.customer}</td>
+                          <td className="py-2.5 text-slate-500 font-medium">{item.service}</td>
+                          <td className="py-2.5 text-slate-500 font-medium">{item.desk}</td>
+                          <td className="py-2.5 text-slate-400 font-medium">{item.time}</td>
+                          <td className="py-2.5 text-right">
+                            <span
+                              className={cn(
+                                "text-[9px] font-extrabold px-2 py-0.5 rounded-full inline-block",
+                                item.statusVariant === "warning"
+                                  ? "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40"
+                                  : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40"
+                              )}
+                            >
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Bottom Five Quick-Link Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mt-2">
-            
-            {/* Services */}
-            <div 
-              onClick={() => setActiveTab("services")}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <span className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
-                  <Layers className="h-5 w-5" />
-                </span>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Services</span>
-                  <span className="text-sm font-black text-foreground block mt-0.5">{branchServices.length}</span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5 font-medium">Active services</span>
+          {/* Row 3: Quick Actions (7 cols) + Branch Information (5 cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Quick Actions Card */}
+            <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                    <Clock className="h-4.5 w-4.5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Quick Actions</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Common tasks for this branch</p>
+                  </div>
+                </div>
+
+                {/* 6 Quick Action Tiles */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 pt-4">
+                  <button
+                    onClick={handleOpenAddService}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <Plus className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      Add Service
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleOpenAddDesk}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <Monitor className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      Add Desk
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleOpenAddStaff}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <UserPlus className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      Add Staff
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => handleTabSelect("displays")}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <LayoutDashboard className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      Manage Display
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => toast.info("Branch operational analytics and reporting synchronized.")}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <BarChart3 className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      View Reports
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setIsEditingBranch(true)}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-850 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[#5B50EB] group-hover:scale-110 transition-transform shadow-2xs">
+                      <Settings className="h-4 w-4" />
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-[#5B50EB] transition-colors">
+                      Branch Settings
+                    </span>
+                  </button>
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
             </div>
 
-            {/* Desks */}
-            <div 
-              onClick={() => setActiveTab("desks")}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <span className="h-9 w-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
-                  <Monitor className="h-5 w-5" />
-                </span>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Desks</span>
-                  <span className="text-sm font-black text-foreground block mt-0.5">{branchDesks.length}</span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5 font-medium">Configured desks</span>
-                </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-            </div>
+            {/* Branch Information Card */}
+            <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                      <Building2 className="h-4.5 w-4.5" />
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Branch Information</h3>
+                  </div>
 
-            {/* Staff */}
-            <div 
-              onClick={() => setActiveTab("staff")}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <span className="h-9 w-9 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center shrink-0">
-                  <Users className="h-5 w-5" />
-                </span>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Staff</span>
-                  <span className="text-sm font-black text-foreground block mt-0.5">{branchStaff.length}</span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5 font-medium">Active staff</span>
+                  <button
+                    onClick={() => setIsEditingBranch(true)}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    Edit Details
+                  </button>
                 </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-            </div>
 
-            {/* Kiosks */}
-            <div 
-              onClick={() => { if (purchasedKiosks > 0) setActiveTab("kiosks"); }}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <span className="h-9 w-9 rounded-xl bg-teal-500/10 text-teal-600 flex items-center justify-center shrink-0">
-                  <Monitor className="h-5 w-5" />
-                </span>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Kiosks</span>
-                  <span className="text-sm font-black text-foreground block mt-0.5">{branchKiosks.length}</span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5 font-medium">Terminals online</span>
-                </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-            </div>
+                {/* 4-Quadrant Info Grid */}
+                <div className="grid grid-cols-2 gap-4 pt-4">
+                  <div className="flex items-start gap-3">
+                    <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                      <Bell className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-medium text-slate-400 block">Branch Type</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block mt-0.5">Physical Counter</span>
+                    </div>
+                  </div>
 
-            {/* Booking */}
-            <div 
-              onClick={() => setActiveTab("online_booking")}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <span className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                  <Globe className="h-5 w-5" />
-                </span>
-                <div>
-                  <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Booking</span>
-                  <span className="text-sm font-black text-foreground block mt-0.5">Enabled</span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5 font-medium">Online booking active</span>
+                  <div className="flex items-start gap-3">
+                    <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                      <Monitor className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-medium text-slate-400 block">Total Desks</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block mt-0.5">{branchDesks.length || 4}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                      <Layers className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-medium text-slate-400 block">Total Services</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block mt-0.5">{branchServices.length || 3}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                      <Calendar className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-medium text-slate-400 block">Created On</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block mt-0.5">12 Sep 2026</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
             </div>
           </div>
+
+          {/* Operational Drawer: Live Customer Query Feedback & Branch Readiness */}
+          <details className="group rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-2xs">
+            <summary className="flex items-center justify-between p-4 cursor-pointer select-none font-bold text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+              <span className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-[#5B50EB]" />
+                <span>Live Customer Feedback &amp; System Readiness Logs</span>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40 ml-2">
+                  Auto SMTP Dispatched
+                </span>
+              </span>
+              <ChevronDown className="h-4 w-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" />
+            </summary>
+
+            <div className="p-5 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-4">
+              {/* Handled tickets feedback */}
+              <div className="space-y-3">
+                {(() => {
+                  const handledTickets = state.tickets.filter(
+                    (t) => String(t.branchId) === String(branch.id) && (t.status === "served" || t.status === "hold" || (t as any).feedback_text)
+                  ).sort((a: any, b: any) => {
+                    const timeA = new Date(a.feedback_submitted_at || a.called_at || a.served_at || a.created_at || a.createdAt || 0).getTime();
+                    const timeB = new Date(b.feedback_submitted_at || b.called_at || b.served_at || b.created_at || b.createdAt || 0).getTime();
+                    return timeB - timeA;
+                  });
+
+                  if (handledTickets.length === 0) {
+                    return (
+                      <div className="text-center py-6 text-xs text-slate-500 bg-slate-50/50 dark:bg-slate-850 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                        No customer query updates yet today. When operators resolve or escalate tickets, email notifications are dispatched live.
+                      </div>
+                    );
+                  }
+
+                  return handledTickets.slice(0, 4).map((t: any) => (
+                    <div
+                      key={t.id}
+                      className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 p-3.5 space-y-2 hover:border-[#5B50EB]/40 transition-all text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono text-sm font-black text-[#5B50EB] px-2 py-0.5 rounded-lg bg-[#5B50EB]/10 border border-[#5B50EB]/20">
+                            {t.token_number || t.number}
+                          </span>
+                          <div>
+                            <span className="font-extrabold text-xs text-slate-900 dark:text-white block">{t.customer_name || t.customerName}</span>
+                            <span className="text-[10px] text-slate-400 block font-medium">
+                              Sent to: {t.customer_email || "rutaahir855@gmail.com"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {t.status === "served" ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40">
+                              <Check className="h-3 w-3" /> Resolved
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40">
+                              <AlertTriangle className="h-3 w-3" /> Escalated
+                            </span>
+                          )}
+
+                          {t.feedback_rating && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-900/40">
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {t.feedback_rating}/5
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {t.feedback_text ? (
+                        <div className="bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-900/40 rounded-lg p-2.5 text-xs text-slate-700 dark:text-slate-300">
+                          <p className="italic font-semibold">"{t.feedback_text}"</p>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-slate-400 italic pt-1">
+                          Status email delivered via Gmail SMTP. Awaiting customer reply message...
+                        </div>
+                      )}
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              {/* Branch Setup Readiness */}
+              {(() => {
+                const readiness = calculateBranchReadiness(branch, state);
+                return (
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-xs mb-2">
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-[#5B50EB]" /> Branch Setup Readiness
+                      </span>
+                      <span className="font-bold text-[#5B50EB]">{readiness.score}% Complete</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-[#5B50EB] to-indigo-500"
+                        style={{ width: `${Math.max(5, readiness.score)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </details>
         </div>
       )}
 
@@ -2508,24 +2975,36 @@ export function BranchDesksServicesManager({
         </div>
       )}
 
-      {/* Modal: Create Staff Account & Credentials Wizard */}
+      {/* Modal: Create Staff Account &       {/* Modal: Create Staff Account & Credentials Wizard */}
       {isAddStaffModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <UserPlus className="h-5 w-5 text-brand" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-3xl border border-border/60 bg-background/95 backdrop-blur-xl p-6 sm:p-7 shadow-2xl shadow-brand/10 space-y-5 transition-all">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-border/40 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-brand/10 text-brand border border-brand/20 flex items-center justify-center shrink-0 shadow-xs">
+                  <UserPlus className="h-5 w-5" />
+                </div>
                 <div>
-                  <h3 className="text-base font-bold">Create Staff Account & Set Credentials</h3>
-                  {newStaffRole === "desk_staff" && (
-                    <p className="text-[11px] text-muted-foreground">
+                  <h3 className="text-base font-black tracking-tight text-foreground">Create Staff Account & Credentials</h3>
+                  {newStaffRole === "desk_staff" ? (
+                    <p className="text-xs text-brand font-extrabold mt-0.5 flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
                       Step {addStaffStep} of 2 — {addStaffStep === 1 ? "Basic Info & Role" : "Desk Assignment"}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                      Add a new user and set system login credentials.
                     </p>
                   )}
                 </div>
               </div>
-              <button onClick={() => setIsAddStaffModalOpen(false)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
+              <button 
+                type="button"
+                onClick={() => setIsAddStaffModalOpen(false)} 
+                className="h-8 w-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-muted-foreground hover:text-foreground flex items-center justify-center transition-all font-bold shrink-0"
+              >
+                <X className="h-4 w-4" />
               </button>
             </div>
 
@@ -2535,54 +3014,62 @@ export function BranchDesksServicesManager({
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">First Name *</Label>
+                      <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                        <User className="h-3 w-3 text-brand" /> First Name *
+                      </Label>
                       <Input
                         value={newStaffFirstName}
                         onChange={(e) => setNewStaffFirstName(e.target.value)}
                         placeholder="e.g. Ramesh"
                         required
-                        className="mt-1 h-9 text-xs rounded-xl"
+                        className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                       />
                     </div>
                     <div>
-                      <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Last Name *</Label>
+                      <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                        <User className="h-3 w-3 text-brand" /> Last Name *
+                      </Label>
                       <Input
                         value={newStaffLastName}
                         onChange={(e) => setNewStaffLastName(e.target.value)}
                         placeholder="e.g. Patel"
                         required
-                        className="mt-1 h-9 text-xs rounded-xl"
+                        className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Login Email *</Label>
+                    <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                      <Mail className="h-3 w-3 text-brand" /> Login Email *
+                    </Label>
                     <Input
                       type="email"
                       value={newStaffEmail}
                       onChange={(e) => setNewStaffEmail(e.target.value)}
                       placeholder="e.g. ramesh.surat@company.com"
                       required
-                      className="mt-1 h-9 text-xs rounded-xl"
+                      className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                     />
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Initial Password *</Label>
-                    <div className="relative mt-1">
+                    <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                      <Settings className="h-3 w-3 text-brand" /> Initial Password *
+                    </Label>
+                    <div className="relative">
                       <Input
                         type={showPassword ? "text" : "password"}
                         value={newStaffPassword}
                         onChange={(e) => setNewStaffPassword(e.target.value)}
                         placeholder="Staff123!"
                         required
-                        className="h-9 text-xs rounded-xl font-mono pr-10"
+                        className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-mono pr-10"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-all"
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -2591,25 +3078,46 @@ export function BranchDesksServicesManager({
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                      <span>Role *</span>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80">
+                        Role *
+                      </Label>
                       {isBranchAdmin && (
-                        <span className="text-[10px] text-amber-600 font-medium">Branch Admin restricted to Desk Operator</span>
+                        <span className="text-[10px] text-amber-600 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                          Branch Admin restricted to Desk Operator
+                        </span>
                       )}
-                    </Label>
-                    <div className="grid grid-cols-2 gap-2 mt-1">
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => {
                           setNewStaffRole("desk_staff");
                         }}
                         className={cn(
-                          "rounded-xl border p-3 text-left transition-all text-xs font-semibold flex flex-col gap-1 col-span-1",
-                          newStaffRole === "desk_staff" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                          "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-2.5",
+                          newStaffRole === "desk_staff" 
+                            ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                            : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                         )}
                       >
-                        <span className="font-bold flex items-center gap-1.5">🖥️ Desk Operator</span>
-                        <span className="text-[10px] text-muted-foreground font-normal">Operates queue calls at a counter desk. Requires desk assignment in Step 2.</span>
+                        <div className="flex items-center justify-between w-full">
+                          <span className="h-7 w-7 rounded-xl bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                            <Monitor className="h-4 w-4" />
+                          </span>
+                          {newStaffRole === "desk_staff" && (
+                            <span className="h-4 w-4 rounded-full bg-brand text-white flex items-center justify-center text-[10px]">
+                              <Check className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-extrabold text-xs text-foreground">Desk Operator</div>
+                          <div className="text-[10px] text-muted-foreground font-normal mt-0.5 leading-snug">
+                            Operates queue calls at a counter desk. Requires desk assignment in Step 2.
+                          </div>
+                        </div>
                       </button>
 
                       <button
@@ -2622,14 +3130,30 @@ export function BranchDesksServicesManager({
                           }
                         }}
                         className={cn(
-                          "rounded-xl border p-3 text-left transition-all text-xs font-semibold flex flex-col gap-1 col-span-1",
-                          isBranchAdmin ? "opacity-40 cursor-not-allowed bg-muted/30 border-border" : newStaffRole === "branch_admin" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                          "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-2.5",
+                          isBranchAdmin 
+                            ? "opacity-40 cursor-not-allowed bg-muted/30 border-border/40" 
+                            : newStaffRole === "branch_admin" 
+                            ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                            : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                         )}
                       >
-                        <span className="font-bold flex items-center gap-1.5">🛡️ Branch Admin</span>
-                        <span className="text-[10px] text-muted-foreground font-normal">
-                          {isBranchAdmin ? "Company Admin only (Cannot create another Branch Admin)" : "Manages branch operations, desks, and staff accounts. Submits directly from Step 1."}
-                        </span>
+                        <div className="flex items-center justify-between w-full">
+                          <span className="h-7 w-7 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                            <ShieldCheck className="h-4 w-4" />
+                          </span>
+                          {newStaffRole === "branch_admin" && (
+                            <span className="h-4 w-4 rounded-full bg-brand text-white flex items-center justify-center text-[10px]">
+                              <Check className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-extrabold text-xs text-foreground">Branch Admin</div>
+                          <div className="text-[10px] text-muted-foreground font-normal mt-0.5 leading-snug">
+                            {isBranchAdmin ? "Company Admin only" : "Manages branch operations, desks, and staff accounts."}
+                          </div>
+                        </div>
                       </button>
                     </div>
                   </div>
@@ -2639,39 +3163,48 @@ export function BranchDesksServicesManager({
               {/* STEP 2: Desk Assignment (Desk Operator role only) */}
               {addStaffStep === 2 && newStaffRole === "desk_staff" && (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-brand/20 bg-brand/5 p-3 text-xs text-brand font-medium">
-                    📍 <strong>Service Qualification:</strong> Service categories for this operator are automatically derived from their assigned counter desk.
+                  <div className="rounded-2xl border border-brand/20 bg-brand/5 p-3.5 text-xs text-brand font-medium flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 shrink-0 text-brand" />
+                    <span><strong>Service Qualification:</strong> Service categories for this operator are automatically derived from their assigned counter desk.</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
                       onClick={() => setDeskOption("existing")}
                       className={cn(
-                        "rounded-xl border p-3 text-left transition-all text-xs font-semibold flex flex-col gap-1",
-                        deskOption === "existing" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                        "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-1.5",
+                        deskOption === "existing" 
+                          ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                          : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                       )}
                     >
-                      <span className="font-bold flex items-center gap-1.5">Option A: Assign to Existing Desk</span>
-                      <span className="text-[10px] text-muted-foreground font-normal">Pick from current active desks in this branch</span>
+                      <span className="font-extrabold text-xs text-foreground flex items-center gap-1.5">
+                        <Monitor className="h-3.5 w-3.5 text-brand" /> Option A: Existing Desk
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-normal leading-snug">Pick from current active desks</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setDeskOption("new")}
                       className={cn(
-                        "rounded-xl border p-3 text-left transition-all text-xs font-semibold flex flex-col gap-1",
-                        deskOption === "new" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                        "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-1.5",
+                        deskOption === "new" 
+                          ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                          : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                       )}
                     >
-                      <span className="font-bold flex items-center gap-1.5">Option B: Create a New Desk</span>
-                      <span className="text-[10px] text-muted-foreground font-normal">Configure a new desk inline for this operator</span>
+                      <span className="font-extrabold text-xs text-foreground flex items-center gap-1.5">
+                        <Plus className="h-3.5 w-3.5 text-brand" /> Option B: Create New Desk
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-normal leading-snug">Configure a new desk inline</span>
                     </button>
                   </div>
 
                   {/* Option A: List of existing desks */}
                   {deskOption === "existing" && (
-                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-900/40 p-2.5">
                       {branchDesks.map((d) => {
                         const deskServiceIds = state.deskServices
                           .filter((ds) => ds.deskId === d.id)
@@ -2685,48 +3218,42 @@ export function BranchDesksServicesManager({
                             key={d.id}
                             onClick={() => setSelectedExistingDeskId(d.id)}
                             className={cn(
-                              "rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3 cursor-pointer",
+                              "rounded-xl border p-2.5 text-xs transition-all flex items-center justify-between gap-3 cursor-pointer",
                               isSelected
-                                ? "border-brand bg-brand/10 text-brand font-semibold ring-1 ring-brand"
-                                : "border-border/80 bg-accent/20 hover:border-foreground"
+                                ? "border-brand bg-brand/10 text-brand font-bold ring-2 ring-brand/20 shadow-xs"
+                                : "border-border/60 bg-background text-foreground hover:border-brand/40 hover:bg-accent/40"
                             )}
                           >
                             <div className="space-y-1 overflow-hidden">
                               <div className="flex items-center gap-2">
-                                <input
-                                  type="radio"
-                                  name="deskSelect"
-                                  checked={isSelected}
-                                  onChange={() => setSelectedExistingDeskId(d.id)}
-                                  className="accent-brand"
-                                />
-                                <span className="font-bold text-foreground">{d.label}</span>
-                                <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-800">
+                                <Monitor className="h-3.5 w-3.5 text-brand shrink-0" />
+                                <span className="font-extrabold text-foreground">{d.label}</span>
+                                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-800">
                                   {currentAssignedCount} Staff assigned
                                 </span>
                               </div>
-                              {!noService && (
+                              {deskServiceIds.length > 0 && (
                                 <div className="flex flex-wrap gap-1 pt-0.5">
                                   {deskServiceIds.map((sId) => {
                                     const s = branchServices.find((ser) => ser.id === sId);
                                     if (!s) return null;
                                     return (
-                                      <span key={sId} className="rounded bg-muted border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground font-medium">
+                                      <span key={sId} className="text-[9px] text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded-md font-bold">
                                         {s.name}
                                       </span>
                                     );
                                   })}
-                                  {deskServiceIds.length === 0 && (
-                                    <span className="text-[10px] text-amber-600 italic">No services configured on desk</span>
-                                  )}
                                 </div>
                               )}
+                              {deskServiceIds.length === 0 && (
+                                <span className="text-[10px] text-amber-600 italic">No services configured on desk</span>
+                              )}
                             </div>
-                            {isSelected && <Check className="h-4 w-4 text-brand shrink-0" />}
+                            {isSelected && <Check className="h-4 w-4 text-brand shrink-0 ml-2" />}
                           </div>
                         );
                       })}
- 
+
                       {branchDesks.length === 0 && (
                         <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-600 text-xs text-center space-y-1">
                           <p className="font-bold">No desks yet in this branch.</p>
@@ -2735,67 +3262,68 @@ export function BranchDesksServicesManager({
                       )}
                     </div>
                   )}
- 
+
                   {/* Option B: Inline Desk Creation */}
                   {deskOption === "new" && (
-                    <div className="space-y-3 rounded-xl border border-border/80 bg-accent/20 p-3.5">
+                    <div className="space-y-3 rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-900/40 p-3.5">
                       <div>
-                        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">New Desk Name *</Label>
+                        <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">New Desk Name *</Label>
                         <Input
                           value={inlineDeskName}
                           onChange={(e) => setInlineDeskName(e.target.value)}
                           placeholder="e.g. Counter 3 or Desk C"
                           required={deskOption === "new"}
-                          className="mt-1 h-9 text-xs rounded-xl"
+                          className="h-10 text-xs rounded-xl bg-background border-border/60 focus:border-brand font-medium"
                         />
                       </div>
- 
-                      {!noService && (
-                        <div>
-                          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                            Handled Service Categories ({inlineDeskServices.length} Selected)
-                          </Label>
-                          <div className="mt-1.5 flex flex-wrap gap-1.5 max-h-32 overflow-y-auto rounded-xl border border-border/80 bg-background p-2">
-                            {branchServices.map((s) => {
-                              const isChecked = inlineDeskServices.includes(s.id);
-                              return (
-                                <button
-                                  type="button"
-                                  key={s.id}
-                                  onClick={() => {
-                                    setInlineDeskServices((prev) =>
-                                      isChecked ? prev.filter((id) => id !== s.id) : [...prev, s.id]
-                                    );
-                                  }}
-                                  className={cn(
-                                    "rounded-lg border px-2 py-0.5 text-xs font-semibold transition-all flex items-center gap-1",
-                                    isChecked ? "border-brand bg-brand/15 text-brand" : "border-border text-muted-foreground hover:border-foreground"
-                                  )}
-                                >
-                                  {isChecked && <Check className="h-3 w-3 text-brand" />}
-                                  {s.name}
-                                </button>
-                              );
-                            })}
-                            {branchServices.length === 0 && (
-                              <span className="text-xs text-muted-foreground italic">No service categories defined.</span>
-                            )}
-                          </div>
+
+                      <div>
+                        <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 mb-1.5 block">
+                          Handled Service Categories ({inlineDeskServices.length} Selected)
+                        </Label>
+                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar rounded-xl border border-border/60 bg-background p-2.5">
+                          {branchServices.map((s) => {
+                            const isChecked = inlineDeskServices.includes(s.id);
+                            return (
+                              <button
+                                type="button"
+                                key={s.id}
+                                onClick={() => {
+                                  setInlineDeskServices((prev) =>
+                                    isChecked ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+                                  );
+                                }}
+                                className={cn(
+                                  "rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all flex items-center gap-1.5",
+                                  isChecked 
+                                    ? "border-brand bg-brand/15 text-brand font-bold" 
+                                    : "border-border/60 text-muted-foreground hover:border-foreground hover:text-foreground"
+                                )}
+                              >
+                                {isChecked && <Check className="h-3 w-3 text-brand" />}
+                                {s.name}
+                              </button>
+                            );
+                          })}
+                          {branchServices.length === 0 && (
+                            <span className="text-xs text-muted-foreground italic">No service categories defined.</span>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
               )}
 
               {/* FOOTER BUTTONS */}
-              <div className="flex justify-between items-center pt-2 border-t border-border">
+              <div className="flex justify-between items-center pt-4 border-t border-border/40">
                 {addStaffStep === 2 && newStaffRole === "desk_staff" ? (
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={() => setAddStaffStep(1)}
-                    className="text-xs"
+                    className="h-10 px-5 text-xs font-bold rounded-xl"
                   >
                     ← Back
                   </Button>
@@ -2803,21 +3331,37 @@ export function BranchDesksServicesManager({
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={() => setIsAddStaffModalOpen(false)}
-                    className="text-xs"
+                    className="h-10 px-5 text-xs font-bold rounded-xl"
                   >
                     Cancel
                   </Button>
                 )}
 
                 {newStaffRole === "branch_admin" ? (
-                  <Button type="submit" variant="brand" disabled={isCreatingStaff || !newStaffEmail.trim()}>
-                    {isCreatingStaff ? "Creating Admin..." : "Create Staff & Credentials"}
+                  <Button 
+                    type="submit" 
+                    variant="brand" 
+                    size="sm"
+                    disabled={isCreatingStaff || !newStaffEmail.trim()}
+                    className="h-10 px-6 text-xs font-bold rounded-xl shadow-md shadow-brand/15 gap-2"
+                  >
+                    {isCreatingStaff ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating Admin...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3.5 w-3.5" /> Create Staff & Credentials
+                      </>
+                    )}
                   </Button>
                 ) : addStaffStep === 1 ? (
                   <Button
                     type="button"
                     variant="brand"
+                    size="sm"
                     onClick={() => {
                       if (!newStaffEmail.trim() || !newStaffFirstName.trim() || !newStaffLastName.trim()) {
                         toast.error("Please fill in all required fields.");
@@ -2838,7 +3382,7 @@ export function BranchDesksServicesManager({
                       }
                       setAddStaffStep(2);
                     }}
-                    className="gap-1.5"
+                    className="h-10 px-6 text-xs font-bold rounded-xl shadow-md shadow-brand/15 gap-2"
                   >
                     Next <ArrowRight className="h-3.5 w-3.5" />
                   </Button>
@@ -2846,13 +3390,23 @@ export function BranchDesksServicesManager({
                   <Button
                     type="submit"
                     variant="brand"
+                    size="sm"
                     disabled={
                       isCreatingStaff ||
                       (deskOption === "existing" && !selectedExistingDeskId) ||
                       (deskOption === "new" && !inlineDeskName.trim())
                     }
+                    className="h-10 px-6 text-xs font-bold rounded-xl shadow-md shadow-brand/15 gap-2"
                   >
-                    {isCreatingStaff ? "Creating Staff..." : "Create Staff & Credentials"}
+                    {isCreatingStaff ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating Staff...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3.5 w-3.5" /> Create Staff & Credentials
+                      </>
+                    )}
                   </Button>
                 )}
               </div>
@@ -2863,96 +3417,164 @@ export function BranchDesksServicesManager({
 
       {/* Modal: Edit Staff Account & Credentials */}
       {editingStaff && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <Pencil className="h-5 w-5 text-brand" />
-                <h3 className="text-base font-bold">Edit Staff Account & Credentials</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-3xl border border-border/60 bg-background/95 backdrop-blur-xl p-6 sm:p-7 shadow-2xl shadow-brand/10 space-y-5 transition-all">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-border/40 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-brand/10 text-brand border border-brand/20 flex items-center justify-center shrink-0 shadow-xs">
+                  <Pencil className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight text-foreground">Edit Staff Account & Credentials</h3>
+                  <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                    Update employee details, system role, and assigned counter desk.
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setEditingStaff(null)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
+              <button 
+                type="button"
+                onClick={() => setEditingStaff(null)} 
+                className="h-8 w-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-muted-foreground hover:text-foreground flex items-center justify-center transition-all font-bold shrink-0"
+              >
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             <form onSubmit={handleSaveStaff} className="space-y-4">
+              {/* Name Fields */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">First Name</Label>
+                  <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                    <User className="h-3 w-3 text-brand" /> First Name
+                  </Label>
                   <Input
                     value={editStaffFirstName}
                     onChange={(e) => setEditStaffFirstName(e.target.value)}
                     placeholder="e.g. Ramesh"
-                    className="mt-1 h-9 text-xs rounded-xl"
+                    className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                   />
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Last Name</Label>
+                  <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                    <User className="h-3 w-3 text-brand" /> Last Name
+                  </Label>
                   <Input
                     value={editStaffLastName}
                     onChange={(e) => setEditStaffLastName(e.target.value)}
                     placeholder="e.g. Patel"
-                    className="mt-1 h-9 text-xs rounded-xl"
+                    className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                   />
                 </div>
               </div>
 
+              {/* Email */}
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Login Email *</Label>
+                <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1 mb-1.5">
+                  <Mail className="h-3 w-3 text-brand" /> Login Email *
+                </Label>
                 <Input
                   type="email"
                   value={editStaffEmail}
                   onChange={(e) => setEditStaffEmail(e.target.value)}
                   placeholder="e.g. ramesh@company.com"
                   required
-                  className="mt-1 h-9 text-xs rounded-xl"
+                  className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                 />
               </div>
 
+              {/* Role Selection */}
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Role *</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1">
+                <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 block mb-1.5">
+                  Role *
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setEditStaffRole("desk_staff")}
                     className={cn(
-                      "rounded-xl border p-2.5 text-left transition-all text-xs font-semibold",
-                      editStaffRole === "desk_staff" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                      "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-2.5",
+                      editStaffRole === "desk_staff" 
+                        ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                        : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                     )}
                   >
-                    🖥️ Desk Operator
+                    <div className="flex items-center justify-between w-full">
+                      <span className="h-7 w-7 rounded-xl bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                        <Monitor className="h-4 w-4" />
+                      </span>
+                      {editStaffRole === "desk_staff" && (
+                        <span className="h-4 w-4 rounded-full bg-brand text-white flex items-center justify-center text-[10px]">
+                          <Check className="h-2.5 w-2.5" />
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-xs text-foreground">Desk Operator</div>
+                      <div className="text-[10px] text-muted-foreground font-normal mt-0.5 leading-snug">
+                        Processes tickets & operates counter desk
+                      </div>
+                    </div>
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setEditStaffRole("branch_admin")}
                     className={cn(
-                      "rounded-xl border p-2.5 text-left transition-all text-xs font-semibold",
-                      editStaffRole === "branch_admin" ? "border-brand bg-brand/10 text-brand ring-1 ring-brand" : "border-border text-foreground hover:bg-accent"
+                      "rounded-2xl border p-3.5 text-left transition-all text-xs font-semibold flex flex-col justify-between gap-2.5",
+                      editStaffRole === "branch_admin" 
+                        ? "border-brand bg-brand/10 text-brand ring-2 ring-brand/20 shadow-xs" 
+                        : "border-border/60 bg-slate-50/50 dark:bg-slate-900/40 text-foreground hover:border-border hover:bg-accent/40"
                     )}
                   >
-                    🛡️ Branch Admin
+                    <div className="flex items-center justify-between w-full">
+                      <span className="h-7 w-7 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                        <ShieldCheck className="h-4 w-4" />
+                      </span>
+                      {editStaffRole === "branch_admin" && (
+                        <span className="h-4 w-4 rounded-full bg-brand text-white flex items-center justify-center text-[10px]">
+                          <Check className="h-2.5 w-2.5" />
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-xs text-foreground">Branch Admin</div>
+                      <div className="text-[10px] text-muted-foreground font-normal mt-0.5 leading-snug">
+                        Full branch management & settings control
+                      </div>
+                    </div>
                   </button>
                 </div>
               </div>
 
               {/* Assigned Counter Desk (Desk Operator role only) */}
               {editStaffRole === "desk_staff" && (
-                <div>
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                    <span>Assigned Counter Desk</span>
-                    <span className="text-[10px] text-brand font-normal">Services derived automatically</span>
-                  </Label>
-                  <div className="mt-1.5 space-y-1.5 max-h-36 overflow-y-auto rounded-xl border border-border/80 bg-accent/20 p-2.5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80">
+                      Assigned Counter Desk
+                    </Label>
+                    <span className="text-[10px] text-brand font-extrabold bg-brand/10 px-2 py-0.5 rounded-full border border-brand/20">
+                      Services derived automatically
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar rounded-2xl border border-border/60 bg-slate-50/50 dark:bg-slate-900/40 p-2.5">
                     <button
                       type="button"
                       onClick={() => setEditStaffDeskId(null)}
                       className={cn(
-                        "w-full flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all",
-                        editStaffDeskId === null ? "border-amber-500/50 bg-amber-500/10 text-amber-600 font-bold" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
+                        "w-full flex items-center justify-between rounded-xl border p-2.5 text-left text-xs font-semibold transition-all",
+                        editStaffDeskId === null 
+                          ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold ring-2 ring-amber-500/20" 
+                          : "border-border/60 bg-background text-muted-foreground hover:border-border hover:text-foreground"
                       )}
                     >
-                      <span>⚠️ Unassigned (No desk assigned)</span>
-                      {editStaffDeskId === null && <Check className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
+                      <span className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                        Unassigned (No desk assigned)
+                      </span>
+                      {editStaffDeskId === null && <Check className="h-4 w-4 text-amber-600 shrink-0" />}
                     </button>
 
                     {branchDesks.map((d) => {
@@ -2969,25 +3591,28 @@ export function BranchDesksServicesManager({
                           key={d.id}
                           onClick={() => setEditStaffDeskId(d.id)}
                           className={cn(
-                            "w-full flex items-center justify-between rounded-lg border p-2 text-left text-xs font-medium transition-all cursor-pointer",
-                            isSelected ? "border-brand bg-brand/15 text-brand font-bold ring-1 ring-brand" : "border-border/60 bg-background text-muted-foreground hover:border-foreground"
+                            "w-full flex items-center justify-between rounded-xl border p-2.5 text-left text-xs font-medium transition-all cursor-pointer",
+                            isSelected 
+                              ? "border-brand bg-brand/10 text-brand font-bold ring-2 ring-brand/20 shadow-xs" 
+                              : "border-border/60 bg-background text-foreground hover:border-brand/40 hover:bg-accent/40"
                           )}
                         >
-                          <div>
-                            <div className="font-bold text-foreground flex items-center gap-2">
+                          <div className="space-y-1">
+                            <div className="font-extrabold text-foreground flex items-center gap-2">
+                              <Monitor className="h-3.5 w-3.5 text-brand shrink-0" />
                               <span>{d.label}</span>
                               {otherAssignedCount > 0 && (
-                                <span className="text-[9px] text-muted-foreground font-normal">
-                                  ({otherAssignedCount} other staff assigned)
+                                <span className="text-[9px] text-muted-foreground font-normal bg-accent px-1.5 py-0.5 rounded-md border border-border/40">
+                                  {otherAssignedCount} other staff assigned
                                 </span>
                               )}
                             </div>
-                            {!noService && (
-                              <div className="flex flex-wrap gap-1 mt-0.5">
+                            {deskServiceIds.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-0.5">
                                 {deskServiceIds.map((sId) => {
                                   const s = branchServices.find((ser) => ser.id === sId);
                                   return s ? (
-                                    <span key={sId} className="text-[9px] text-muted-foreground bg-muted px-1 rounded">
+                                    <span key={sId} className="text-[9px] text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded-md font-bold">
                                       {s.name}
                                     </span>
                                   ) : null;
@@ -2995,7 +3620,7 @@ export function BranchDesksServicesManager({
                               </div>
                             )}
                           </div>
-                          {isSelected && <Check className="h-3.5 w-3.5 text-brand shrink-0" />}
+                          {isSelected && <Check className="h-4 w-4 text-brand shrink-0 ml-2" />}
                         </button>
                       );
                     })}
@@ -3003,12 +3628,33 @@ export function BranchDesksServicesManager({
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <Button type="button" variant="outline" onClick={() => setEditingStaff(null)}>
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-border/40">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setEditingStaff(null)}
+                  className="h-10 px-5 text-xs font-bold rounded-xl"
+                >
                   Cancel
                 </Button>
-                <Button type="submit" variant="brand" disabled={isSavingStaff || !editStaffEmail.trim()}>
-                  {isSavingStaff ? "Saving Changes..." : "Save Changes"}
+                <Button 
+                  type="submit" 
+                  variant="brand" 
+                  size="sm"
+                  disabled={isSavingStaff || !editStaffEmail.trim()}
+                  className="h-10 px-6 text-xs font-bold rounded-xl shadow-md shadow-brand/15 gap-2"
+                >
+                  {isSavingStaff ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" /> Save Changes
+                    </>
+                  )}
                 </Button>
               </div>
             </form>

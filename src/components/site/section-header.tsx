@@ -40,7 +40,7 @@ export function SectionHeader({
           observer.disconnect(); // Trigger animation once
         }
       },
-      { threshold: 0.6 } // Trigger when 60% of the header is visible
+      { threshold: 0.15, rootMargin: "-30px 0px" } // Trigger gracefully as header enters viewport
     );
 
     observer.observe(el);
@@ -144,7 +144,7 @@ export function SectionHeader({
       initial={reduce ? "visible" : "hidden"}
       animate={isInView ? "visible" : "hidden"}
       className={cn(
-        "relative max-w-4xl border border-white/12 dark:border-white/5 bg-[oklch(0.985_0.006_75_/_0.48)] dark:bg-[oklch(0.19_0.02_280_/_0.48)] backdrop-blur-md rounded-[2.5rem] p-7 sm:p-10 mb-12 shadow-[0_8px_32px_-12px_oklch(0.4_0.05_285_/_0.06)]",
+        "relative max-w-4xl border border-white/12 dark:border-white/5 bg-[oklch(0.985_0.006_75_/_0.48)] dark:bg-[oklch(0.19_0.02_280_/_0.48)] backdrop-blur-md rounded-[2.5rem] p-6 sm:p-8 mb-8 sm:mb-10 shadow-[0_8px_32px_-12px_oklch(0.4_0.05_285_/_0.06)]",
         isCentered ? "mx-auto text-center items-center flex flex-col" : "text-left",
         className
       )}

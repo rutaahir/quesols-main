@@ -34,8 +34,11 @@ import {
   ListTree,
   Wallet,
   MessageSquare,
-  Link2
+  Link2,
+  Calendar,
+  Search,
 } from "lucide-react";
+import { AppointmentCustomerModal } from "@/components/console/appointment-customer-modal";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
@@ -428,6 +431,16 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
     );
   }
 
+
+  if (view === "appointments") {
+    return (
+      <CompanyAdminAppointmentsView
+        companyId={companyId}
+        branches={branches}
+        onBack={() => setView?.("overview")}
+      />
+    );
+  }
 
   if (view === "alerts") {
     const rules = state.alertRules.filter((r) => r.companyId === companyId);
@@ -2732,3 +2745,211 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
     </div>
   );
 }
+
+function CompanyAdminAppointmentsView({
+  companyId,
+  branches,
+  onBack,
+}: {
+  companyId: string;
+  branches: Branch[];
+  onBack: () => void;
+}) {
+  const { state } = useQuesole();
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+
+  const fetchAllBookings = async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch("/api/online-bookings/");
+      if (Array.isArray(data)) {
+        setBookings(data);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load appointments");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAllBookings();
+  }, [companyId]);
+
+  const filteredBookings = bookings.filter((b) => {
+    if (statusFilter !== "all" && b.status !== statusFilter) return false;
+    if (branchFilter !== "all" && String(b.branch) !== String(branchFilter)) return false;
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      const name = (b.customer_name || "").toLowerCase();
+      const phone = (b.customer_phone || "").toLowerCase();
+      const ref = (b.booking_reference || "").toLowerCase();
+      if (!name.includes(term) && !phone.includes(term) && !ref.includes(term)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return (
+    <div className="space-y-5 animate-in fade-in duration-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border/60">
+        <div>
+          <button
+            onClick={onBack}
+            className="text-xs font-bold text-brand hover:underline inline-flex items-center gap-1 mb-1"
+          >
+            ← Back to Overview
+          </button>
+          <h2 className="font-display text-xl sm:text-2xl font-black text-foreground">
+            Customer Online Appointments
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Manage scheduled customer bookings, verify customer details, and track desk routing.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchAllBookings}
+            disabled={loading}
+            className="rounded-xl text-xs"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", loading && "animate-spin")} />
+            Sync
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters Bar */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="h-4 w-4 absolute left-3 top-2.5 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by customer name, phone, or reference code..."
+            className="pl-9 h-9 text-xs rounded-xl"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-xl border border-input bg-background px-3 py-1.5 text-xs font-medium cursor-pointer"
+          >
+            <option value="all">All Statuses</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="pending">Pending</option>
+            <option value="completed">Completed</option>
+            <option value="no_show">No-Show</option>
+          </select>
+
+          <select
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            className="rounded-xl border border-input bg-background px-3 py-1.5 text-xs font-medium cursor-pointer"
+          >
+            <option value="all">All Branches</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="panel overflow-x-auto shadow-xs p-0 border border-border/80">
+        <table className="w-full text-left text-xs min-w-[700px]">
+          <thead className="bg-muted/40 border-b border-border/60 text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+            <tr>
+              <th className="py-3 px-4">Customer</th>
+              <th className="py-3 px-4">Branch</th>
+              <th className="py-3 px-4">Date & Slot</th>
+              <th className="py-3 px-4 text-center">Status</th>
+              <th className="py-3 px-4">Booking Ref</th>
+              <th className="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/40">
+            {filteredBookings.map((b) => {
+              const branchName = branches.find((br) => String(br.id) === String(b.branch))?.name || "Branch";
+              return (
+                <tr
+                  key={b.id}
+                  onClick={() => setSelectedBooking(b)}
+                  className="hover:bg-accent/40 transition-colors cursor-pointer group"
+                >
+                  <td className="py-3 px-4">
+                    <div className="font-bold text-foreground group-hover:text-brand transition-colors">
+                      {b.customer_name}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">{b.customer_phone || b.customer_email || "No contact"}</div>
+                  </td>
+
+                  <td className="py-3 px-4 text-muted-foreground">
+                    {branchName}
+                  </td>
+
+                  <td className="py-3 px-4 font-mono text-[11px]">
+                    {b.date} · {b.slot_time}
+                  </td>
+
+                  <td className="py-3 px-4 text-center">
+                    <span className={cn(
+                      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border capitalize",
+                      b.status === "confirmed" ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                      b.status === "pending" ? "bg-amber-50 text-amber-600 border-amber-200" :
+                      b.status === "completed" ? "bg-blue-50 text-blue-600 border-blue-200" :
+                      "bg-rose-50 text-rose-600 border-rose-200"
+                    )}>
+                      {b.status}
+                    </span>
+                  </td>
+
+                  <td className="py-3 px-4 font-mono text-[10px] text-muted-foreground">
+                    {b.booking_reference || "—"}
+                  </td>
+
+                  <td className="py-3 px-4 text-right">
+                    <Button variant="ghost" size="sm" className="h-7 text-xs text-brand font-semibold">
+                      Manage →
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+
+            {filteredBookings.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-12 text-center text-xs text-muted-foreground">
+                  {loading ? "Loading customer appointments..." : "No matching online appointments found."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedBooking && (
+        <AppointmentCustomerModal
+          booking={selectedBooking}
+          onClose={() => setSelectedBooking(null)}
+          onRefresh={fetchAllBookings}
+          services={state.services}
+          desks={state.desks}
+        />
+      )}
+    </div>
+  );
+}
+

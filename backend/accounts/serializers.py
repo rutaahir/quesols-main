@@ -46,6 +46,14 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 if not user.company or user.company.slug != company_slug:
                     raise serializers.ValidationError("These credentials aren't associated with this company.")
 
+        has_purchased = True
+        company_status = ""
+        company_name = ""
+        if user.role != "super_admin" and user.company:
+            has_purchased = (user.company.onboarding_status == "active")
+            company_status = user.company.status
+            company_name = user.company.name
+
         data['user'] = {
             'email': user.email,
             'role': user.role,
@@ -53,8 +61,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'last_name': user.last_name,
             'name': f"{user.first_name} {user.last_name}".strip(),
             'companyId': str(user.company.id) if user.company else "",
+            'companyName': company_name,
             'branchId': str(user.branch.id) if user.branch else "",
             'deskId': "",
+            'hasPurchasedPlan': has_purchased,
+            'onboardingStatus': user.company.onboarding_status if user.company else "",
+            'companyStatus': company_status,
+            'companySlug': user.company.slug if user.company else "",
         }
         return data
 

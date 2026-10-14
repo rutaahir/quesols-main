@@ -48,27 +48,21 @@ const FULL_FEATURES: Record<string, string[]> = {
     "CSV export",
     "Email support (next business day)",
   ],
-  growth: [
+  standard: [
     "Everything in Starter",
     "Service-based multi-desk routing (Method 2)",
-    "Now Serving display boards (Method 3)",
-    "8 branches · 40 desks",
-    "Alert rules builder + notification centre",
-    "Branch comparison analytics & peak-hour heatmap",
-    "Staff performance reporting",
-    "Company branding (logo + accent colour)",
+    "Up to 3 branches, 15 desks",
+    "Alert rules & notification center",
     "Priority support (4h response)",
+    "Staff performance reporting",
   ],
-  enterprise: [
-    "Everything in Growth",
-    "Remote appointment booking with OTP (Method 4)",
-    "Unlimited branches & desks",
-    "Multi-branch command centre view",
-    "Custom SLA thresholds & escalation matrix",
-    "White-label subdomain & full branding",
-    "Platform-wide audit log export",
-    "SSO / directory sync (on request)",
-    "Dedicated success manager",
+  advanced: [
+    "Everything in Standard",
+    "Now Serving display boards (Method 3)",
+    "Branch comparison analytics & peak-hour heatmap",
+    "Up to 10 branches, 50 desks",
+    "Company branding (logo + accent colour)",
+    "Dedicated support",
   ],
 };
 

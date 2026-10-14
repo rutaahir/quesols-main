@@ -822,7 +822,7 @@ function DisplayBoardScreen() {
 
                 const isBreak = desk.status === "break";
                 const isPaused = desk.status === "paused";
-                const isOffline = desk.status === "offline";
+                const isOffline = (desk.status === "offline" && desk.isActive === false) || desk.isActive === false;
 
                 return (
                   <div

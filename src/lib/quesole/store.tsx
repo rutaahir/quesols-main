@@ -50,6 +50,7 @@ import type {
   SubscriptionDurationTier,
   PriceChangeLog,
   Kiosk,
+  InterestedCandidate,
 } from "./types";
 import { getApiUrl, getWsUrl } from "../api-config";
 
@@ -63,7 +64,11 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   
   const isPublicPath =
     path.startsWith("/api/public/") ||
-    path.includes("/by-slug/");
+    path.includes("/by-slug/") ||
+    path.startsWith("/api/billing/") ||
+    path.startsWith("/api/companies/register/") ||
+    path.startsWith("/api/companies/register-step1/") ||
+    path.startsWith("/api/companies/check-slug/");
 
   const accessToken = localStorage.getItem("quesole.access_token");
   if (accessToken && (!isPublicPath || path.includes("company-booking-config"))) {
@@ -176,6 +181,7 @@ export interface QuesoleState {
   durationTiers: SubscriptionDurationTier[];
   priceLogs: PriceChangeLog[];
   kiosks: Kiosk[];
+  interestedCandidates: InterestedCandidate[];
 }
 
 interface Ctx {
@@ -222,6 +228,7 @@ interface Ctx {
       serviceIds?: string[];
     }) => Promise<any>;
     approveCompany: (companyId: string) => Promise<void>;
+    approveCompanyInvoice: (companyId: string) => Promise<void>;
     suspendCompany: (companyId: string) => Promise<void>;
     resolveUpgrade: (id: string, status: "approved" | "declined") => Promise<void>;
     setDeskStatus: (deskId: string, status: Desk["status"]) => Promise<void>;
@@ -275,6 +282,7 @@ interface Ctx {
       contactName: string;
       email: string;
       password: string;
+      confirmPassword?: string;
       phone: string;
       itemizedSelections: Record<string, number>;
       branches?: any[];
@@ -289,7 +297,11 @@ interface Ctx {
       enabledCustomerFields?: string[];
       enabledBookingFields?: string[];
       enabledNotificationChannels?: string[];
-    }) => Promise<{ companyId: string; branchId: string }>;
+      companySlug?: string;
+      website?: string;
+      hpField?: string;
+      paymentMode?: "online" | "invoice_request";
+    }) => Promise<{ companyId: string; branchId: string; paymentMode?: string; onboardingStatus?: string }>;
       checkoutUpgrade: (input: {
         branches: any[];
         durationMonths: number;
@@ -298,6 +310,22 @@ interface Ctx {
       }) => Promise<{ status: "success" | "approval_required"; message: string; upgrade_request_id?: string; purchased_amount?: number }>;
       regenerateKioskPin: (kioskId: string) => Promise<any>;
       updateKiosk: (kioskId: string, input: { status?: "active" | "inactive" }) => Promise<void>;
+      saveRegistrationStep1: (input: {
+        companyName: string;
+        industry: string;
+        customIndustry?: string;
+        country: string;
+        state: string;
+        city: string;
+        address: string;
+        contactName: string;
+        email: string;
+        password: string;
+        phone: string;
+        countryCode: string;
+        website?: string;
+      }) => Promise<any>;
+      updateCandidateStatus: (candidateId: number, status: string, notes?: string) => Promise<void>;
     };
   }
 
@@ -339,6 +367,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
     durationTiers: [],
     priceLogs: [],
     kiosks: [],
+    interestedCandidates: [],
   }));
   const [session, setSessionState] = useState<Session | null>(() => {
     if (typeof window === "undefined") return null;
@@ -374,6 +403,23 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
   // Fetch real data from the backend
   const loadData = useCallback(async () => {
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("quesole.access_token") : null;
+      const hasAuth = !!session || !!token;
+
+      // Always fetch public billing components, solution types, delivery methods, and duration tiers
+      const [
+        planComponentsData,
+        solutionTypesData,
+        tokenDeliveryMethodsData,
+        durationTiersData,
+      ] = await Promise.all([
+        apiFetch("/api/billing/plan-components/").catch(() => []),
+        apiFetch("/api/billing/solution-types/").catch(() => []),
+        apiFetch("/api/billing/token-delivery-methods/").catch(() => []),
+        apiFetch("/api/billing/duration-tiers/").catch(() => []),
+      ]);
+
+      // Only fetch protected data if user is authenticated (prevents 401 Unauthorized errors on public pages)
       const [
         companiesData,
         branchesData,
@@ -384,41 +430,39 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         upgradesData,
         auditLogsData,
         queueMethodsData,
-        planComponentsData,
         allocationsData,
         purchasesData,
         deskServicesData,
         userServicesData,
-        solutionTypesData,
-        tokenDeliveryMethodsData,
-        durationTiersData,
         priceLogsData,
-        kiosksData
-      ] = await Promise.all([
-        session?.role === "super_admin"
-          ? apiFetch("/api/companies/").catch(() => [])
-          : session?.companyId
-            ? apiFetch(`/api/companies/${session.companyId}/`).then(c => [c]).catch(() => [])
-            : apiFetch("/api/companies/").catch(() => []),
-        apiFetch("/api/branches/").catch(() => []),
-        apiFetch("/api/desks/").catch(() => []),
-        apiFetch("/api/services/").catch(() => []),
-        apiFetch("/api/users/").catch(() => []),
-        apiFetch("/api/tickets/").catch(() => []),
-        apiFetch("/api/upgrades/").catch(() => []),
-        apiFetch("/api/audit-logs/").catch(() => []),
-        apiFetch("/api/queue-methods/").catch(() => []),
-        apiFetch("/api/billing/plan-components/").catch(() => []),
-        apiFetch("/api/billing/allocations/").catch(() => []),
-        apiFetch("/api/billing/purchases/").catch(() => []),
-        apiFetch("/api/desk-services/").catch(() => []),
-        apiFetch("/api/user-services/").catch(() => []),
-        apiFetch("/api/billing/solution-types/").catch(() => []),
-        apiFetch("/api/billing/token-delivery-methods/").catch(() => []),
-        apiFetch("/api/billing/duration-tiers/").catch(() => []),
-        apiFetch("/api/billing/price-change-logs/").catch(() => []),
-        apiFetch("/api/kot/kiosks/").catch(() => [])
-      ]);
+        kiosksData,
+        interestedCandidatesData,
+      ] = hasAuth
+        ? await Promise.all([
+            session?.role === "super_admin"
+              ? apiFetch("/api/companies/").catch(() => [])
+              : session?.companyId
+                ? apiFetch(`/api/companies/${session.companyId}/`).then(c => [c]).catch(() => [])
+                : apiFetch("/api/companies/").catch(() => []),
+            apiFetch("/api/branches/").catch(() => []),
+            apiFetch("/api/desks/").catch(() => []),
+            apiFetch("/api/services/").catch(() => []),
+            apiFetch("/api/users/").catch(() => []),
+            apiFetch("/api/tickets/").catch(() => []),
+            apiFetch("/api/upgrades/").catch(() => []),
+            apiFetch("/api/audit-logs/").catch(() => []),
+            apiFetch("/api/queue-methods/").catch(() => []),
+            apiFetch("/api/billing/allocations/").catch(() => []),
+            apiFetch("/api/billing/purchases/").catch(() => []),
+            apiFetch("/api/desk-services/").catch(() => []),
+            apiFetch("/api/user-services/").catch(() => []),
+            apiFetch("/api/billing/price-change-logs/").catch(() => []),
+            apiFetch("/api/kot/kiosks/").catch(() => []),
+            session?.role === "super_admin"
+              ? apiFetch("/api/interested-candidates/").catch(() => [])
+              : Promise.resolve([]),
+          ])
+        : [[], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []];
 
       const formattedCompanies = Array.isArray(companiesData) ? companiesData : [companiesData].filter(Boolean);
       const fetchedComponents = Array.isArray(planComponentsData) && planComponentsData.length > 0
@@ -445,22 +489,39 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         : [];
 
       setState({
-        companies: formattedCompanies.map((c: any) => ({
-          id: String(c.id),
-          name: c.name,
-          industry: c.industry,
-          city: c.city,
-          plan: mapPackageToPlanId(c.package_name || c.plan),
-          status: c.status,
-          createdAt: c.created_at || "",
-          contact: c.contact_name || "",
-          email: c.contact_email || "",
-          branchIds: (c.branches || []).map((b: any) => String(b.id || b)),
-          monthlySpend: Number(c.monthly_spend || 0),
-          slug: c.slug || "",
-          solution: c.solution || "ONSITE_ONLINE"
-        })),
-        branches: (Array.isArray(branchesData) ? branchesData : []).map((b: any) => ({
+        companies: formattedCompanies
+          .filter((c: any) => c && typeof c === "object" && c.id)
+          .map((c: any) => ({
+            id: String(c.id),
+            name: c.name || "Company",
+            industry: c.industry || "General",
+            city: c.city || "",
+            address: c.address || "",
+            state: c.state || "",
+            country: c.country || "India",
+            customIndustry: c.custom_industry || "",
+            plan: mapPackageToPlanId(c.package_name || c.plan),
+            status: c.status || "active",
+            onboardingStatus: c.onboarding_status || "active",
+            hasPurchasedPlan: c.onboarding_status === "active",
+            createdAt: c.created_at || "",
+            contact: c.contact_name || c.admin_name || "",
+            email: c.contact_email || c.admin_email || "",
+            phone: c.contact_phone || c.admin_phone || "",
+            adminName: c.admin_name || c.contact_name || "",
+            adminEmail: c.admin_email || c.contact_email || "",
+            adminPhone: c.admin_phone || c.contact_phone || "",
+            planPurchase: c.plan_purchase || null,
+            branchesDetail: c.branches_detail || [],
+            branchIds: (c.branches || []).map((b: any) => String(b.id || b)),
+            monthlySpend: Number(c.monthly_spend || (c.plan_purchase?.total_amount || 0)),
+            slug: c.slug || "",
+            solution: c.solution || "ONSITE_ONLINE",
+            planConfig: c.plan_config || {},
+          })),
+        branches: (Array.isArray(branchesData) ? branchesData : [])
+          .filter((b: any) => b && typeof b === "object" && b.id)
+          .map((b: any) => ({
           id: String(b.id),
           companyId: String(b.company),
           name: b.name,
@@ -656,20 +717,18 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           is_logged_in: Boolean(k.is_logged_in),
           created_at: k.created_at,
           updated_at: k.updated_at
-        }))
+        })),
+        interestedCandidates: Array.isArray(interestedCandidatesData) ? interestedCandidatesData : []
       });
     } catch (err) {
       console.error("Failed to load backend data:", err);
     }
   }, [session]);
 
-  // Load data initially when session is established
+  // Load data initially on mount and when session changes
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("quesole.access_token") : null;
-    if (session || token) {
-      loadData();
-    }
-  }, [session, loadData]);
+    loadData();
+  }, [loadData]);
 
   // WebSocket Live Updates Connection
   useEffect(() => {
@@ -738,8 +797,13 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         name: data.user.name,
         email: data.user.email,
         companyId: String(data.user.companyId || ""),
+        companyName: data.user.companyName || "",
+        companyStatus: data.user.companyStatus || "",
         branchId: String(data.user.branchId || ""),
         deskId: String(data.user.deskId || ""),
+        hasPurchasedPlan: Boolean(data.user.hasPurchasedPlan),
+        onboardingStatus: data.user.onboardingStatus || "",
+        companySlug: data.user.companySlug || "",
       };
       
       localStorage.setItem("quesole.access_token", access);
@@ -882,11 +946,17 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       },
 
       async approveCompany(companyId: string) {
-        await apiFetch(`/api/companies/${companyId}/`, {
-          method: "PATCH",
-          body: JSON.stringify({ status: "active" })
+        await apiFetch(`/api/companies/${companyId}/approve-invoice/`, {
+          method: "POST"
         });
-        loadData();
+        await loadData();
+      },
+
+      async approveCompanyInvoice(companyId: string) {
+        await apiFetch(`/api/companies/${companyId}/approve-invoice/`, {
+          method: "POST"
+        });
+        await loadData();
       },
 
       async suspendCompany(companyId: string) {
@@ -1643,6 +1713,8 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         companySlug?: string;
         website?: string;
         hpField?: string;
+        paymentMode?: "online" | "invoice_request";
+        invoiceDetails?: any;
       }) {
         if (input.simulateFailure) {
           throw new Error("Simulated Payment Gateway Authorization Failed. Please check card credentials and retry.");
@@ -1674,13 +1746,17 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
             slug: input.companySlug,
             website: input.website,
             hp_field: input.hpField,
+            payment_mode: input.paymentMode || "online",
+            invoice_details: input.invoiceDetails || {},
           })
         });
 
         await loadData();
         return {
           companyId: String(res.companyId),
-          branchId: String(res.branchId)
+          branchId: String(res.branchId),
+          paymentMode: res.payment_mode || input.paymentMode || "online",
+          onboardingStatus: res.onboarding_status || "active"
         };
       },
 
@@ -1716,6 +1792,61 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         await apiFetch(`/api/kot/kiosks/${kioskId}/`, {
           method: "PATCH",
           body: JSON.stringify(input)
+        });
+        await loadData();
+      },
+
+      async saveRegistrationStep1(input: {
+        companyName: string;
+        industry: string;
+        customIndustry?: string;
+        country: string;
+        state: string;
+        city: string;
+        address: string;
+        contactName: string;
+        email: string;
+        password: string;
+        phone: string;
+        countryCode: string;
+        website?: string;
+      }) {
+        const res = await apiFetch("/api/companies/register-step1/", {
+          method: "POST",
+          body: JSON.stringify({
+            company_name: input.companyName,
+            industry: input.industry,
+            custom_industry: input.customIndustry,
+            country: input.country,
+            state: input.state,
+            city: input.city,
+            address: input.address,
+            contact_name: input.contactName,
+            email: input.email,
+            password: input.password,
+            phone: input.phone,
+            country_code: input.countryCode,
+            website: input.website,
+          }),
+        });
+
+        if (res.access) {
+          localStorage.setItem("quesole.access_token", res.access);
+        }
+        if (res.refresh) {
+          localStorage.setItem("quesole.refresh_token", res.refresh);
+        }
+        if (res.user) {
+          persist(res.user);
+        }
+        await loadData();
+        return res;
+      },
+
+      async updateCandidateStatus(candidateId: number, status: string, notes?: string) {
+        await apiFetch(`/api/interested-candidates/${candidateId}/`, {
+          method: "PATCH",
+          body: JSON.stringify({ status, ...(notes !== undefined ? { notes } : {}) }),
         });
         await loadData();
       }

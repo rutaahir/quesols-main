@@ -1595,27 +1595,29 @@ export function BranchConsoleView({
                         <span className="flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5 text-brand" /> Internal Staff Notes &amp; Log</span>
                         <span className="text-[9px] text-brand font-bold bg-brand/10 px-2 py-0.5 rounded-md">Team Only</span>
                       </div>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Type internal note (e.g. Verified passport, requested invoice)..."
-                          value={staffNoteText}
-                          onChange={(e) => setStaffNoteText(e.target.value)}
-                          className="text-xs h-9 rounded-xl bg-accent/10 border-border/70"
-                          onKeyDown={async (e) => {
-                            if (e.key === "Enter" && staffNoteText.trim()) {
-                              handleSaveStaffNote();
-                            }
-                          }}
-                        />
-                        <Button
-                          size="sm"
-                          variant="brand"
-                          className="h-9 text-xs font-extrabold shrink-0 rounded-xl px-4"
-                          onClick={handleSaveStaffNote}
-                        >
-                          Add Note
-                        </Button>
-                      </div>
+                      {activeBooking.status !== "completed" && (
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Type internal note (e.g. Verified passport, requested invoice)..."
+                            value={staffNoteText}
+                            onChange={(e) => setStaffNoteText(e.target.value)}
+                            className="text-xs h-9 rounded-xl bg-accent/10 border-border/70"
+                            onKeyDown={async (e) => {
+                              if (e.key === "Enter" && staffNoteText.trim()) {
+                                handleSaveStaffNote();
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="brand"
+                            className="h-9 text-xs font-extrabold shrink-0 rounded-xl px-4"
+                            onClick={handleSaveStaffNote}
+                          >
+                            Add Note
+                          </Button>
+                        </div>
+                      )}
                       {activeBooking.internal_notes ? (
                         <div className="text-xs text-foreground bg-accent/20 p-3 rounded-xl border border-border/60 font-medium space-y-1">
                           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Note Log</div>

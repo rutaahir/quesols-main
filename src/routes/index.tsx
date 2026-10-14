@@ -7,6 +7,7 @@ import {
   CommandCentre,
   FinalCta,
   Hero,
+  HeroFeaturesCarousel,
   HowItWorks,
   LiveQueueDemo,
   MethodsSection,
@@ -16,6 +17,8 @@ import {
   TrustSection,
   UseCases,
 } from "@/components/site/sections";
+
+import { useScroll, useSpring, motion as m } from "motion/react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -40,10 +43,23 @@ export const Route = createFileRoute("/")({
 });
 
 function Landing() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, {
+    stiffness: 120,
+    damping: 30,
+    restDelta: 0.001,
+  });
+
   return (
     <div className="min-h-screen">
+      {/* Top Scroll Progress Indicator */}
+      <m.div
+        style={{ scaleX }}
+        className="fixed top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-violet-600 via-indigo-500 to-cyan-400 origin-left z-[100] shadow-[0_0_12px_rgba(99,102,241,0.65)] pointer-events-none"
+      />
       <SiteNav />
       <main>
+        {/* Hero Section containing clear video background, copy, stats, and moving cards carousel in 100dvh */}
         <Hero />
         <ScrollControlledBackground />
         <ProblemSection />

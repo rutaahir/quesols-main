@@ -69,25 +69,6 @@ export const PLANS: Plan[] = [
       "Dedicated support",
     ],
   },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    monthly: 24900,
-    annual: 249000,
-    tagline: "Nationwide operations, appointments and command centre.",
-    branches: 999,
-    desks: 999,
-    maxUsers: 999,
-    methods: [1, 2, 3, 4],
-    features: [
-      "Everything in Advanced",
-      "Remote appointment booking + OTP",
-      "Unlimited branches & desks",
-      "Custom SLA & escalation matrix",
-      "White-label branding",
-      "Dedicated success manager",
-    ],
-  },
 ];
 
 export const companies: Company[] = [

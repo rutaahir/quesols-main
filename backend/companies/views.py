@@ -1,4 +1,5 @@
 from rest_framework import serializers, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
@@ -8,6 +9,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.core.files.storage import default_storage
 from core.permissions import IsSuperAdmin
+from core.authentication import SafeJWTAuthentication
 from core.models import PlatformSetting
 from core.throttles import CompanySignupThrottle
 from core.honeypot import validate_honeypot
@@ -153,11 +155,28 @@ class CompanyRegistrationView(APIView):
         # Check for duplicate name warning
         duplicate_warning = Company.objects.filter(name=data["company_name"]).exists()
         
+        # Check payment mode
+        is_invoice_request = (
+            raw_data.get("payment_mode") == "invoice_request" or
+            request.data.get("payment_mode") == "invoice_request" or
+            raw_data.get("is_invoice_request") is True or
+            request.data.get("is_invoice_request") is True
+        )
+        
         # Check platform setting auto-approve toggle
         auto_approve_setting = PlatformSetting.objects.filter(key="auto_approve_registrations").first()
         auto_approve = auto_approve_setting.value.get("enabled", False) if auto_approve_setting else False
         
-        company_status = "active" if auto_approve else "pending"
+        if is_invoice_request:
+            company_status = "pending"
+            onboarding_status = "pending_invoice_approval"
+            payment_status = "pending"
+            payment_reference = f"INV_REQ_{int(timezone.now().timestamp())}"
+        else:
+            company_status = "active" if auto_approve else "pending"
+            onboarding_status = "active"
+            payment_status = "paid"
+            payment_reference = f"REG_TXN_{int(timezone.now().timestamp())}"
         
         # Handle logo upload if provided
         logo_url = ""
@@ -168,23 +187,48 @@ class CompanyRegistrationView(APIView):
             
         try:
             with transaction.atomic():
-                # 1. Create Company
-                company = Company.objects.create(
-                    name=data["company_name"],
-                    slug=data.get("slug") or None,
-                    website=data.get("website") or None,
-                    industry=data["industry"],
-                    contact_email=data["contact_email"],
-                    contact_phone=data["contact_phone"],
-                    address=data["address"],
-                    city=data["city"],
-                    logo_url=logo_url,
-                    brand_colors={"primary": data.get("brand_primary_color", "#6366F1")},
-                    status=company_status,
-                    onboarding_status="active",
-                    package=data["package"],
-                    solution=request.data.get("solution", "ONSITE_ONLINE")
-                )
+                # 1. Create or update Company
+                existing_company = Company.objects.filter(contact_email=data["contact_email"]).first()
+                if existing_company and existing_company.onboarding_status == "pending_payment":
+                    company = existing_company
+                    company.name = data["company_name"]
+                    if data.get("slug"):
+                        company.slug = data["slug"]
+                    company.website = data.get("website") or company.website
+                    company.industry = data["industry"]
+                    company.custom_industry = request.data.get("custom_industry") or company.custom_industry
+                    company.contact_phone = data["contact_phone"]
+                    company.address = data["address"]
+                    company.city = data["city"]
+                    company.state = request.data.get("state") or company.state
+                    company.country = request.data.get("country", "India")
+                    if logo_url:
+                        company.logo_url = logo_url
+                    company.status = company_status
+                    company.onboarding_status = onboarding_status
+                    company.package = data["package"]
+                    company.solution = request.data.get("solution", "ONSITE_ONLINE")
+                    company.save()
+                else:
+                    company = Company.objects.create(
+                        name=data["company_name"],
+                        slug=data.get("slug") or None,
+                        website=data.get("website") or None,
+                        industry=data["industry"],
+                        custom_industry=request.data.get("custom_industry"),
+                        contact_email=data["contact_email"],
+                        contact_phone=data["contact_phone"],
+                        address=data["address"],
+                        city=data["city"],
+                        state=request.data.get("state"),
+                        country=request.data.get("country", "India"),
+                        logo_url=logo_url,
+                        brand_colors={"primary": data.get("brand_primary_color", "#6366F1")},
+                        status=company_status,
+                        onboarding_status=onboarding_status,
+                        package=data["package"],
+                        solution=request.data.get("solution", "ONSITE_ONLINE")
+                    )
 
                 # Initialize BookingPageConfig for the company with submitted or default portal customization details
                 from appointments.models import BookingPageConfig
@@ -333,8 +377,8 @@ class CompanyRegistrationView(APIView):
                     type="initial_registration",
                     line_items=line_items,
                     total_amount=total_amount,
-                    payment_status="paid",
-                    payment_reference=f"REG_TXN_{timezone.now().timestamp()}"
+                    payment_status=payment_status,
+                    payment_reference=payment_reference
                 )
                 
                 # 2. Create Subscription
@@ -347,16 +391,27 @@ class CompanyRegistrationView(APIView):
                     status=company_status
                 )
                 
-                # 3. Create Admin User
-                admin_user = User.objects.create_user(
-                    email=data["admin_email"],
-                    password=data["admin_password"],
-                    first_name=data["admin_first_name"],
-                    last_name=data["admin_last_name"],
-                    role="company_admin",
-                    company=company,
-                    phone=data["admin_phone"]
-                )
+                # 3. Create or update Admin User
+                existing_admin = User.objects.filter(email=data["admin_email"]).first()
+                if existing_admin:
+                    admin_user = existing_admin
+                    admin_user.first_name = data["admin_first_name"]
+                    admin_user.last_name = data["admin_last_name"]
+                    admin_user.role = "company_admin"
+                    admin_user.company = company
+                    admin_user.phone = data["admin_phone"]
+                    admin_user.set_password(data["admin_password"])
+                    admin_user.save()
+                else:
+                    admin_user = User.objects.create_user(
+                        email=data["admin_email"],
+                        password=data["admin_password"],
+                        first_name=data["admin_first_name"],
+                        last_name=data["admin_last_name"],
+                        role="company_admin",
+                        company=company,
+                        phone=data["admin_phone"]
+                    )
 
                 # 4. Create branches
                 from branches.models import Branch
@@ -379,8 +434,8 @@ class CompanyRegistrationView(APIView):
                             company=company,
                             name=b_name,
                             slug=b_name.lower().replace(" ", "-"),
-                            city=company.city or "Default City",
-                            address=company.address or "Default Address",
+                            city=b_cfg.get("city") or company.city or "Default City",
+                            address=b_cfg.get("address") or company.address or "Default Address",
                             mode=b_mode,
                             channel_type=channel_type,
                             status="active"
@@ -487,15 +542,59 @@ class CompanyRegistrationView(APIView):
                         "admin_email": admin_user.email
                     }
                 )
+
+                # Save invoice_details and plan configuration on Company
+                invoice_details = raw_data.get("invoice_details") or request.data.get("invoice_details") or {}
+                comp_plan_cfg = company.plan_config or {}
+                comp_plan_cfg["branches"] = branches_data
+                comp_plan_cfg["duration_months"] = duration_months
+                if is_invoice_request and invoice_details:
+                    comp_plan_cfg["invoice_details"] = invoice_details
+                company.plan_config = comp_plan_cfg
+                company.save(update_fields=["plan_config"])
+
+                # Update InterestedCandidate status and invoice details
+                from companies.models import InterestedCandidate
+                candidate_status = "invoice_requested" if is_invoice_request else "plan_purchased"
+                candidate_notes = f"Requested Proforma Invoice for INR {total_amount:.2f} ({duration_months} mo). Awaiting Superadmin clearance." if is_invoice_request else f"Plan purchased (INR {total_amount:.2f})"
+                if is_invoice_request and invoice_details:
+                    b_name = invoice_details.get("billing_name") or company.name
+                    gst_val = invoice_details.get("gst_number")
+                    c_pers = invoice_details.get("contact_person")
+                    c_ph = invoice_details.get("contact_phone")
+                    candidate_notes += f" | Billed To: {b_name}"
+                    if gst_val:
+                        candidate_notes += f" | GST: {gst_val}"
+                    if c_pers:
+                        candidate_notes += f" | Contact: {c_pers} ({c_ph})"
+                    if invoice_details.get("further_instructions"):
+                        candidate_notes += f" | Notes: {invoice_details.get('further_instructions')}"
+
+                cand = InterestedCandidate.objects.filter(email=data["contact_email"]).first()
+                if cand:
+                    cand_plan_cfg = cand.plan_config or {}
+                    cand_plan_cfg["branches"] = branches_data
+                    cand_plan_cfg["duration_months"] = duration_months
+                    if is_invoice_request and invoice_details:
+                        cand_plan_cfg["invoice_details"] = invoice_details
+                    cand.plan_config = cand_plan_cfg
+                    cand.status = candidate_status
+                    cand.company = company
+                    cand.user = admin_user
+                    cand.notes = candidate_notes
+                    cand.save()
                 
             response_data = {
-                "message": "Company registered successfully.",
+                "message": "Invoice inquiry registered successfully. Superadmin review is pending." if is_invoice_request else "Company registered successfully.",
                 "companyId": company.id,
                 "branchId": branch.id,
+                "payment_mode": "invoice_request" if is_invoice_request else "online",
+                "onboarding_status": onboarding_status,
                 "company": {
                     "id": company.id,
                     "name": company.name,
                     "status": company.status,
+                    "onboarding_status": onboarding_status,
                     "package": company.package.name,
                     "admin_email": admin_user.email
                 }
@@ -514,6 +613,11 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     package_name = serializers.CharField(source="package.name", read_only=True)
     subscription_status = serializers.SerializerMethodField()
     branch_count = serializers.SerializerMethodField()
+    admin_name = serializers.SerializerMethodField()
+    admin_email = serializers.SerializerMethodField()
+    admin_phone = serializers.SerializerMethodField()
+    plan_purchase = serializers.SerializerMethodField()
+    branches_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
@@ -526,6 +630,49 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     def get_branch_count(self, obj):
         return obj.branches.count()
 
+    def get_admin_name(self, obj):
+        u = obj.users.filter(role="company_admin").first()
+        if u:
+            return f"{u.first_name} {u.last_name}".strip()
+        cand = obj.candidate_leads.first()
+        return cand.contact_name if cand else ""
+
+    def get_admin_email(self, obj):
+        u = obj.users.filter(role="company_admin").first()
+        return u.email if u else obj.contact_email
+
+    def get_admin_phone(self, obj):
+        u = obj.users.filter(role="company_admin").first()
+        return u.phone if u else obj.contact_phone
+
+    def get_plan_purchase(self, obj):
+        purchase = obj.plan_purchases.order_by("-created_at").first()
+        if not purchase:
+            return None
+        return {
+            "id": purchase.id,
+            "type": purchase.type,
+            "line_items": purchase.line_items,
+            "total_amount": float(purchase.total_amount),
+            "payment_status": purchase.payment_status,
+            "payment_reference": purchase.payment_reference,
+            "created_at": purchase.created_at.isoformat() if purchase.created_at else None,
+        }
+
+    def get_branches_detail(self, obj):
+        res = []
+        for b in obj.branches.all():
+            res.append({
+                "id": b.id,
+                "name": b.name,
+                "mode": b.mode,
+                "channel_type": b.channel_type,
+                "operator_count": b.desks.count(),
+                "service_count": b.services.count(),
+                "city": b.city,
+            })
+        return res
+
 from rest_framework.permissions import IsAuthenticated
 
 class CompanyViewSet(viewsets.ModelViewSet):
@@ -535,6 +682,8 @@ class CompanyViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if self.action == "invoice_pdf":
+            return Company.objects.all()
         if not user or not user.is_authenticated:
             return Company.objects.none()
         if self.action == "list" and user.role != "super_admin":
@@ -542,7 +691,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
                 return Company.objects.filter(id=user.company.id)
             raise PermissionDenied("Only Super Admins can list companies.")
         if user.role == "super_admin":
-            qs = Company.objects.all()
+            qs = Company.objects.all().order_by("-created_at")
             status_filter = self.request.query_params.get("status")
             if status_filter:
                 qs = qs.filter(status=status_filter)
@@ -551,9 +700,45 @@ class CompanyViewSet(viewsets.ModelViewSet):
             return Company.objects.filter(id=user.company.id)
         return Company.objects.none()
 
+    def _approve_company_internal(self, company, actor):
+        company.status = "active"
+        company.onboarding_status = "active"
+        company.save()
+        sub = company.subscriptions.first()
+        if sub:
+            sub.status = "active"
+            sub.save()
+        
+        from billing.models import PlanPurchase
+        PlanPurchase.objects.filter(company=company, payment_status="pending").update(payment_status="paid")
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        User.objects.filter(company=company).update(is_active=True)
+
+        from companies.models import InterestedCandidate
+        InterestedCandidate.objects.filter(company=company).update(status="plan_purchased")
+
+        log_audit(
+            actor=actor,
+            company=company,
+            branch=None,
+            action="company_approved",
+            object_type="Company",
+            object_id=company.id,
+            changes={"status": "active", "onboarding_status": "active"}
+        )
+
     def partial_update(self, request, *args, **kwargs):
         company = self.get_object()
         action = request.data.get("action")
+        new_status = request.data.get("status")
+
+        # Handle quick approve via PATCH status: active by superadmin
+        if not action and new_status == "active" and request.user.role == "super_admin" and company.status == "pending":
+            with transaction.atomic():
+                self._approve_company_internal(company, request.user)
+            return Response(CompanyDetailSerializer(company).data, status=status.HTTP_200_OK)
         
         if not action:
             # Check if user is company_admin of this company or super_admin
@@ -568,24 +753,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
         
         try:
             with transaction.atomic():
-                if action == "approve":
+                if action in ["approve", "approve_invoice"]:
                     if company.status != "pending":
                         return Response({"error": "Only pending companies can be approved."}, status=status.HTTP_400_BAD_REQUEST)
-                    company.status = "active"
-                    company.save()
-                    sub = company.subscriptions.first()
-                    if sub:
-                        sub.status = "active"
-                        sub.save()
-                    log_audit(
-                        actor=request.user,
-                        company=company,
-                        branch=None,
-                        action="company_approved",
-                        object_type="Company",
-                        object_id=company.id,
-                        changes={"old_status": old_status, "new_status": "active"}
-                    )
+                    self._approve_company_internal(company, request.user)
                     
                 elif action == "suspend":
                     if company.status != "active":
@@ -642,6 +813,107 @@ class CompanyViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=["post"], url_path="approve-invoice")
+    def approve_invoice(self, request, pk=None):
+        company = self.get_object()
+        if request.user.role != "super_admin":
+            return Response({"detail": "Only Super Admins can approve invoices."}, status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            self._approve_company_internal(company, request.user)
+        return Response(CompanyDetailSerializer(company).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="invoice-pdf", permission_classes=[AllowAny])
+    def invoice_pdf(self, request, pk=None):
+        company = self.get_object()
+        from io import BytesIO
+        from django.http import HttpResponse
+        buffer = BytesIO()
+        self._render_company_invoice_pdf(buffer, company)
+        buffer.seek(0)
+        response = HttpResponse(buffer, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="Invoice_{company.slug or company.id}.pdf"'
+        return response
+
+    @staticmethod
+    def _render_company_invoice_pdf(buffer, company):
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        story = []
+        styles = getSampleStyleSheet()
+
+        title_style = ParagraphStyle(
+            'TitleStyle',
+            parent=styles['Heading1'],
+            fontSize=22,
+            textColor=colors.HexColor('#4f46e5'),
+            spaceAfter=6
+        )
+        subtitle_style = ParagraphStyle(
+            'SubtitleStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#64748b'),
+            spaceAfter=15
+        )
+
+        story.append(Paragraph("QUESOLE PROFORMA INVOICE", title_style))
+        story.append(Paragraph(f"Smart Queue Intelligence | Reference: INV-{company.id}", subtitle_style))
+        story.append(Spacer(1, 10))
+
+        admin_u = company.users.filter(role="company_admin").first()
+        admin_name = f"{admin_u.first_name} {admin_u.last_name}".strip() if admin_u else "Administrator"
+        admin_email = admin_u.email if admin_u else company.contact_email
+        admin_phone = admin_u.phone if admin_u else company.contact_phone
+
+        details_data = [
+            [Paragraph("<b>Company Name:</b>", styles['Normal']), Paragraph(company.name, styles['Normal'])],
+            [Paragraph("<b>Admin Contact:</b>", styles['Normal']), Paragraph(f"{admin_name} ({admin_email}, {admin_phone})", styles['Normal'])],
+            [Paragraph("<b>Location:</b>", styles['Normal']), Paragraph(f"{company.city or ''}, {company.country or 'India'}", styles['Normal'])],
+            [Paragraph("<b>Status:</b>", styles['Normal']), Paragraph(company.onboarding_status.replace('_', ' ').upper(), styles['Normal'])],
+        ]
+        t_details = Table(details_data, colWidths=[130, 390])
+        t_details.setStyle(TableStyle([
+            ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#1e293b')),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ]))
+        story.append(t_details)
+        story.append(Spacer(1, 15))
+
+        purchase = company.plan_purchases.order_by("-created_at").first()
+        items_data = [
+            [Paragraph("<b>Component Description</b>", styles['Normal']), Paragraph("<b>Qty</b>", styles['Normal']), Paragraph("<b>Subtotal (INR)</b>", styles['Normal'])],
+        ]
+        if purchase and purchase.line_items:
+            for itm in purchase.line_items:
+                desc = itm.get("component_label") or itm.get("component_key") or "Item"
+                qty = str(itm.get("quantity", 1))
+                sub = f"INR {float(itm.get('subtotal', 0)):.2f}"
+                items_data.append([Paragraph(desc, styles['Normal']), Paragraph(qty, styles['Normal']), Paragraph(sub, styles['Normal'])])
+        else:
+            items_data.append([Paragraph("Enterprise Queue Management Plan", styles['Normal']), Paragraph("1", styles['Normal']), Paragraph(f"INR {purchase.total_amount if purchase else 0}", styles['Normal'])])
+
+        total_val = float(purchase.total_amount) if purchase else 0.0
+        items_data.append([Paragraph("<b>Grand Total</b>", styles['Normal']), Paragraph("", styles['Normal']), Paragraph(f"<b>INR {total_val:.2f}</b>", styles['Normal'])])
+
+        t_items = Table(items_data, colWidths=[300, 80, 140])
+        t_items.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4f46e5')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('GRID', (0,0), (-1,-2), 0.5, colors.HexColor('#cbd5e1')),
+            ('LINEABOVE', (0,-1), (-1,-1), 1, colors.HexColor('#1e293b')),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(t_items)
+
+        doc.build(story)
 
 
 class CheckSlugView(APIView):
@@ -770,4 +1042,548 @@ class BranchBySlugView(APIView):
             "enabled_methods": enabled_methods,
             "enabledMethods": enabled_methods
         }, status=status.HTTP_200_OK)
+
+
+from rest_framework_simplejwt.tokens import RefreshToken
+from companies.models import InterestedCandidate
+from companies.serializers import InterestedCandidateSerializer
+
+class RegisterStep1View(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        email = request.query_params.get("email", "").strip().lower()
+        if not email:
+            return Response({"available": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+        existing = User.objects.filter(email=email).first()
+        if existing and existing.company and existing.company.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
+            return Response({"available": False, "message": "This email is already registered. Please sign in."})
+        return Response({"available": True})
+
+    def post(self, request):
+        data = request.data
+        email = data.get("email", "").strip().lower()
+        password = data.get("password", "")
+        company_name = data.get("company_name", "").strip()
+        contact_name = data.get("contact_name", "").strip()
+        industry = data.get("industry", "Healthcare").strip()
+        custom_industry = data.get("custom_industry", "").strip() or None
+        country = data.get("country", "India").strip()
+        state = data.get("state", "").strip()
+        city = data.get("city", "").strip()
+        address = data.get("address", "").strip()
+        phone = data.get("phone", "").strip()
+        country_code = data.get("country_code", "+91").strip()
+        website = data.get("website", "").strip() or None
+
+        if not email or not password or not company_name:
+            return Response(
+                {"error": "Company name, administrator email, and password are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if len(password) < 6:
+            return Response(
+                {"error": "Password must be at least 6 characters.", "field": "password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not any(char.isalpha() for char in password):
+            return Response(
+                {"error": "Password must contain at least one letter.", "field": "password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not any(char.isdigit() for char in password):
+            return Response(
+                {"error": "Password must contain at least one number.", "field": "password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        existing_user = User.objects.filter(email=email).first()
+        if existing_user and existing_user.company and existing_user.company.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
+            return Response(
+                {"error": "A company account is already registered with this login email. Please sign in.", "field": "email"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        name_parts = contact_name.split(" ", 1)
+        first_name = name_parts[0] if name_parts else "Admin"
+        last_name = name_parts[1] if len(name_parts) > 1 else "User"
+
+        effective_industry = custom_industry if (industry == "Other" and custom_industry) else industry
+
+        with transaction.atomic():
+            # 1. Company
+            company = Company.objects.filter(contact_email=email).first()
+            if not company:
+                company = Company.objects.create(
+                    name=company_name,
+                    industry=effective_industry,
+                    custom_industry=custom_industry,
+                    contact_email=email,
+                    contact_phone=f"{country_code} {phone}".strip(),
+                    address=address,
+                    city=city,
+                    state=state,
+                    country=country,
+                    website=website,
+                    status="pending",
+                    onboarding_status="pending_payment",
+                )
+            else:
+                company.name = company_name
+                company.industry = effective_industry
+                company.custom_industry = custom_industry
+                company.contact_phone = f"{country_code} {phone}".strip()
+                company.address = address
+                company.city = city
+                company.state = state
+                company.country = country
+                company.website = website
+                company.save()
+
+            # 2. User
+            user = User.objects.filter(email=email).first()
+            if not user:
+                user = User.objects.create_user(
+                    email=email,
+                    password=password,
+                    first_name=first_name,
+                    last_name=last_name,
+                    role="company_admin",
+                    company=company,
+                    phone=f"{country_code} {phone}".strip()
+                )
+            else:
+                user.first_name = first_name
+                user.last_name = last_name
+                user.company = company
+                user.role = "company_admin"
+                user.set_password(password)
+                user.save()
+
+            # 3. InterestedCandidate record
+            candidate, _ = InterestedCandidate.objects.update_or_create(
+                email=email,
+                defaults={
+                    "company_name": company_name,
+                    "industry": effective_industry,
+                    "custom_industry": custom_industry,
+                    "country": country,
+                    "state": state,
+                    "city": city,
+                    "address": address,
+                    "contact_name": contact_name,
+                    "phone": phone,
+                    "country_code": country_code,
+                    "website": website,
+                    "status": "interested" if company.onboarding_status == "pending_payment" else "plan_purchased",
+                    "user": user,
+                    "company": company,
+                }
+            )
+
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+            refresh['email'] = user.email
+            refresh['role'] = user.role
+            refresh['company_id'] = user.company.id
+            refresh['branch_id'] = user.branch.id if user.branch else None
+
+            return Response({
+                "message": "Step 1 profile saved successfully.",
+                "candidate_id": candidate.id,
+                "company_id": company.id,
+                "company_slug": company.slug,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": {
+                    "email": user.email,
+                    "name": f"{user.first_name} {user.last_name}".strip(),
+                    "role": user.role,
+                    "companyId": str(company.id),
+                    "branchId": "",
+                    "deskId": "",
+                    "hasPurchasedPlan": False,
+                    "onboardingStatus": company.onboarding_status,
+                }
+            }, status=status.HTTP_201_CREATED)
+
+
+class InterestedCandidateViewSet(viewsets.ModelViewSet):
+    queryset = InterestedCandidate.objects.all().order_by("-created_at")
+    serializer_class = InterestedCandidateSerializer
+    permission_classes = [IsSuperAdmin]
+
+    def get_queryset(self):
+        qs = InterestedCandidate.objects.all().order_by("-created_at")
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        q = self.request.query_params.get("search")
+        if q:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(company_name__icontains=q) |
+                Q(contact_name__icontains=q) |
+                Q(email__icontains=q) |
+                Q(industry__icontains=q) |
+                Q(city__icontains=q)
+            )
+        return qs
+
+
+def _resolve_company_from_request(request):
+    """Helper to locate company from auth token or query/body parameters"""
+    if request.user and request.user.is_authenticated and getattr(request.user, "company", None):
+        return request.user.company
+
+    company_id = request.data.get("company_id") or request.query_params.get("company_id")
+    if company_id:
+        try:
+            return Company.objects.filter(id=company_id).first()
+        except Exception:
+            pass
+
+    company_slug = request.data.get("company_slug") or request.query_params.get("company_slug")
+    if company_slug:
+        comp = Company.objects.filter(slug=company_slug).first()
+        if comp:
+            return comp
+
+    email = request.data.get("email") or request.query_params.get("email")
+    if email:
+        candidate = InterestedCandidate.objects.filter(email=email).first()
+        if candidate and candidate.company:
+            return candidate.company
+        comp = Company.objects.filter(contact_email=email).first()
+        if comp:
+            return comp
+
+    return None
+
+
+class CompanyPlanConfigView(APIView):
+    """
+    Dynamic autosave and retrieval of Build Your Plan configuration.
+    Stores complete multi-branch, onsite, online, and addon state in the DB.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+
+    def get(self, request):
+        company = _resolve_company_from_request(request)
+        if not company:
+            # Check candidate by email
+            email = request.query_params.get("email")
+            if email:
+                candidate = InterestedCandidate.objects.filter(email=email).first()
+                if candidate and candidate.plan_config:
+                    return Response({
+                        "plan_config": candidate.plan_config,
+                        "company_id": candidate.company_id if candidate.company else None,
+                        "company_name": candidate.company_name
+                    })
+            return Response({"plan_config": {}}, status=status.HTTP_200_OK)
+
+        config = company.plan_config or {}
+
+        # Also populate booking config if present
+        try:
+            if hasattr(company, "booking_config") and company.booking_config:
+                bc = company.booking_config
+                config.setdefault("branding", {
+                    "portal_name": bc.portal_name,
+                    "logo_url": bc.logo_url,
+                    "primary_color": bc.primary_color,
+                    "display_address": bc.display_address,
+                    "enabled_customer_fields": bc.enabled_customer_fields,
+                    "enabled_booking_fields": bc.enabled_booking_fields,
+                    "enabled_notification_channels": bc.enabled_notification_channels,
+                })
+        except Exception:
+            pass
+
+        return Response({
+            "plan_config": config,
+            "company_id": company.id,
+            "company_name": company.name,
+            "company_slug": company.slug,
+            "address": company.address,
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        company = _resolve_company_from_request(request)
+        plan_data = request.data.get("plan_config") or request.data
+
+        if not company:
+            # Try saving on candidate record if company not yet associated
+            email = request.data.get("email") or plan_data.get("email")
+            if email:
+                candidate, _ = InterestedCandidate.objects.get_or_create(
+                    email=email,
+                    defaults={
+                        "company_name": plan_data.get("company_name", "Draft Company"),
+                        "contact_name": "Admin",
+                        "phone": "9999999999",
+                        "industry": "Healthcare",
+                        "plan_config": plan_data
+                    }
+                )
+                candidate.plan_config = plan_data
+                candidate.save(update_fields=["plan_config"])
+                return Response({
+                    "status": "success",
+                    "message": "Plan configuration saved to candidate profile.",
+                    "plan_config": candidate.plan_config
+                }, status=status.HTTP_200_OK)
+            return Response(
+                {"status": "success", "message": "Draft plan config received."},
+                status=status.HTTP_200_OK
+            )
+
+        with transaction.atomic():
+            company.plan_config = plan_data
+            if "solution" in plan_data:
+                company.solution = plan_data["solution"]
+            company.save(update_fields=["plan_config", "solution"] if "solution" in plan_data else ["plan_config"])
+
+            # Also update candidate if exists
+            InterestedCandidate.objects.filter(company=company).update(plan_config=plan_data)
+
+            # Sync booking config if provided
+            branding = plan_data.get("branding") or plan_data.get("portal_config") or {}
+            if branding:
+                from appointments.models import BookingPageConfig
+                bc, _ = BookingPageConfig.objects.get_or_create(company=company)
+                if branding.get("portal_name") or branding.get("portalName"):
+                    bc.portal_name = branding.get("portal_name") or branding.get("portalName")
+                if branding.get("logo_url") or branding.get("logoUrl"):
+                    bc.logo_url = branding.get("logo_url") or branding.get("logoUrl")
+                if branding.get("primary_color") or branding.get("primaryColor"):
+                    bc.primary_color = branding.get("primary_color") or branding.get("primaryColor")
+                if branding.get("display_address") or branding.get("displayAddress"):
+                    bc.display_address = branding.get("display_address") or branding.get("displayAddress")
+                if branding.get("enabled_customer_fields") or branding.get("enabledCustomerFields"):
+                    bc.enabled_customer_fields = branding.get("enabled_customer_fields") or branding.get("enabledCustomerFields")
+                if branding.get("enabled_booking_fields") or branding.get("enabledBookingFields"):
+                    bc.enabled_booking_fields = branding.get("enabled_booking_fields") or branding.get("enabledBookingFields")
+                if branding.get("enabled_notification_channels") or branding.get("enabledNotificationChannels"):
+                    bc.enabled_notification_channels = branding.get("enabled_notification_channels") or branding.get("enabledNotificationChannels")
+                bc.save()
+
+        return Response({
+            "status": "success",
+            "message": "Plan configuration saved successfully.",
+            "plan_config": company.plan_config
+        }, status=status.HTTP_200_OK)
+
+
+class CompanyLogoUploadView(APIView):
+    """
+    Dedicated logo uploader endpoint. Validates image type and size (<= 2MB),
+    saves to default storage, and returns static/media URL.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+
+    def post(self, request):
+        logo_file = request.FILES.get("logo")
+        if not logo_file:
+            return Response({"error": "No logo file provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # File size validation (<= 2MB)
+        if logo_file.size > 2 * 1024 * 1024:
+            return Response({"error": "File size exceeds 2MB limit."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extension validation
+        allowed_extensions = ["png", "jpg", "jpeg", "svg", "webp"]
+        ext = logo_file.name.split(".")[-1].lower() if "." in logo_file.name else ""
+        if ext not in allowed_extensions:
+            return Response({
+                "error": f"Invalid image format (.{ext}). Supported formats: PNG, JPG, JPEG, SVG, WEBP."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            import uuid
+            safe_name = f"logo_{uuid.uuid4().hex[:12]}.{ext}"
+            saved_path = default_storage.save(f"logos/{safe_name}", logo_file)
+            logo_url = f"/media/{saved_path}"
+
+            # Optionally link to company/booking config if company resolved
+            company = _resolve_company_from_request(request)
+            if company:
+                company.logo_url = logo_url
+                company.save(update_fields=["logo_url"])
+                try:
+                    from appointments.models import BookingPageConfig
+                    bc, _ = BookingPageConfig.objects.get_or_create(company=company)
+                    bc.logo_url = logo_url
+                    bc.save(update_fields=["logo_url"])
+                except Exception:
+                    pass
+
+            return Response({
+                "status": "success",
+                "logo_url": logo_url,
+                "message": "Logo uploaded successfully."
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({"error": f"Failed to upload logo: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CompanyBranchAddView(APIView):
+    """
+    Instantly adds a new branch with sensible defaults in DB and returns it.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+
+    def post(self, request):
+        company = _resolve_company_from_request(request)
+        branch_name = request.data.get("name")
+        current_branches = (company.plan_config.get("branches") if company else None) or []
+        count = len(current_branches) + 1
+        name = branch_name or f"Branch {count}"
+
+        new_branch = {
+            "name": name,
+            "address": request.data.get("address") or (company.address if company else "") or f"Location {count}",
+            "mode": "NON_SERVICE_BASED",
+            "channel_type": "ONSITE_ONLY",
+            "serviceQty": 1,
+            "operatorQty": 1,
+            "kioskQty": 0,
+            "kotQty": 0,
+            "tokenDeliverySelections": ["SCREEN_ONLY"],
+            "activeMethods": ["1"],
+            "serviceAssignments": {},
+            "addons": {
+                "operator_screens": 0,
+                "paper_roll_screens": 0,
+                "services": 0,
+                "printed_qr": 0
+            },
+            "branding": {
+                "portal_name": name,
+                "primary_color": "#7C3AED",
+                "display_address": request.data.get("address") or "",
+                "enabled_customer_fields": ["name", "email", "phone"],
+                "enabled_booking_fields": ["date_slot", "message"]
+            }
+        }
+
+        if company:
+            current_branches.append(new_branch)
+            plan_cfg = company.plan_config or {}
+            plan_cfg["branches"] = current_branches
+            plan_cfg["branchesCount"] = len(current_branches)
+            company.plan_config = plan_cfg
+            company.save(update_fields=["plan_config"])
+            InterestedCandidate.objects.filter(company=company).update(plan_config=plan_cfg)
+
+        return Response({
+            "status": "success",
+            "branch": new_branch,
+            "branches_count": len(current_branches),
+            "branches": current_branches,
+            "message": f"{name} added successfully."
+        }, status=status.HTTP_201_CREATED)
+
+
+class CompanyBranchDeleteView(APIView):
+    """
+    Deletes branch, strictly guarding against removing the last branch.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+
+    def delete(self, request, branch_idx=None):
+        return self._handle_delete(request, branch_idx)
+
+    def post(self, request, branch_idx=None):
+        return self._handle_delete(request, branch_idx)
+
+    def _handle_delete(self, request, branch_idx):
+        idx = branch_idx
+        if idx is None:
+            idx = request.data.get("index")
+
+        try:
+            idx = int(idx)
+        except (TypeError, ValueError):
+            return Response({"error": "Valid branch index is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        company = _resolve_company_from_request(request)
+        branches = (company.plan_config.get("branches") if company else None) or []
+
+        if len(branches) <= 1:
+            return Response(
+                {"error": "Cannot delete the last remaining headquarters branch. At least 1 branch is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if idx < 0 or idx >= len(branches):
+            return Response({"error": "Branch index out of range."}, status=status.HTTP_400_BAD_REQUEST)
+
+        removed = branches.pop(idx)
+        if company:
+            plan_cfg = company.plan_config or {}
+            plan_cfg["branches"] = branches
+            plan_cfg["branchesCount"] = len(branches)
+            company.plan_config = plan_cfg
+            company.save(update_fields=["plan_config"])
+            InterestedCandidate.objects.filter(company=company).update(plan_config=plan_cfg)
+
+        return Response({
+            "status": "success",
+            "message": f"{removed.get('name', 'Branch')} removed successfully.",
+            "branches": branches,
+            "branches_count": len(branches)
+        }, status=status.HTTP_200_OK)
+
+
+class CompanyApplyToAllView(APIView):
+    """
+    Copies source branch settings (onsite/online modes, steppers, addons) to all branches.
+    Preserves branch names and individual addresses.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+
+    def post(self, request):
+        company = _resolve_company_from_request(request)
+        source_idx = int(request.data.get("source_index", 0))
+        branches = request.data.get("branches") or (company.plan_config.get("branches") if company else [])
+
+        if not branches or len(branches) <= 1:
+            return Response({"message": "No additional branches to synchronize.", "branches": branches})
+
+        source = branches[source_idx] if 0 <= source_idx < len(branches) else branches[0]
+
+        updated_branches = []
+        for i, b in enumerate(branches):
+            if i == source_idx:
+                updated_branches.append(b)
+                continue
+            copied = {
+                **source,
+                "name": b.get("name", f"Branch {i + 1}"),
+                "address": b.get("address", source.get("address", ""))
+            }
+            updated_branches.append(copied)
+
+        if company:
+            plan_cfg = company.plan_config or {}
+            plan_cfg["branches"] = updated_branches
+            company.plan_config = plan_cfg
+            company.save(update_fields=["plan_config"])
+            InterestedCandidate.objects.filter(company=company).update(plan_config=plan_cfg)
+
+        return Response({
+            "status": "success",
+            "message": "Settings copied to all branch locations.",
+            "branches": updated_branches
+        }, status=status.HTTP_200_OK)
+
+
 

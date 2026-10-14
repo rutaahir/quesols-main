@@ -177,79 +177,122 @@ def assign_predicted_desk_for_ticket(ticket):
 
         best_desk = None
         min_load = float("inf")
+        min_services_count = float("inf")
+        cutoff = timezone.now() - timezone.timedelta(hours=24)
 
         for d in desks:
             load = Ticket.objects.filter(
                 predicted_desk=d,
-                status="waiting"
+                status="waiting",
+                created_at__gte=cutoff
             ).count()
 
-            if load < min_load:
+            # Count assigned services to prioritize specialized counters over multi-service counters
+            services_count = d.desk_services.count()
+
+            # Prefer lower queue load; if load is equal, prefer more specialized desk (fewer assigned services)
+            if load < min_load or (load == min_load and services_count < min_services_count):
                 min_load = load
+                min_services_count = services_count
                 best_desk = d
 
         if best_desk:
             ticket.predicted_desk = best_desk
 
 
+def rebalance_branch_queue(branch):
+    """
+    Intelligently re-balances all active waiting tickets across eligible desks in the branch.
+    Ensures specialized and idle desks receive tickets first, preventing bottlenecking at multi-service desks.
+    """
+    from queuing.models import Ticket, Desk, DeskService
+    from queuing.views import broadcast_queue_update
+
+    cutoff = timezone.now() - timezone.timedelta(hours=24)
+    with transaction.atomic():
+        waiting_tickets = list(
+            Ticket.objects.filter(
+                branch=branch,
+                status="waiting",
+                created_at__gte=cutoff
+            ).select_for_update().order_by("created_at")
+        )
+
+        if not waiting_tickets:
+            return
+
+        # Track simulated load during redistribution
+        active_desks = list(Desk.objects.filter(branch=branch, is_active=True).order_by("id"))
+        desk_load = {d.id: 0 for d in active_desks}
+        desk_services_map = {
+            d.id: set(DeskService.objects.filter(desk=d).values_list("service_id", flat=True))
+            for d in active_desks
+        }
+
+        # 1. First pass: Assign tickets whose service can only be served by a single desk
+        unassigned_tickets = []
+        for t in waiting_tickets:
+            if not t.service_id:
+                unassigned_tickets.append(t)
+                continue
+            eligible = [d for d in active_desks if t.service_id in desk_services_map.get(d.id, set())]
+            if len(eligible) == 1:
+                target_desk = eligible[0]
+                if t.predicted_desk_id != target_desk.id:
+                    t.predicted_desk = target_desk
+                    t.save(update_fields=["predicted_desk"])
+                    try:
+                        broadcast_queue_update(branch.id, t)
+                    except Exception:
+                        pass
+                desk_load[target_desk.id] += 1
+            else:
+                unassigned_tickets.append(t)
+
+        # 2. Second pass: Assign tickets with multiple eligible desks, prioritizing lowest load & specialist counters
+        for t in unassigned_tickets:
+            if not t.service_id:
+                eligible = active_desks
+            else:
+                eligible = [d for d in active_desks if t.service_id in desk_services_map.get(d.id, set())]
+
+            if not eligible:
+                continue
+
+            # Sort candidate desks by: (current simulated load ASC, service count ASC [specialist first], desk id ASC)
+            best_desk = min(
+                eligible,
+                key=lambda d: (
+                    desk_load.get(d.id, 0),
+                    len(desk_services_map.get(d.id, set())),
+                    d.id
+                )
+            )
+
+            if t.predicted_desk_id != best_desk.id:
+                t.predicted_desk = best_desk
+                t.save(update_fields=["predicted_desk"])
+                try:
+                    broadcast_queue_update(branch.id, t)
+                except Exception:
+                    pass
+
+            desk_load[best_desk.id] += 1
+
+
 def redistribute_tickets_for_deactivated_desk(desk):
     """
     Redistributes all waiting tickets predicted to a deactivated desk.
     """
-    from queuing.models import Ticket
-    from queuing.views import broadcast_queue_update
-    with transaction.atomic():
-        waiting_tickets = list(Ticket.objects.filter(
-            predicted_desk=desk,
-            status="waiting"
-        ).select_for_update().order_by("created_at"))
-        
-        for t in waiting_tickets:
-            t.predicted_desk = None
-            assign_predicted_desk_for_ticket(t)
-            t.save(update_fields=["predicted_desk"])
-            try:
-                broadcast_queue_update(t.branch.id, t)
-            except Exception as e:
-                pass
+    if desk and desk.branch:
+        rebalance_branch_queue(desk.branch)
 
 
 def reevaluate_predictions_for_desk(desk):
     """
-    Re-evaluates waiting tickets predicted to a desk. If a ticket's service is
-    no longer supported by the desk, it is redistributed.
+    Re-evaluates waiting tickets predicted to a desk or when desk services change.
     """
-    if is_no_service_mode(desk.company):
-        return
-
-    from queuing.models import Ticket, DeskService
-    from queuing.views import broadcast_queue_update
-    with transaction.atomic():
-        # Get active services supported by this desk
-        supported_service_ids = list(
-            DeskService.objects.filter(desk=desk).values_list("service_id", flat=True)
-        )
-        
-        # If the desk has no services configured, it is no longer eligible.
-        # Find all waiting tickets currently predicted to it and redistribute them.
-        if not supported_service_ids:
-            unsupported_tickets = list(Ticket.objects.filter(
-                predicted_desk=desk,
-                status="waiting"
-            ).select_for_update().order_by("created_at"))
-        else:
-            unsupported_tickets = list(Ticket.objects.filter(
-                predicted_desk=desk,
-                status="waiting"
-            ).exclude(service_id__in=supported_service_ids).select_for_update().order_by("created_at"))
-            
-        for t in unsupported_tickets:
-            t.predicted_desk = None
-            assign_predicted_desk_for_ticket(t)
-            t.save(update_fields=["predicted_desk"])
-            try:
-                broadcast_queue_update(t.branch.id, t)
-            except Exception as e:
-                pass
+    if desk and desk.branch:
+        rebalance_branch_queue(desk.branch)
 
 

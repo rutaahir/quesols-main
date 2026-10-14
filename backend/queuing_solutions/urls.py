@@ -7,7 +7,20 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 from core.views import healthz, ContactSubmissionView, DemoRequestView, PartnershipRequestView
 from accounts.views import CustomTokenObtainPairView, LogoutView, UserInviteViewSet, InviteAcceptView, UserViewSet
-from companies.views import CompanyRegistrationView, CompanyViewSet, CheckSlugView, CompanyBySlugView, BranchBySlugView
+from companies.views import (
+    CompanyRegistrationView,
+    CompanyViewSet,
+    CheckSlugView,
+    CompanyBySlugView,
+    BranchBySlugView,
+    RegisterStep1View,
+    InterestedCandidateViewSet,
+    CompanyPlanConfigView,
+    CompanyLogoUploadView,
+    CompanyBranchAddView,
+    CompanyBranchDeleteView,
+    CompanyApplyToAllView,
+)
 from branches.views import BranchViewSet
 from billing.views import PackageViewSet, UpgradeRequestViewSet
 from audit.views import AuditLogViewSet
@@ -36,6 +49,7 @@ from queuing.views import (
 router = DefaultRouter()
 router.register("packages", PackageViewSet, basename="packages")
 router.register("companies", CompanyViewSet, basename="companies")
+router.register("interested-candidates", InterestedCandidateViewSet, basename="interested-candidates")
 router.register("branches", BranchViewSet, basename="branches")
 router.register("invites", UserInviteViewSet, basename="invites")
 router.register("users", UserViewSet, basename="users")
@@ -78,6 +92,13 @@ urlpatterns = [
     
     # Onboarding & Invites
     path("api/companies/register/", CompanyRegistrationView.as_view(), name="company_register"),
+    path("api/companies/register-step1/", RegisterStep1View.as_view(), name="company_register_step1"),
+    path("api/companies/plan-config/", CompanyPlanConfigView.as_view(), name="company_plan_config"),
+    path("api/companies/upload-logo/", CompanyLogoUploadView.as_view(), name="company_upload_logo"),
+    path("api/companies/branches/add/", CompanyBranchAddView.as_view(), name="company_branch_add"),
+    path("api/companies/branches/delete/", CompanyBranchDeleteView.as_view(), name="company_branch_delete"),
+    path("api/companies/branches/<int:branch_idx>/delete/", CompanyBranchDeleteView.as_view(), name="company_branch_delete_idx"),
+    path("api/companies/branches/apply-to-all/", CompanyApplyToAllView.as_view(), name="company_apply_to_all"),
     path("api/companies/check-slug/", CheckSlugView.as_view(), name="company_check_slug"),
     path("api/companies/by-slug/<str:company_slug>/", CompanyBySlugView.as_view(), name="company_by_slug"),
     path("api/companies/<str:company_slug>/branches/by-slug/<str:branch_slug>/", BranchBySlugView.as_view(), name="branch_by_slug"),

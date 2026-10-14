@@ -177,7 +177,7 @@ export function FloatingContact() {
                   <div>
                     <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-wider leading-none">Visit Us</span>
                     <span className="text-[11px] font-semibold text-white block mt-0.5 leading-tight">
-                      Mithakhali Six Roads, Ahmedabad
+                      Titanium Business Park, Makarba, Ahmedabad
                     </span>
                   </div>
                 </motion.div>

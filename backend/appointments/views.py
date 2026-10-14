@@ -2,7 +2,8 @@ import secrets
 from datetime import datetime, timedelta, date
 from django.db import transaction
 from django.utils import timezone
-from django.core.mail import send_mail
+from django.core.mail import send_mail, EmailMultiAlternatives
+import threading
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework import status, viewsets
 from rest_framework.views import APIView
@@ -425,7 +426,7 @@ class AppointmentBookingView(APIView):
                 send_mail(
                     "Appointment Confirmed - Quesole",
                     email_body,
-                    "noreply@quesole.com",
+                    getattr(settings, "DEFAULT_FROM_EMAIL", settings.EMAIL_HOST_USER),
                     [email],
                     fail_silently=True,
                 )
@@ -700,61 +701,264 @@ class OnlineBookingViewSet(viewsets.ModelViewSet):
         booking = serializer.save()
         new_status = booking.status
 
-        # Automated email notification dispatch
-        customer_email = booking.customer_email
-        is_real_email = customer_email and not customer_email.startswith("bookings+anon_") and not customer_email.endswith("@quesole.com")
-        
-        if is_real_email and old_status != new_status:
-            company_name = booking.branch.company.name if (booking.branch and booking.branch.company) else "Quesole"
-            branch_name = booking.branch.name if booking.branch else "Branch Office"
+        # Automated email notification dispatch when status changes (or marked completed)
+        if (old_status != new_status) or (new_status == "completed" and "status" in self.request.data):
+            frontend_origin = self.request.META.get("HTTP_ORIGIN")
+            if not frontend_origin:
+                referer = self.request.META.get("HTTP_REFERER")
+                if referer:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(referer)
+                    frontend_origin = f"{parsed.scheme}://{parsed.netloc}"
+            dispatch_booking_status_email_async(booking.id, new_status, frontend_origin=frontend_origin)
 
-            if new_status == "checked_in":
-                email_body = (
-                    f"Hi {booking.customer_name},\n\n"
-                    f"You have been checked in for your appointment at {branch_name}.\n"
-                    f"Reference Code: {booking.booking_reference}\n\n"
-                    f"Thank you,\n{company_name}"
+
+def dispatch_booking_status_email_async(booking_id, new_status, frontend_origin=None):
+    """
+    Spawns a background worker thread to send a branded status notification email
+    to the customer upon appointment status updates (completed, checked_in, cancelled, no_show).
+    """
+    thread = threading.Thread(
+        target=_send_booking_status_email_worker,
+        args=(booking_id, new_status, frontend_origin),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _send_booking_status_email_worker(booking_id, new_status, frontend_origin=None):
+    try:
+        from appointments.models import OnlineBooking
+
+        booking = (
+            OnlineBooking.all_objects.filter(id=booking_id)
+            .select_related("branch", "branch__company", "service", "desk")
+            .first()
+        )
+        if not booking:
+            logger.error(f"[BOOKING EMAIL] Booking #{booking_id} not found.")
+            return
+
+        customer_email = (booking.customer_email or "").strip()
+        if (
+            not customer_email
+            or "@" not in customer_email
+            or customer_email.startswith("bookings+anon_")
+            or customer_email.endswith("@quesole.com")
+        ):
+            logger.info(
+                f"[BOOKING EMAIL] Skipping email for non-standard or placeholder address: '{customer_email}'"
+            )
+            return
+
+        company_name = (
+            booking.branch.company.name
+            if (booking.branch and booking.branch.company)
+            else "Quesole"
+        )
+        branch_name = booking.branch.name if booking.branch else "Branch Office"
+        service_name = booking.service.name if booking.service else "General Service"
+        desk_name = booking.desk.name if booking.desk else None
+        customer_name = booking.customer_name or "Valued Customer"
+
+        formatted_date = (
+            booking.date.strftime("%A, %b %d, %Y")
+            if hasattr(booking.date, "strftime")
+            else str(booking.date)
+        )
+        formatted_time = (
+            booking.slot_time.strftime("%I:%M %p")
+            if hasattr(booking.slot_time, "strftime")
+            else str(booking.slot_time)
+        )
+
+        # Base URL for feedback link
+        base_url = (frontend_origin or "").rstrip("/")
+        if not base_url or ":8000" in base_url:
+            base_url = getattr(settings, "FRONTEND_URL", "http://192.168.1.12:8081")
+        feedback_url = f"{base_url}/feedback/{booking.booking_reference}"
+
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None) or getattr(
+            settings, "EMAIL_HOST_USER", "socialbuzz31@gmail.com"
+        )
+
+        if new_status == "completed":
+            subject = f"✅ Appointment Completed - {booking.booking_reference} ({company_name})"
+            plain_text = (
+                f"Hi {customer_name},\n\n"
+                f"Thank you for visiting {company_name} ({branch_name}) today!\n\n"
+                f"Your appointment status is now: COMPLETED\n"
+                f"Booking Reference: {booking.booking_reference}\n"
+                f"Service: {service_name}\n"
+                f"Branch: {branch_name}\n"
+                f"Date & Time: {formatted_date} at {formatted_time}\n\n"
+                f"We value your feedback! Please rate your experience and share your thoughts here:\n"
+                f"{feedback_url}\n\n"
+                f"Warm regards,\n"
+                f"{company_name}"
+            )
+
+            desk_row = (
+                f'<tr><td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Counter / Desk:</td><td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #0f172a; text-align: right;">{desk_name}</td></tr>'
+                if desk_name
+                else ""
+            )
+
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; margin: 0; padding: 24px; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 20px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05);">
+    <!-- Header -->
+    <tr>
+      <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 32px 24px; text-align: center; color: #ffffff;">
+        <div style="font-size: 24px; font-weight: 900; letter-spacing: -0.5px; text-transform: uppercase; color: #38bdf8; margin-bottom: 12px;">{company_name}</div>
+        <div style="display: inline-block; background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; font-size: 13px; font-weight: 800; padding: 6px 18px; border-radius: 9999px; letter-spacing: 0.5px;">
+          ✓ APPOINTMENT COMPLETED
+        </div>
+      </td>
+    </tr>
+
+    <!-- Content -->
+    <tr>
+      <td style="padding: 32px 28px;">
+        <h2 style="font-size: 20px; font-weight: 800; color: #0f172a; margin-top: 0; margin-bottom: 8px;">Thank you, {customer_name}!</h2>
+        <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin-top: 0; margin-bottom: 24px;">
+          Your appointment with <strong>{company_name}</strong> has been marked as <strong>Completed</strong>. We hope you had a pleasant and seamless experience.
+        </p>
+
+        <!-- Reference Code Box -->
+        <div style="background-color: #f8fafc; border: 1.5px dashed #cbd5e1; border-radius: 14px; padding: 18px; text-align: center; margin-bottom: 24px;">
+          <div style="font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Appointment Reference</div>
+          <div style="font-size: 28px; font-weight: 900; color: #2563eb; font-family: monospace; letter-spacing: 2px; margin-top: 4px;">{booking.booking_reference}</div>
+        </div>
+
+        <!-- Details Table -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 28px; font-size: 13px; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b; width: 40%;">Status:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #059669; text-align: right;">Completed</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Organization:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #0f172a; text-align: right;">{company_name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Branch:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #0f172a; text-align: right;">{branch_name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Service Category:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #0f172a; text-align: right;">{service_name}</td>
+          </tr>
+          {desk_row}
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Date:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #2563eb; text-align: right;">{formatted_date}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #64748b;">Scheduled Time:</td>
+            <td style="padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 800; color: #2563eb; text-align: right;">{formatted_time}</td>
+          </tr>
+        </table>
+
+        <!-- Feedback CTA -->
+        <div style="text-align: center; margin-top: 28px; margin-bottom: 16px;">
+          <a href="{feedback_url}" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff !important; text-decoration: none; padding: 14px 32px; border-radius: 12px; font-weight: 800; font-size: 14px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);">
+            Rate Your Experience &amp; Leave Feedback →
+          </a>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; text-align: center; word-break: break-all; margin-top: 12px;">
+          Feedback URL: <a href="{feedback_url}" style="color: #2563eb;">{feedback_url}</a>
+        </div>
+      </td>
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+      <td style="background-color: #f8fafc; padding: 20px 24px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b;">
+        <p style="margin: 0 0 4px 0; font-weight: 600;">Powered by <strong>Quesoles Queue &amp; Appointment Orchestration</strong></p>
+        <p style="margin: 0;">Sent on behalf of {company_name} · {branch_name}</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_text,
+                from_email=from_email,
+                to=[customer_email],
+            )
+            try:
+                msg.send(fail_silently=False)
+                logger.info(
+                    f"[BOOKING EMAIL SUCCESS] Sent 'completed' status email for booking {booking.booking_reference} to {customer_email}"
                 )
-                send_mail(
-                    f"Checked In - Appointment {booking.booking_reference}",
-                    email_body,
-                    "noreply@quesole.com",
-                    [customer_email],
-                    fail_silently=True,
+            except Exception as mail_err:
+                logger.warning(
+                    f"[BOOKING EMAIL SMTP WARNING] Failed to deliver 'completed' email to {customer_email} via SMTP ({mail_err}). Link: {feedback_url}"
                 )
 
-            elif new_status == "completed":
-                feedback_url = f"http://192.168.1.12:8080/feedback/{booking.booking_reference}"
-                email_body = (
-                    f"Hi {booking.customer_name},\n\n"
-                    f"Thank you for visiting {company_name} ({branch_name}) today!\n\n"
-                    f"Your appointment ({booking.booking_reference}) has been marked as completed.\n\n"
-                    f"We value your feedback! Please rate your experience and share your thoughts here:\n"
-                    f"{feedback_url}\n\n"
-                    f"Warm regards,\n{company_name}"
+        elif new_status == "checked_in":
+            subject = f"Checked In - Appointment {booking.booking_reference} ({company_name})"
+            plain_text = (
+                f"Hi {customer_name},\n\n"
+                f"You have been checked in for your appointment at {branch_name}.\n"
+                f"Reference Code: {booking.booking_reference}\n"
+                f"Service: {service_name}\n\n"
+                f"Thank you,\n{company_name}"
+            )
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_text,
+                from_email=from_email,
+                to=[customer_email],
+            )
+            try:
+                msg.send(fail_silently=False)
+                logger.info(
+                    f"[BOOKING EMAIL SUCCESS] Sent 'checked_in' email for booking {booking.booking_reference} to {customer_email}"
                 )
-                send_mail(
-                    f"Thank you for visiting {company_name}! Please share your feedback",
-                    email_body,
-                    "noreply@quesole.com",
-                    [customer_email],
-                    fail_silently=True,
+            except Exception as mail_err:
+                logger.warning(
+                    f"[BOOKING EMAIL SMTP WARNING] Failed to deliver 'checked_in' email to {customer_email}: {mail_err}"
                 )
 
-            elif new_status in ["cancelled", "no_show"]:
-                email_body = (
-                    f"Hi {booking.customer_name},\n\n"
-                    f"Your appointment ({booking.booking_reference}) at {branch_name} has been updated to: {new_status.replace('_', ' ').title()}.\n\n"
-                    f"If you need to rebook or have questions, please reach out to us.\n\n"
-                    f"Thank you,\n{company_name}"
+        elif new_status in ["cancelled", "no_show"]:
+            status_label = new_status.replace("_", " ").title()
+            subject = f"Appointment Update ({status_label}) - {booking.booking_reference} ({company_name})"
+            plain_text = (
+                f"Hi {customer_name},\n\n"
+                f"Your appointment ({booking.booking_reference}) at {branch_name} has been updated to: {status_label}.\n\n"
+                f"If you need to rebook or have questions, please reach out to us.\n\n"
+                f"Thank you,\n{company_name}"
+            )
+            msg = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_text,
+                from_email=from_email,
+                to=[customer_email],
+            )
+            try:
+                msg.send(fail_silently=False)
+                logger.info(
+                    f"[BOOKING EMAIL SUCCESS] Sent '{new_status}' email for booking {booking.booking_reference} to {customer_email}"
                 )
-                send_mail(
-                    f"Appointment Update - {booking.booking_reference}",
-                    email_body,
-                    "noreply@quesole.com",
-                    [customer_email],
-                    fail_silently=True,
+            except Exception as mail_err:
+                logger.warning(
+                    f"[BOOKING EMAIL SMTP WARNING] Failed to deliver '{new_status}' email to {customer_email}: {mail_err}"
                 )
+
+    except Exception as e:
+        logger.error(
+            f"[BOOKING EMAIL ERROR] Failed to send status email for booking #{booking_id}: {str(e)}",
+            exc_info=True,
+        )
 
 
 class PublicCompanyResolveView(APIView):

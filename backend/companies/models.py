@@ -39,9 +39,13 @@ class Company(BaseModel):
     brand_colors = models.JSONField(default=dict, blank=True)
     address = models.CharField(max_length=500, null=True, blank=True)
     city = models.CharField(max_length=255, null=True, blank=True)
+    state = models.CharField(max_length=100, null=True, blank=True)
+    country = models.CharField(max_length=100, default="India", null=True, blank=True)
+    custom_industry = models.CharField(max_length=255, null=True, blank=True)
     website = models.URLField(max_length=255, null=True, blank=True)
     ONBOARDING_STATUS_CHOICES = [
         ("pending_payment", "Pending Payment"),
+        ("pending_invoice_approval", "Pending Invoice Approval"),
         ("active", "Active"),
         ("suspended", "Suspended"),
     ]
@@ -51,6 +55,7 @@ class Company(BaseModel):
     package = models.ForeignKey("billing.Package", on_delete=models.SET_NULL, null=True, blank=True, related_name="companies")
     slug = models.SlugField(max_length=255, unique=True, null=True, blank=True, validators=[validate_company_slug])
     solution = models.CharField(max_length=50, default="ONSITE_ONLINE")
+    plan_config = models.JSONField(default=dict, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -77,3 +82,38 @@ class Company(BaseModel):
 
     def __str__(self):
         return self.name
+
+
+class InterestedCandidate(BaseModel):
+    STATUS_CHOICES = [
+        ("interested", "Interested (Step 1 Completed)"),
+        ("invoice_requested", "Invoice Requested"),
+        ("plan_purchased", "Plan Purchased"),
+        ("contacted", "Contacted"),
+        ("dropped", "Dropped"),
+    ]
+
+    company_name = models.CharField(max_length=255)
+    industry = models.CharField(max_length=255)
+    custom_industry = models.CharField(max_length=255, null=True, blank=True)
+    country = models.CharField(max_length=100, default="India")
+    state = models.CharField(max_length=100, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    address = models.CharField(max_length=500, blank=True, null=True)
+    contact_name = models.CharField(max_length=255)
+    email = models.EmailField()
+    phone = EncryptedCharField(max_length=50)
+    country_code = models.CharField(max_length=10, default="+91")
+    website = models.URLField(max_length=255, null=True, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="interested")
+    user = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="candidate_records")
+    company = models.ForeignKey("companies.Company", on_delete=models.SET_NULL, null=True, blank=True, related_name="candidate_leads")
+    notes = models.TextField(blank=True, null=True)
+    plan_config = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.contact_name} - {self.company_name} ({self.status})"
+

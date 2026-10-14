@@ -8,6 +8,10 @@ import {
   LayoutDashboard,
   Users,
   Settings,
+  Calendar,
+  BarChart3,
+  Sliders,
+  Sparkles,
 } from "lucide-react";
 import { ConsoleShell, type NavItem } from "@/components/console/shell";
 import { CompanyAdminView } from "@/components/console/company-admin";
@@ -18,13 +22,16 @@ export const Route = createFileRoute("/$companySlug/admin")({
 });
 
 const NAV: NavItem[] = [
-  { id: "overview", label: "Company overview", icon: LayoutDashboard },
+  { id: "overview", label: "Company Overview", icon: LayoutDashboard },
   { id: "branches", label: "Branches", icon: Building2 },
   { id: "online_booking_fields", label: "Online Booking Form", icon: FileText },
-  { id: "staff", label: "Team", icon: Users },
-  { id: "alerts", label: "Alert rules", icon: Bell },
-  { id: "branding", label: "Branding", icon: Settings },
-  { id: "billing", label: "Plan & usage", icon: CreditCard },
+  { id: "staff", label: "Team Management", icon: Users },
+  { id: "appointments", label: "Appointments", icon: Calendar },
+  { id: "alerts", label: "Alert Rules", icon: Bell },
+  { id: "branding", label: "Branding", icon: Sparkles },
+  { id: "billing", label: "Plan & Usage", icon: CreditCard },
+  { id: "reports", label: "Reports", icon: BarChart3 },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 function CompanyAdminDashboard() {
@@ -73,6 +80,12 @@ function CompanyAdminDashboard() {
   useEffect(() => {
     if (!session) {
       void navigate({ to: "/$companySlug/login", params: { companySlug } });
+    } else if (session.role === "company_admin" && (!session.hasPurchasedPlan || session.onboardingStatus === "pending_invoice_approval")) {
+      if (session.onboardingStatus === "pending_invoice_approval") {
+        void navigate({ to: "/login" });
+      } else {
+        void navigate({ to: "/signup", search: { step: 1 } });
+      }
     } else if (session.role === "super_admin") {
       void navigate({ to: "/app" });
     } else if (session.role !== "company_admin") {
@@ -81,7 +94,7 @@ function CompanyAdminDashboard() {
     }
   }, [session, navigate, companySlug]);
 
-  if (!session || session.role !== "company_admin") {
+  if (!session || session.role !== "company_admin" || !session.hasPurchasedPlan || session.onboardingStatus === "pending_invoice_approval") {
     return null;
   }
 

@@ -26,31 +26,45 @@ export const DUR = {
   cinematic: 1.0,
 } as const;
 
-/** Fade + rise into view. The single reveal primitive used site-wide. */
+/** Fade, scale + rise into view with fluid spring curves and subtle focal depth unveil. */
 export function Reveal({
   children,
   delay = 0,
-  y = 24,
+  y = 28,
+  scale = 0.97,
+  blur = 6,
   className,
   as = "div",
 }: {
   children: ReactNode;
   delay?: number;
   y?: number;
+  scale?: number;
+  blur?: number;
   className?: string;
   as?: "div" | "section" | "li" | "span";
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, margin: "-10% 0px -8% 0px" });
+  const inView = useInView(ref, { once: true, margin: "-8% 0px -6% 0px" });
   const reduce = useReducedMotion();
   const Comp = motion[as] as typeof motion.div;
 
   return (
     <Comp
       ref={ref}
-      initial={reduce ? { opacity: 1 } : { opacity: 0, y }}
-      animate={inView ? { opacity: 1, y: 0 } : reduce ? { opacity: 1 } : { opacity: 0, y }}
-      transition={{ duration: DUR.emphasis, ease: EASE, delay }}
+      initial={reduce ? { opacity: 1 } : { opacity: 0, y, scale, filter: blur ? `blur(${blur}px)` : "none" }}
+      animate={
+        inView
+          ? { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+          : reduce
+          ? { opacity: 1 }
+          : { opacity: 0, y, scale, filter: blur ? `blur(${blur}px)` : "none" }
+      }
+      transition={{
+        duration: 0.65,
+        ease: [0.16, 1, 0.3, 1], // Apple/Stripe-grade deceleration curve
+        delay,
+      }}
       className={className}
     >
       {children}
