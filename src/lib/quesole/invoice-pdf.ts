@@ -56,6 +56,12 @@ export interface InvoiceData {
   grandTotal: number;
 }
 
+// Professional ISO currency formatter (avoids non-ASCII/Helvetica encoding corruption in jsPDF)
+function formatINR(val: number | string | undefined | null): string {
+  const num = Number(val || 0);
+  return `INR ${num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -69,88 +75,83 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   let y = 0;
 
   // 1. Top Enterprise Header Banner
-  doc.setFillColor(30, 27, 75); // Dark Indigo #1E1B4B
-  doc.rect(0, 0, pageWidth, 28, "F");
+  doc.setFillColor(15, 23, 42); // Deep Slate #0F172A
+  doc.rect(0, 0, pageWidth, 30, "F");
 
   // Accent gradient line underneath banner
-  doc.setFillColor(99, 102, 241); // Indigo-500
-  doc.rect(0, 27, pageWidth, 1.5, "F");
+  doc.setFillColor(99, 102, 241); // Indigo-500 #6366F1
+  doc.rect(0, 29, pageWidth, 1.2, "F");
 
   // Header Brand Logo / Text
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
-  doc.text("QUESOLE", margin, 14);
+  doc.text("QUESOLE", margin, 13);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(224, 231, 255);
-  doc.text("ENTERPRISE QUEUE INTELLIGENCE & BILLING SUITE", margin, 20);
+  doc.setFontSize(7.5);
+  doc.setTextColor(199, 210, 254);
+  doc.text("ENTERPRISE QUEUE INTELLIGENCE & SAAS SUITE", margin, 19);
+
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text("GSTIN: 24AAACQ9876Q1Z8  ·  support@quesole.com", margin, 24.5);
 
   // Invoice / Proforma Header (Right side of banner)
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text("PROFORMA INVOICE", pageWidth - margin, 13, { align: "right" });
+  doc.text("PROFORMA INVOICE", pageWidth - margin, 12, { align: "right" });
 
   const invNumber = data.invoiceNumber || `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.setTextColor(199, 210, 254);
-  doc.text(`Doc Ref: ${invNumber}`, pageWidth - margin, 19, { align: "right" });
+  doc.setFontSize(8);
+  doc.setTextColor(224, 231, 255);
+  doc.text(`Doc Ref: ${invNumber}`, pageWidth - margin, 17.5, { align: "right" });
+
   const todayStr = data.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  doc.text(`Issue Date: ${todayStr}`, pageWidth - margin, 24, { align: "right" });
+  doc.text(`Issue Date: ${todayStr}`, pageWidth - margin, 22, { align: "right" });
 
-  y = 35;
+  doc.setTextColor(165, 180, 252);
+  doc.text("Payment Terms: Net 15 / Due on Receipt", pageWidth - margin, 26.5, { align: "right" });
 
-  // 2. Status Banner Box
-  doc.setFillColor(254, 243, 199); // amber-100
-  doc.setDrawColor(245, 158, 11); // amber-500
-  doc.roundedRect(margin, y, contentWidth, 9, 2, 2, "FD");
-  doc.setTextColor(180, 83, 9); // amber-700
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("OFFLINE CORPORATE INVOICE  ·  PENDING SUPERADMIN EXECUTIVE CLEARANCE", margin + 4, y + 6);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text("Payment Term: Due On Receipt / Within 15 Days", pageWidth - margin - 4, y + 6, { align: "right" });
+  y = 36;
 
-  y += 14;
-
-  // 3. Dual Columns Info Card: Billed To (Left) & Plan Timing & Subscription (Right)
+  // 2. Dual Columns Info Card: Billed To (Left) & Plan Timing & Subscription (Right)
+  // (Upper warning box removed as per user request to provide a clean SaaS enterprise look)
   const colWidth = (contentWidth - 6) / 2; // ~88mm
   const cardHeight = 44;
 
   // Left Card: Billed To
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
   doc.roundedRect(margin, y, colWidth, cardHeight, 2, 2, "FD");
 
-  doc.setTextColor(99, 102, 241);
+  doc.setTextColor(79, 70, 229); // indigo-600
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.text("BILLED TO / CORPORATE DETAILS", margin + 4, y + 6);
 
   const billingLegalName = data.billingName || data.companyName || "Client Organization";
   doc.setTextColor(15, 23, 42);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(billingLegalName.length > 32 ? `${billingLegalName.slice(0, 32)}...` : billingLegalName, margin + 4, y + 13);
+  doc.text(billingLegalName.length > 30 ? `${billingLegalName.slice(0, 30)}...` : billingLegalName, margin + 4, y + 13);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
 
   const contactPerson = data.contactPerson || data.contactName || "Authorized Admin";
-  doc.text(`Attn: ${contactPerson}`, margin + 4, y + 19);
+  doc.text(`Attn: ${contactPerson.length > 32 ? `${contactPerson.slice(0, 32)}...` : contactPerson}`, margin + 4, y + 19);
 
   const emailStr = data.billerEmail || data.email || "—";
-  doc.text(`Email: ${emailStr}`, margin + 4, y + 24);
+  doc.text(`Email: ${emailStr.length > 34 ? `${emailStr.slice(0, 34)}...` : emailStr}`, margin + 4, y + 24);
 
   const phoneStr = data.contactPhone || data.phone || "—";
   doc.text(`Phone: ${phoneStr}`, margin + 4, y + 29);
 
-  const gstStr = data.gstNumber ? `GSTIN / Tax ID: ${data.gstNumber.toUpperCase()}` : "GSTIN: Not Applicable / Unregistered";
+  const gstStr = data.gstNumber ? `GSTIN / Tax ID: ${data.gstNumber.toUpperCase()}` : "GSTIN: Unregistered / Not Applicable";
   doc.setFont("helvetica", data.gstNumber ? "bold" : "normal");
   doc.setTextColor(data.gstNumber ? 15 : 100, data.gstNumber ? 23 : 116, data.gstNumber ? 42 : 139);
   doc.text(gstStr, margin + 4, y + 34);
@@ -158,7 +159,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   doc.setFont("helvetica", "normal");
   doc.setTextColor(71, 85, 105);
   const addrStr = data.billingAddress || data.address || `${data.city || ""}, ${data.country || "India"}`;
-  doc.text(`Address: ${addrStr.length > 38 ? `${addrStr.slice(0, 38)}...` : addrStr}`, margin + 4, y + 39);
+  doc.text(`Address: ${addrStr.length > 36 ? `${addrStr.slice(0, 36)}...` : addrStr}`, margin + 4, y + 39);
 
   // Right Card: Plan Timing & Subscription
   const rightColX = margin + colWidth + 6;
@@ -166,24 +167,24 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   doc.setDrawColor(226, 232, 240);
   doc.roundedRect(rightColX, y, colWidth, cardHeight, 2, 2, "FD");
 
-  doc.setTextColor(99, 102, 241);
+  doc.setTextColor(79, 70, 229);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.text("SUBSCRIPTION TIMING & ACCESS", rightColX + 4, y + 6);
 
   // Plan duration and timing calculations
   const durationMonths = data.durationMonths || 1;
   const termLabel = data.planTiming?.termLabel || (
     durationMonths === 1 ? "1 Month (Monthly Subscription)" :
-    durationMonths === 3 ? "3 Months (Quarterly Plan - 5% Off)" :
-    durationMonths === 6 ? "6 Months (Semi-Annual Plan - 10% Off)" :
-    "12 Months (Annual Commitment - 20% Off)"
+    durationMonths === 3 ? "3 Months (Quarterly · 5% Discount)" :
+    durationMonths === 6 ? "6 Months (Semi-Annual · 10% Discount)" :
+    "12 Months (Annual Commitment · 20% Discount)"
   );
 
   doc.setTextColor(15, 23, 42);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
-  doc.text(termLabel.length > 34 ? `${termLabel.slice(0, 34)}...` : termLabel, rightColX + 4, y + 13);
+  doc.text(termLabel.length > 32 ? `${termLabel.slice(0, 32)}...` : termLabel, rightColX + 4, y + 13);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
@@ -201,22 +202,22 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   doc.text(`Activation Term: ${durationMonths} Month${durationMonths > 1 ? "s" : ""}`, rightColX + 4, y + 19);
   doc.text(`Effective Period: ${startDate} to ${renewalDate}`, rightColX + 4, y + 24);
   doc.text(`Next Billing / Renewal: ${renewalDate}`, rightColX + 4, y + 29);
-  doc.text(`Currency: INR (₹)  ·  Settlement: Corporate Invoice`, rightColX + 4, y + 34);
+  doc.text(`Currency: INR  ·  Settlement: Corporate Wire`, rightColX + 4, y + 34);
   doc.text(`Platform Provider: Quesole Technologies Pvt. Ltd.`, rightColX + 4, y + 39);
 
   y += cardHeight + 6;
 
-  // 4. Itemized Commercial Table Header
+  // 3. Itemized Commercial Table Header
   doc.setFillColor(241, 245, 249); // slate-100
   doc.setDrawColor(203, 213, 225);
   doc.rect(margin, y, contentWidth, 7.5, "FD");
 
   doc.setTextColor(51, 65, 85);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.text("ITEM / ARCHITECTURE SPECIFICATION", margin + 4, y + 5);
-  doc.text("QTY", pageWidth - margin - 58, y + 5, { align: "center" });
-  doc.text("RATE/MO", pageWidth - margin - 32, y + 5, { align: "right" });
+  doc.text("QTY", pageWidth - margin - 64, y + 5, { align: "center" });
+  doc.text("RATE / MO", pageWidth - margin - 36, y + 5, { align: "right" });
   doc.text("SUBTOTAL (INR)", pageWidth - margin - 4, y + 5, { align: "right" });
 
   y += 7.5;
@@ -229,7 +230,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: `Branch Locations Setup (${branchesCount} location${branchesCount > 1 ? "s" : ""})`,
       qty: String(branchesCount),
-      rate: `₹${Math.round(Number(data.itemized.branches_subtotal) / branchesCount).toLocaleString("en-IN")}`,
+      rate: formatINR(Math.round(Number(data.itemized.branches_subtotal) / branchesCount)),
       subtotal: Number(data.itemized.branches_subtotal),
     });
   }
@@ -238,7 +239,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: "Online Booking & Customer Web Appointment Portal",
       qty: "1 Module",
-      rate: `₹${Number(data.itemized.online_subtotal).toLocaleString("en-IN")}`,
+      rate: formatINR(Number(data.itemized.online_subtotal)),
       subtotal: Number(data.itemized.online_subtotal),
     });
   }
@@ -248,7 +249,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: `Operator Desks & Counter Workstations`,
       qty: `${totalOps} Seats`,
-      rate: `₹${Math.round(Number(data.itemized.operators_subtotal) / totalOps).toLocaleString("en-IN")}`,
+      rate: formatINR(Math.round(Number(data.itemized.operators_subtotal) / totalOps)),
       subtotal: Number(data.itemized.operators_subtotal),
     });
   }
@@ -258,7 +259,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: `Service Queuing Categories`,
       qty: `${totalServices} Queues`,
-      rate: `₹${Math.round(Number(data.itemized.services_subtotal) / totalServices).toLocaleString("en-IN")}`,
+      rate: formatINR(Math.round(Number(data.itemized.services_subtotal) / totalServices)),
       subtotal: Number(data.itemized.services_subtotal),
     });
   }
@@ -268,7 +269,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: `Display Units & Self-Service Kiosks`,
       qty: `${totalKiosks} Units`,
-      rate: `₹${Math.round(Number(data.itemized.kiosks_subtotal) / totalKiosks).toLocaleString("en-IN")}`,
+      rate: formatINR(Math.round(Number(data.itemized.kiosks_subtotal) / totalKiosks)),
       subtotal: Number(data.itemized.kiosks_subtotal),
     });
   }
@@ -284,7 +285,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     items.push({
       name: "Multi-Channel Notification Gateway (WhatsApp / SMS Delivery)",
       qty: "1 Addon",
-      rate: `₹${Number(data.itemized.delivery_subtotal).toLocaleString("en-IN")}`,
+      rate: formatINR(Number(data.itemized.delivery_subtotal)),
       subtotal: Number(data.itemized.delivery_subtotal),
     });
   }
@@ -302,13 +303,13 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
 
     doc.setTextColor(30, 41, 59);
     doc.text(item.name, margin + 4, rowY + 4.6);
-    doc.text(item.qty, pageWidth - margin - 58, rowY + 4.6, { align: "center" });
-    doc.text(item.rate, pageWidth - margin - 32, rowY + 4.6, { align: "right" });
+    doc.text(item.qty, pageWidth - margin - 64, rowY + 4.6, { align: "center" });
+    doc.text(item.rate, pageWidth - margin - 36, rowY + 4.6, { align: "right" });
 
     if (typeof item.subtotal === "number") {
-      doc.text(`₹${item.subtotal.toLocaleString("en-IN")}`, pageWidth - margin - 4, rowY + 4.6, { align: "right" });
+      doc.text(formatINR(item.subtotal), pageWidth - margin - 4, rowY + 4.6, { align: "right" });
     } else {
-      doc.setTextColor(16, 185, 129); // emerald
+      doc.setTextColor(16, 185, 129); // emerald-600
       doc.setFont("helvetica", "bold");
       doc.text(item.subtotal, pageWidth - margin - 4, rowY + 4.6, { align: "right" });
       doc.setFont("helvetica", "normal");
@@ -322,49 +323,49 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   doc.line(margin, y, pageWidth - margin, y);
   y += 3;
 
-  // 5. Totals Breakdown (Right-aligned Box)
-  const totalsBoxX = pageWidth - margin - 96;
-  const totalsBoxWidth = 96;
+  // 4. Totals Breakdown (Right-aligned Professional Box)
+  const totalsBoxX = pageWidth - margin - 104;
+  const totalsBoxWidth = 104;
 
   const totals = [
-    { label: "Base Monthly Rate:", val: `₹${Number(data.monthlyTotal).toLocaleString("en-IN")}/mo` },
+    { label: "Base Monthly Rate:", val: `${formatINR(data.monthlyTotal)} / mo` },
     ...(data.discountPercent && data.discountPercent > 0 ? [
-      { label: `Duration Discount (${data.discountPercent}% off):`, val: `-₹${Number(data.discountAmount || 0).toLocaleString("en-IN")}`, green: true }
+      { label: `Duration Discount (${data.discountPercent}% off):`, val: `-${formatINR(data.discountAmount || 0)}`, green: true }
     ] : []),
-    { label: `Contract Subtotal (${data.durationMonths} mo):`, val: `₹${Number(data.contractSubtotal).toLocaleString("en-IN")}` },
-    { label: `GST (${data.gstPercent}%):`, val: `₹${Number(data.gstAmount).toLocaleString("en-IN")}` },
-    { label: "Grand Total (INR):", val: `₹${Number(data.grandTotal).toLocaleString("en-IN")}`, bold: true },
+    { label: `Contract Subtotal (${data.durationMonths} mo):`, val: formatINR(data.contractSubtotal) },
+    { label: `GST (${data.gstPercent}%):`, val: formatINR(data.gstAmount) },
+    { label: "Grand Total (INR):", val: formatINR(data.grandTotal), bold: true },
   ];
 
   totals.forEach((row) => {
     if (row.bold) {
       doc.setFillColor(238, 242, 255); // Indigo 50
       doc.setDrawColor(199, 210, 254);
-      doc.roundedRect(totalsBoxX - 2, y, totalsBoxWidth + 2, 7.5, 1.5, 1.5, "FD");
+      doc.roundedRect(totalsBoxX - 2, y, totalsBoxWidth + 2, 8, 1.5, 1.5, "FD");
       doc.setTextColor(67, 56, 202); // Indigo 700
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
+      doc.setFontSize(9.5);
     } else {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(row.green ? 16 : 71, row.green ? 185 : 85, row.green ? 129 : 105);
     }
 
-    doc.text(row.label, totalsBoxX + 2, y + 5);
-    doc.text(row.val, pageWidth - margin - 4, y + 5, { align: "right" });
-    y += row.bold ? 9 : 5.8;
+    doc.text(row.label, totalsBoxX + 2, y + 5.2);
+    doc.text(row.val, pageWidth - margin - 4, y + 5.2, { align: "right" });
+    y += row.bold ? 9.5 : 5.8;
   });
 
   y += 4;
 
-  // 6. Further Instructions / Purchase Order Section (if present)
+  // 5. Further Instructions / Purchase Order Section (if present)
   if (data.furtherInstructions && data.furtherInstructions.trim()) {
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.roundedRect(margin, y, contentWidth, 15, 2, 2, "FD");
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(30, 41, 59);
     doc.text("CUSTOMER PURCHASE ORDER / FURTHER INSTRUCTIONS:", margin + 4, y + 5);
 
@@ -377,7 +378,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
     y += 18;
   }
 
-  // 7. Payment & Bank Remittance Instructions Card
+  // 6. Payment & Bank Remittance Instructions Card
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
   doc.roundedRect(margin, y, contentWidth, 26, 2, 2, "FD");
@@ -401,7 +402,7 @@ export function generateAndDownloadInvoicePDF(data: InvoiceData): jsPDF {
   doc.text("• Submit UTR / Payment Proof: billing@quesole.com", bankRight, y + 15.5);
   doc.text("• Corporate Hotline: +91 98765 43210 (Mon-Sat 9AM-7PM IST)", bankRight, y + 20);
 
-  // 8. Bottom Footer
+  // 7. Bottom Footer
   doc.setFont("helvetica", "italic");
   doc.setFontSize(7);
   doc.setTextColor(148, 163, 184);

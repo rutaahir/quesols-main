@@ -23,9 +23,12 @@ def provision_displays_for_branch(branch):
             N = comp_alloc.purchased_qty
         else:
             # Fallback to package max_displays (default 1 for out-of-the-box usability)
-            pkg = getattr(branch.company, "package", None)
-            pkg_displays = getattr(pkg, "max_displays", 1) if pkg else 1
-            N = pkg_displays if pkg_displays > 0 else 1
+            try:
+                pkg = getattr(branch.company, "package", None)
+                pkg_displays = getattr(pkg, "max_displays", 1) if pkg else 1
+            except Exception:
+                pkg_displays = 1
+            N = pkg_displays if (pkg_displays and pkg_displays > 0) else 1
 
     if N < 0:
         N = 0
@@ -73,6 +76,24 @@ def provision_displays_for_branch(branch):
                 company=branch.company,
                 branch=branch,
                 terminal_identifier=f"Display {i}",
+                username=f"display-{i}",
                 passcode=passcode,
                 status="active"
             )
+
+    # 4. Auto-provision default rotation slot for active terminals that have no slots
+    try:
+        from display.models import DisplayTerminalSlot
+        from queuing.models import Desk
+        branch_desks = list(Desk.objects.filter(branch=branch, is_active=True))
+        if not branch_desks:
+            branch_desks = list(Desk.objects.filter(branch=branch))
+
+        for term in DisplayTerminal.objects.filter(branch=branch, status="active"):
+            if not term.slots.exists():
+                slot = DisplayTerminalSlot.objects.create(terminal=term, order=1)
+                if branch_desks:
+                    slot.desks.set(branch_desks)
+                slot.save()
+    except Exception as ex:
+        print(f"Error provisioning default display slots: {ex}")

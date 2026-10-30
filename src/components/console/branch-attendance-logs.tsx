@@ -16,11 +16,19 @@ import {
   Users,
   ShieldCheck,
   User,
-  Briefcase
+  Briefcase,
+  Building2,
+  Plus,
+  Trash2,
+  LogOut,
+  X,
+  MapPin,
+  Monitor
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/lib/quesole/store";
+import { Label } from "@/components/ui/label";
+import { apiFetch, useQuesole } from "@/lib/quesole/store";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "@/components/quesole/motion";
 
@@ -28,12 +36,18 @@ export function BranchAttendanceLogsView({
   branchId,
   branchName,
   isStaffRole = false,
+  companyWide = false,
+  onBranchChange,
 }: {
-  branchId: string;
+  branchId?: string;
   branchName?: string;
   isStaffRole?: boolean;
+  companyWide?: boolean;
+  onBranchChange?: (newBranchId: string) => void;
 }) {
+  const { state, session, refresh } = useQuesole();
   const [logs, setLogs] = useState<any[]>([]);
+  const [allCompanyLogsCount, setAllCompanyLogsCount] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -41,6 +55,35 @@ export function BranchAttendanceLogsView({
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedLogForDetails, setSelectedLogForDetails] = useState<any | null>(null);
   const [now, setNow] = useState<number>(Date.now());
+
+  // Branch Selection: defaults to provided branchId, or "all" if companyWide or no branchId
+  const [selectedBranch, setSelectedBranch] = useState<string>(() => {
+    if (companyWide) return "all";
+    return branchId || "all";
+  });
+
+  // Modal: Check In Staff (for Admins)
+  const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [checkInUserId, setCheckInUserId] = useState("");
+  const [checkInBranchId, setCheckInBranchId] = useState("");
+  const [checkInDeskId, setCheckInDeskId] = useState("");
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+
+  // Available branches for current company
+  const companyBranches = useMemo(() => {
+    const userCompanyId = session?.companyId;
+    return state.branches.filter(
+      (b) => !userCompanyId || String(b.companyId) === String(userCompanyId) || String((b as any).company) === String(userCompanyId)
+    );
+  }, [state.branches, session?.companyId]);
+
+  // Keep selectedBranch synced if branchId prop changes
+  useEffect(() => {
+    if (branchId && !companyWide) {
+      setSelectedBranch(branchId);
+    }
+  }, [branchId, companyWide]);
 
   // Live timer tick for active shift duration calculations
   useEffect(() => {
@@ -53,14 +96,34 @@ export function BranchAttendanceLogsView({
   const fetchAttendanceLogs = async () => {
     setIsLoading(true);
     try {
-      let query = `/api/operator/attendance/?branch=${branchId}`;
-      if (selectedDate) {
-        query += `&date=${selectedDate}`;
+      let query = `/api/operator/attendance/`;
+      const params = new URLSearchParams();
+      if (selectedBranch && selectedBranch !== "all") {
+        params.append("branch", selectedBranch);
       }
-      const data = await apiFetch(query);
+      if (selectedDate) {
+        params.append("date", selectedDate);
+      }
+      const qs = params.toString();
+      const fullQuery = qs ? `${query}?${qs}` : query;
+      const data = await apiFetch(fullQuery);
       setLogs(Array.isArray(data) ? data : []);
+
+      // If viewing a specific branch with 0 logs, also check if company has any logs in other branches
+      if (selectedBranch !== "all" && Array.isArray(data) && data.length === 0) {
+        try {
+          const compLogs = await apiFetch(`/api/operator/attendance/`);
+          if (Array.isArray(compLogs)) {
+            setAllCompanyLogsCount(compLogs.length);
+          }
+        } catch {
+          // Ignore
+        }
+      } else {
+        setAllCompanyLogsCount(null);
+      }
     } catch (err) {
-      console.error("Failed to fetch branch attendance logs:", err);
+      console.error("Failed to fetch attendance logs:", err);
       toast.error("Could not load attendance logs");
     } finally {
       setIsLoading(false);
@@ -69,7 +132,7 @@ export function BranchAttendanceLogsView({
 
   useEffect(() => {
     fetchAttendanceLogs();
-  }, [branchId, selectedDate]);
+  }, [selectedBranch, selectedDate]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -78,6 +141,7 @@ export function BranchAttendanceLogsView({
         (log.user_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.user_email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.desk_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (log.branch_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.user_role || "").toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesStatus =
@@ -85,8 +149,13 @@ export function BranchAttendanceLogsView({
 
       const matchesRole =
         roleFilter === "all" ||
-        (roleFilter === "admin" && (log.user_role === "branch_admin" || log.user_role === "company_admin")) ||
-        (roleFilter === "staff" && (log.user_role === "operator" || log.user_role === "staff" || !log.user_role));
+        (roleFilter === "admin" &&
+          (log.user_role === "branch_admin" || log.user_role === "company_admin")) ||
+        (roleFilter === "staff" &&
+          (log.user_role === "operator" ||
+            log.user_role === "desk_staff" ||
+            log.user_role === "staff" ||
+            !log.user_role));
 
       return matchesSearch && matchesStatus && matchesRole;
     });
@@ -130,6 +199,7 @@ export function BranchAttendanceLogsView({
       "Staff Name",
       "Email",
       "Role",
+      "Branch",
       "Assigned Desk",
       "Status",
       "Check-in Time",
@@ -137,7 +207,7 @@ export function BranchAttendanceLogsView({
       "Net Work Duration",
       "Total Break Time",
       "Break Count",
-      "Notes"
+      "Notes",
     ];
     const rows = filteredLogs.map((l) => {
       const checkInMs = new Date(l.check_in_time).getTime();
@@ -149,6 +219,7 @@ export function BranchAttendanceLogsView({
         `"${l.user_name || ""}"`,
         `"${l.user_email || ""}"`,
         `"${l.user_role || "Staff"}"`,
+        `"${l.branch_name || ""}"`,
         `"${l.desk_name || "Unassigned"}"`,
         `"${l.status}"`,
         `"${new Date(l.check_in_time).toLocaleString()}"`,
@@ -156,7 +227,7 @@ export function BranchAttendanceLogsView({
         `"${formatDuration(workSec)}"`,
         `"${formatDuration(l.total_break_seconds || 0)}"`,
         `"${l.break_count || 0}"`,
-        `"${(l.notes || "").replace(/"/g, '""')}"`
+        `"${(l.notes || "").replace(/"/g, '""')}"`,
       ];
     });
 
@@ -168,13 +239,83 @@ export function BranchAttendanceLogsView({
     link.setAttribute("href", encodedUri);
     link.setAttribute(
       "download",
-      `staff_attendance_${branchName || "branch"}_${new Date().toISOString().slice(0, 10)}.csv`
+      `staff_attendance_${selectedBranch === "all" ? "all_branches" : branchName || "branch"}_${new Date().toISOString().slice(0, 10)}.csv`
     );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     toast.success("Staff attendance exported to CSV!");
   };
+
+  // Admin: Check Out an active shift
+  const handleCheckOutShift = async (attendanceId: number) => {
+    setIsActionLoading(true);
+    try {
+      await apiFetch("/api/operator/attendance/check-out/", {
+        method: "POST",
+        body: JSON.stringify({ attendance_id: attendanceId }),
+      });
+      toast.success("Shift successfully checked out!");
+      setSelectedLogForDetails(null);
+      await fetchAttendanceLogs();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to check out shift");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Admin: Delete an attendance record
+  const handleDeleteRecord = async (attendanceId: number) => {
+    if (!confirm("Are you sure you want to delete this shift attendance record?")) return;
+    setIsActionLoading(true);
+    try {
+      await apiFetch(`/api/operator/attendance/${attendanceId}/`, {
+        method: "DELETE",
+      });
+      toast.success("Attendance record deleted.");
+      setSelectedLogForDetails(null);
+      await fetchAttendanceLogs();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete record");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Admin: Submit Manual Check In
+  const handleManualCheckIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkInBranchId) {
+      toast.error("Please select a branch.");
+      return;
+    }
+    setIsCheckingIn(true);
+    try {
+      await apiFetch("/api/operator/attendance/check-in/", {
+        method: "POST",
+        body: JSON.stringify({
+          branch_id: checkInBranchId,
+          user_id: checkInUserId || undefined,
+          desk_id: checkInDeskId || undefined,
+        }),
+      });
+      toast.success("Staff member checked in successfully!");
+      setIsCheckInModalOpen(false);
+      setCheckInUserId("");
+      setCheckInDeskId("");
+      await fetchAttendanceLogs();
+      await refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to check in staff member");
+    } finally {
+      setIsCheckingIn(false);
+    }
+  };
+
+  // Find another branch that has records to suggest to user
+  const currentBranchObj = companyBranches.find((b) => String(b.id) === String(selectedBranch));
+  const otherBranchWithData = companyBranches.find((b) => String(b.id) !== String(selectedBranch));
 
   return (
     <div className="space-y-4 w-full">
@@ -188,7 +329,9 @@ export function BranchAttendanceLogsView({
             <div className="font-display font-black text-2xl text-foreground mt-0.5">
               {stats.totalToday}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Recorded shift sessions</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              {selectedBranch === "all" ? "Across all branches" : "Recorded shift sessions"}
+            </p>
           </div>
           <div className="h-10 w-10 rounded-xl bg-brand/10 text-brand flex items-center justify-center font-bold">
             <Users className="h-5 w-5" />
@@ -245,6 +388,29 @@ export function BranchAttendanceLogsView({
       {/* ── FILTER & ACTION CONTROLS BAR (High Density) ── */}
       <div className="panel p-3.5 bg-card border-border/80 rounded-2xl shadow-2xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+          {/* Branch Filter (Company Admin & Multi-Branch Switcher) */}
+          {!isStaffRole && (companyBranches.length > 0 || state.branches.length > 0) && (
+            <div className="relative shrink-0">
+              <select
+                value={selectedBranch}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedBranch(val);
+                  onBranchChange?.(val);
+                }}
+                className="text-xs font-bold h-8.5 rounded-xl border border-brand/40 bg-brand/5 pl-2.5 pr-7 text-brand focus:ring-1 focus:ring-brand cursor-pointer hover:bg-brand/10 transition-colors"
+                title="Filter attendance logs by branch"
+              >
+                <option value="all">🏢 All Branches (Company-Wide)</option>
+                {(companyBranches.length > 0 ? companyBranches : state.branches).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    📍 {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Search Input */}
           <div className="relative flex-1 min-w-[200px]">
             <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -276,7 +442,7 @@ export function BranchAttendanceLogsView({
           >
             <option value="all">All Roles</option>
             <option value="staff">Staff / Operators</option>
-            <option value="admin">Branch Admin</option>
+            <option value="admin">Branch / Company Admin</option>
           </select>
 
           {/* Date Selector */}
@@ -300,6 +466,24 @@ export function BranchAttendanceLogsView({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 shrink-0">
+          {!isStaffRole && (
+            <Button
+              variant="brand"
+              size="sm"
+              onClick={() => {
+                setCheckInBranchId(
+                  selectedBranch && selectedBranch !== "all"
+                    ? selectedBranch
+                    : companyBranches[0]?.id || ""
+                );
+                setIsCheckInModalOpen(true);
+              }}
+              className="h-8.5 gap-1.5 text-xs font-bold rounded-xl shadow-xs shadow-brand/20 bg-[#5B50EB] hover:bg-[#4d42db] text-white"
+            >
+              <Plus className="h-3.5 w-3.5" /> Check In Staff
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -310,15 +494,80 @@ export function BranchAttendanceLogsView({
           </Button>
 
           <Button
-            variant="brand"
+            variant="outline"
             size="sm"
             onClick={exportCSV}
-            className="h-8.5 gap-1.5 text-xs font-bold rounded-xl shadow-xs shadow-brand/20"
+            className="h-8.5 gap-1.5 text-xs font-bold rounded-xl shadow-xs shadow-brand/10"
           >
             <Download className="h-3.5 w-3.5" /> Export CSV
           </Button>
         </div>
       </div>
+
+      {/* ── CONTEXTUAL INFO BANNER: If selected branch has 0 logs but other branches have data ── */}
+      {!isLoading && logs.length === 0 && selectedBranch !== "all" && (
+        <div className="panel p-4 bg-amber-500/10 border border-amber-500/25 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Info className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="font-bold text-foreground">
+                No attendance sessions recorded for {currentBranchObj?.name || branchName || "this branch"} yet.
+              </p>
+              <p className="text-muted-foreground mt-0.5">
+                {allCompanyLogsCount && allCompanyLogsCount > 0
+                  ? `There are ${allCompanyLogsCount} attendance logs in your company. Switch branch or view all branches to inspect them.`
+                  : "Operators record attendance upon shift check-in at the Desk Console, or you can check in staff manually."}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSelectedBranch("all");
+                onBranchChange?.("all");
+              }}
+              className="h-8 text-xs font-bold rounded-xl border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15"
+            >
+              🏢 View All Branches
+            </Button>
+            {otherBranchWithData && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const bId = String(otherBranchWithData.id);
+                  setSelectedBranch(bId);
+                  onBranchChange?.(bId);
+                }}
+                className="h-8 text-xs font-bold rounded-xl border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15"
+              >
+                Switch to {otherBranchWithData.name}
+              </Button>
+            )}
+            {!isStaffRole && (
+              <Button
+                variant="brand"
+                size="sm"
+                onClick={() => {
+                  setCheckInBranchId(
+                    selectedBranch && selectedBranch !== "all"
+                      ? selectedBranch
+                      : companyBranches[0]?.id || ""
+                  );
+                  setIsCheckInModalOpen(true);
+                }}
+                className="h-8 text-xs font-bold rounded-xl bg-[#5B50EB] text-white"
+              >
+                <Plus className="h-3 w-3 mr-1" /> Check In Staff
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── TABULAR ATTENDANCE DASHBOARD (Full Width & Space Optimized) ── */}
       <div className="panel overflow-hidden border-border/80 rounded-2xl shadow-2xs bg-card">
@@ -328,6 +577,9 @@ export function BranchAttendanceLogsView({
               <tr className="text-muted-foreground font-extrabold uppercase tracking-wider text-[10px]">
                 <th className="p-3 pl-4">Staff Member</th>
                 <th className="p-3">Role</th>
+                {(selectedBranch === "all" || companyBranches.length > 1) && (
+                  <th className="p-3">Branch</th>
+                )}
                 <th className="p-3">Assigned Desk</th>
                 <th className="p-3">Check-in Time</th>
                 <th className="p-3">Check-out Time</th>
@@ -340,15 +592,33 @@ export function BranchAttendanceLogsView({
             <tbody className="divide-y divide-border/40 font-medium">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-muted-foreground">
+                  <td
+                    colSpan={selectedBranch === "all" || companyBranches.length > 1 ? 10 : 9}
+                    className="p-12 text-center text-muted-foreground"
+                  >
                     <Loader2 className="h-6 w-6 animate-spin text-brand mx-auto mb-2" />
                     Loading staff attendance records...
                   </td>
                 </tr>
               ) : filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-muted-foreground">
-                    No staff attendance logs found matching your filters.
+                  <td
+                    colSpan={selectedBranch === "all" || companyBranches.length > 1 ? 10 : 9}
+                    className="p-12 text-center text-muted-foreground"
+                  >
+                    <div className="max-w-md mx-auto space-y-2">
+                      <div className="h-10 w-10 mx-auto rounded-full bg-muted/70 flex items-center justify-center text-muted-foreground">
+                        <Clock className="h-5 w-5" />
+                      </div>
+                      <p className="font-bold text-foreground">
+                        No staff attendance logs found matching your filters.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedBranch !== "all"
+                          ? `No logs for ${currentBranchObj?.name || "selected branch"}. Try selecting 'All Branches' or clearing date/search filters.`
+                          : "Shift records will appear here as soon as staff check into their desks."}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -356,17 +626,17 @@ export function BranchAttendanceLogsView({
                   const checkInTime = new Date(log.check_in_time);
                   const checkInStr = checkInTime.toLocaleTimeString("en-IN", {
                     hour: "2-digit",
-                    minute: "2-digit"
+                    minute: "2-digit",
                   });
                   const checkInDateStr = checkInTime.toLocaleDateString("en-IN", {
                     day: "numeric",
-                    month: "short"
+                    month: "short",
                   });
 
                   const checkOutStr = log.check_out_time
                     ? new Date(log.check_out_time).toLocaleTimeString("en-IN", {
                         hour: "2-digit",
-                        minute: "2-digit"
+                        minute: "2-digit",
                       })
                     : "Active Now";
 
@@ -388,12 +658,14 @@ export function BranchAttendanceLogsView({
                       {/* Staff Member Avatar & Info */}
                       <td className="p-3 pl-4">
                         <div className="flex items-center gap-2.5">
-                          <div className={cn(
-                            "h-8 w-8 rounded-full font-bold flex items-center justify-center text-xs shrink-0 border",
-                            isAdminRole
-                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                              : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30"
-                          )}>
+                          <div
+                            className={cn(
+                              "h-8 w-8 rounded-full font-bold flex items-center justify-center text-xs shrink-0 border",
+                              isAdminRole
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30"
+                            )}
+                          >
                             {log.user_name ? log.user_name[0].toUpperCase() : "U"}
                           </div>
                           <div className="min-w-0">
@@ -409,12 +681,14 @@ export function BranchAttendanceLogsView({
 
                       {/* Role Badge */}
                       <td className="p-3">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider border flex items-center gap-1 w-fit",
-                          isAdminRole
-                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                            : "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20"
-                        )}>
+                        <span
+                          className={cn(
+                            "px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider border flex items-center gap-1 w-fit",
+                            isAdminRole
+                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                              : "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20"
+                          )}
+                        >
                           {isAdminRole ? (
                             <>
                               <ShieldCheck className="h-3 w-3 text-amber-500" /> Admin
@@ -426,6 +700,16 @@ export function BranchAttendanceLogsView({
                           )}
                         </span>
                       </td>
+
+                      {/* Branch Badge */}
+                      {(selectedBranch === "all" || companyBranches.length > 1) && (
+                        <td className="p-3">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-muted/70 text-foreground border border-border/50">
+                            <Building2 className="h-3 w-3 text-brand" />
+                            {log.branch_name || "Branch"}
+                          </span>
+                        </td>
+                      )}
 
                       {/* Desk Name */}
                       <td className="p-3">
@@ -552,7 +836,7 @@ export function BranchAttendanceLogsView({
                       Staff Shift & Break Logs
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      {selectedLogForDetails.user_name} ({selectedLogForDetails.desk_name || "Unassigned Desk"})
+                      {selectedLogForDetails.user_name} ({selectedLogForDetails.desk_name || "Unassigned Desk"}) • {selectedLogForDetails.branch_name}
                     </p>
                   </div>
                 </div>
@@ -562,7 +846,7 @@ export function BranchAttendanceLogsView({
                   onClick={() => setSelectedLogForDetails(null)}
                   className="h-8 w-8 rounded-full p-0"
                 >
-                  ✕
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
 
@@ -626,13 +910,13 @@ export function BranchAttendanceLogsView({
                             <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
                               {new Date(b.break_start).toLocaleTimeString([], {
                                 hour: "2-digit",
-                                minute: "2-digit"
+                                minute: "2-digit",
                               })}{" "}
                               -{" "}
                               {b.break_end
                                 ? new Date(b.break_end).toLocaleTimeString([], {
                                     hour: "2-digit",
-                                    minute: "2-digit"
+                                    minute: "2-digit",
                                   })
                                 : "Ongoing"}
                             </div>
@@ -645,7 +929,167 @@ export function BranchAttendanceLogsView({
                     </div>
                   )}
                 </div>
+
+                {/* Admin Management Actions inside Details Modal */}
+                {!isStaffRole && (
+                  <div className="pt-3 border-t border-border/60 flex items-center justify-between gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDeleteRecord(selectedLogForDetails.id)}
+                      disabled={isActionLoading}
+                      className="text-destructive hover:bg-destructive/10 border-destructive/30 text-xs font-bold gap-1 rounded-xl"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete Record
+                    </Button>
+
+                    {!selectedLogForDetails.check_out_time && (
+                      <Button
+                        variant="brand"
+                        size="sm"
+                        onClick={() => handleCheckOutShift(selectedLogForDetails.id)}
+                        disabled={isActionLoading}
+                        className="text-xs font-bold gap-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white"
+                      >
+                        <LogOut className="h-3.5 w-3.5" /> End / Check Out Shift
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL: MANUAL SHIFT CHECK-IN (ADMIN TOOL) ── */}
+      <AnimatePresence>
+        {isCheckInModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="panel max-w-md w-full p-6 space-y-4 rounded-3xl shadow-2xl bg-card border-border/80"
+            >
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 rounded-xl bg-[#5B50EB]/10 text-[#5B50EB] flex items-center justify-center font-bold">
+                    <UserCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-extrabold text-base text-foreground">
+                      Check In Staff Member
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Record an operator shift attendance session
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsCheckInModalOpen(false)}
+                  className="h-8 w-8 rounded-full p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <form onSubmit={handleManualCheckIn} className="space-y-4 text-xs">
+                {/* Branch Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-foreground">Target Branch</Label>
+                  <select
+                    value={checkInBranchId}
+                    onChange={(e) => {
+                      setCheckInBranchId(e.target.value);
+                      setCheckInDeskId("");
+                    }}
+                    required
+                    className="w-full h-9 rounded-xl border border-input bg-background px-3 text-xs text-foreground focus:ring-1 focus:ring-brand font-medium"
+                  >
+                    <option value="">Select Branch...</option>
+                    {companyBranches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Staff Member Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-foreground">Staff Member</Label>
+                  <select
+                    value={checkInUserId}
+                    onChange={(e) => setCheckInUserId(e.target.value)}
+                    className="w-full h-9 rounded-xl border border-input bg-background px-3 text-xs text-foreground focus:ring-1 focus:ring-brand font-medium"
+                  >
+                    <option value="">Myself ({session?.email || "Current User"})</option>
+                    {state.staff
+                      .filter(
+                        (s) =>
+                          (!session?.companyId || String(s.companyId) === String(session.companyId)) &&
+                          (!checkInBranchId || !s.branchId || String(s.branchId) === String(checkInBranchId))
+                      )
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name || s.email} ({s.role || "staff"})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Desk Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-foreground">
+                    Assigned Desk <span className="font-normal text-muted-foreground">(Optional)</span>
+                  </Label>
+                  <select
+                    value={checkInDeskId}
+                    onChange={(e) => setCheckInDeskId(e.target.value)}
+                    className="w-full h-9 rounded-xl border border-input bg-background px-3 text-xs text-foreground focus:ring-1 focus:ring-brand font-medium"
+                  >
+                    <option value="">Unassigned Desk</option>
+                    {state.desks
+                      .filter(
+                        (d) =>
+                          !checkInBranchId || String(d.branchId) === String(checkInBranchId)
+                      )
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label} ({d.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setIsCheckInModalOpen(false)}
+                    className="h-9 text-xs rounded-xl"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="brand"
+                    disabled={isCheckingIn}
+                    className="h-9 px-5 text-xs font-bold rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white"
+                  >
+                    {isCheckingIn ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Checking In...
+                      </>
+                    ) : (
+                      "Confirm Check-In"
+                    )}
+                  </Button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

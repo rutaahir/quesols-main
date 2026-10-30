@@ -1,11 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Loader2, ArrowRight, Mail, Lock, Eye, EyeOff, Sun, Moon, Building2, ShieldAlert } from "lucide-react";
+import { Loader2, ArrowRight, Mail, Lock, Eye, EyeOff, Sun, Moon, Building2, ShieldAlert, User } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useQuesole, apiFetch } from "@/lib/quesole/store";
 import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { OtpVerificationCard } from "@/components/auth/otp-verification-card";
 
 export const Route = createFileRoute("/$companySlug/login")({
   head: () => ({
@@ -175,7 +176,7 @@ function ThemeToggle() {
 
 function CompanyLoginPage() {
   const { companySlug } = Route.useParams();
-  const { signIn, state } = useQuesole();
+  const { signIn, verifyLoginOtp, resendLoginOtp, state } = useQuesole();
   const navigate = useNavigate();
 
   const [company, setCompany] = useState<any | null>(null);
@@ -189,6 +190,8 @@ function CompanyLoginPage() {
   const [emailError, setEmailError] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [authStep, setAuthStep] = useState<"credentials" | "otp">("credentials");
+  const [otpData, setOtpData] = useState<{ tempToken: string; maskedEmail: string } | null>(null);
 
   const shouldReduceMotion = useReducedMotion();
 
@@ -214,11 +217,38 @@ function CompanyLoginPage() {
   const portalName = company?.name || company?.booking_config?.portal_name || (companySlug ? companySlug.toUpperCase() : "PORTAL");
   const logoUrl = company?.logo_url || company?.booking_config?.logo_url;
 
+  const handlePostLoginRedirect = (sessionData: any) => {
+    toast.success("Signed in successfully", { description: `Welcome back to the ${portalName} console.` });
+    
+    const companyObj = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
+    const branchObj = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
+    
+    if (sessionData.role === "super_admin") {
+      void navigate({ to: "/app" });
+    } else if (sessionData.role === "company_admin" && !sessionData.hasPurchasedPlan) {
+      toast.info("Plan Selection Required", { description: "Please configure and purchase a plan to activate your dashboard." });
+      void navigate({ to: "/signup", search: { step: 1 } });
+    } else if (sessionData.role === "company_admin" && (companyObj?.slug || sessionData.companySlug)) {
+      void navigate({ to: "/$companySlug/admin", params: { companySlug: companyObj?.slug || sessionData.companySlug! } });
+    } else if (
+      (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
+      companyObj?.slug &&
+      branchObj?.slug
+    ) {
+      void navigate({
+        to: "/$companySlug/branches/$branchSlug",
+        params: { companySlug: companyObj.slug, branchSlug: branchObj.slug },
+      });
+    } else {
+      void navigate({ to: "/app" });
+    }
+  };
+
   async function submit(e?: React.FormEvent) {
     if (e) e.preventDefault();
     
     let hasError = false;
-    if (!email.includes("@")) {
+    if (!email.trim() || email.trim().length < 3) {
       setEmailError(true);
       hasError = true;
     } else {
@@ -243,37 +273,38 @@ function CompanyLoginPage() {
     setLoading(true);
     
     try {
-      const sessionData = await signIn(email, password, companySlug);
-      toast.success("Signed in successfully", { description: `Welcome back to the ${portalName} console.` });
+      const res = await signIn(email.trim(), password, companySlug);
       
-      const companyObj = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
-      const branchObj = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
-      
-      if (sessionData.role === "super_admin") {
-        void navigate({ to: "/app" });
-      } else if (sessionData.role === "company_admin" && !sessionData.hasPurchasedPlan) {
-        toast.info("Plan Selection Required", { description: "Please configure and purchase a plan to activate your dashboard." });
-        void navigate({ to: "/signup", search: { step: 1 } });
-      } else if (sessionData.role === "company_admin" && (companyObj?.slug || sessionData.companySlug)) {
-        void navigate({ to: "/$companySlug/admin", params: { companySlug: companyObj?.slug || sessionData.companySlug! } });
-      } else if (
-        (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
-        companyObj?.slug &&
-        branchObj?.slug
-      ) {
-        void navigate({
-          to: "/$companySlug/branches/$branchSlug",
-          params: { companySlug: companyObj.slug, branchSlug: branchObj.slug },
+      if (res?.otpRequired) {
+        setOtpData({
+          tempToken: res.tempToken,
+          maskedEmail: res.maskedEmail,
         });
-      } else {
-        void navigate({ to: "/app" });
+        setAuthStep("otp");
+        toast.info("Verification code sent", {
+          description: `A 6-digit verification code has been sent to ${res.maskedEmail}.`,
+        });
+        return;
       }
+
+      handlePostLoginRedirect(res);
     } catch (err: any) {
-      setError(err?.message || "Invalid email or password.");
+      setError(err?.message || "Invalid email/username or password.");
       toast.error("Sign in failed", { description: err?.message || "Please check your credentials." });
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleVerifyOtp(code: string) {
+    if (!otpData) return;
+    const sessionData = await verifyLoginOtp(otpData.tempToken, code, companySlug);
+    handlePostLoginRedirect(sessionData);
+  }
+
+  async function handleResendOtp() {
+    if (!otpData) return;
+    await resendLoginOtp(otpData.tempToken);
   }
 
   if (isLoadingCompany) {
@@ -342,20 +373,34 @@ function CompanyLoginPage() {
             </p>
           </motion.div>
 
-          <motion.form variants={itemVariants} className="space-y-6" onSubmit={submit}>
-            <div className="space-y-4">
-              <FloatingInput
-                id="email"
-                label="Work email"
-                type="email"
-                value={email}
-                onChange={setEmail}
-                error={emailError}
-                errorMessage="Enter a valid work email address"
-                placeholder="you@company.com"
-                icon={Mail}
-                primaryColor={primaryColor}
-              />
+          {authStep === "otp" && otpData ? (
+            <OtpVerificationCard
+              maskedEmail={otpData.maskedEmail}
+              tempToken={otpData.tempToken}
+              onVerify={handleVerifyOtp}
+              onResend={handleResendOtp}
+              onBack={() => {
+                setAuthStep("credentials");
+                setError(null);
+              }}
+              brandPrimaryColor={primaryColor}
+              portalName={portalName}
+            />
+          ) : (
+            <motion.form variants={itemVariants} className="space-y-6" onSubmit={submit}>
+              <div className="space-y-4">
+                <FloatingInput
+                  id="email"
+                  label="Work email or username"
+                  type="text"
+                  value={email}
+                  onChange={setEmail}
+                  error={emailError}
+                  errorMessage="Enter a valid email or username (min. 3 characters)"
+                  placeholder="name or you@company.com"
+                  icon={User}
+                  primaryColor={primaryColor}
+                />
               
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
@@ -411,6 +456,7 @@ function CompanyLoginPage() {
               )}
             </Button>
           </motion.form>
+          )}
 
           <motion.div variants={itemVariants} className="flex justify-center text-xs font-semibold text-muted-foreground/60 border-t border-border/40 pt-6">
             <span>Powered by Quesole queue analytics</span>

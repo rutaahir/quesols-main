@@ -17,17 +17,17 @@ export default defineConfig({
       port: 8081,
       proxy: {
         "/api": {
-          target: "http://127.0.0.1:8000",
+          target: "http://127.0.0.1:8001",
           changeOrigin: true,
           ws: true,
         },
         "/ws": {
-          target: "http://127.0.0.1:8000",
+          target: "http://127.0.0.1:8001",
           ws: true,
           changeOrigin: true,
         },
         "/media": {
-          target: "http://127.0.0.1:8000",
+          target: "http://127.0.0.1:8001",
           changeOrigin: true,
         },
       },

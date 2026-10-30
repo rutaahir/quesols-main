@@ -41,6 +41,9 @@ backend/*.pyc
 backend/db.sqlite3
 backend/htmlcov/
 backend/.pytest_cache/
+backend/backups/
+*.sql
+*.sql.gz
 
 # Scratch / local dev files (not for repo)
 backend/scratch_*.txt

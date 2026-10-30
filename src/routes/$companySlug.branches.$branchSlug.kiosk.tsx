@@ -83,6 +83,7 @@ function Kiosk() {
   const [pinError, setPinError] = useState<string | null>(null);
 
   // Kiosk Initial Unlock State
+  const [initUsername, setInitUsername] = useState("");
   const [initPin, setInitPin] = useState("");
   const [initPinError, setInitPinError] = useState<string | null>(null);
   const [isDeviceUnlocked, setIsDeviceUnlocked] = useState<boolean>(() => {
@@ -210,6 +211,11 @@ function Kiosk() {
       })
       .catch((err: any) => console.error("Failed to load kiosks:", err));
   }, [branch?.id]);
+
+  // Never autofill kiosk terminal username on locked screen
+  useEffect(() => {
+    setInitUsername("");
+  }, [selectedKioskId]);
 
   // Sync unlock states with localStorage to persist through refreshes
   useEffect(() => {
@@ -683,6 +689,8 @@ function Kiosk() {
             ) : (
               <KioskLockScreen
                 branchName={branch.name}
+                initUsername={initUsername}
+                setInitUsername={setInitUsername}
                 initPin={initPin}
                 setInitPin={setInitPin}
                 initPinError={initPinError}
@@ -697,14 +705,23 @@ function Kiosk() {
                     setInitPinError("No kiosk slots provisioned for this branch.");
                     return;
                   }
-                  if (!selectedKioskId) {
-                    setInitPinError("Please select a kiosk terminal.");
+                  if (!initUsername.trim()) {
+                    setInitPinError("Terminal username is required.");
+                    return;
+                  }
+                  if (initPin.length !== 4) {
+                    setInitPinError("Please enter your 4-digit PIN.");
                     return;
                   }
                   try {
                     const res = await apiFetch("/api/public/kiosks/login/", {
                       method: "POST",
-                      body: JSON.stringify({ kiosk_id: selectedKioskId, pin: initPin })
+                      body: JSON.stringify({
+                        kiosk_id: selectedKioskId,
+                        username: initUsername.trim(),
+                        pin: initPin.trim(),
+                        branch_id: branch.id,
+                      })
                     });
                     setSessionToken(res.session_token);
                     setIsDeviceUnlocked(true);
@@ -712,7 +729,7 @@ function Kiosk() {
                     setInitPin("");
                     toast.success(`${res.kiosk_identifier} unlocked successfully!`);
                   } catch (err: any) {
-                    setInitPinError(err.message || "Invalid PIN.");
+                    setInitPinError(err.message || "Invalid Username or PIN.");
                     setInitPin("");
                   }
                 }}
@@ -1091,6 +1108,8 @@ function Kiosk() {
 
 type LockScreenProps = {
   branchName: string;
+  initUsername?: string;
+  setInitUsername?: (v: string) => void;
   initPin: string;
   setInitPin: (v: string) => void;
   initPinError: string | null;
@@ -1102,11 +1121,13 @@ type LockScreenProps = {
   onUnlock: () => Promise<void>;
 };
 
-/** Original purple-blue kiosk lock screen — full terminal selector dropdown */
+/** Original purple-blue kiosk lock screen — username + PIN */
 function KioskLockScreen({
-  branchName, initPin, setInitPin, initPinError, setInitPinError,
+  branchName, initUsername = "", setInitUsername, initPin, setInitPin, initPinError, setInitPinError,
   isEvicted, kiosksList, selectedKioskId, setSelectedKioskId, onUnlock
 }: LockScreenProps) {
+  const selectedKiosk = kiosksList.find((k: any) => String(k.id) === String(selectedKioskId)) || kiosksList[0];
+
   return (
     <motion.div
       key="lock-kiosk"
@@ -1131,23 +1152,23 @@ function KioskLockScreen({
         </div>
         <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-foreground text-center">Kiosk Locked</h2>
         <p className="text-sm font-medium text-muted-foreground/80 mt-2">
-          Please enter the PIN for <strong className="text-violet-600 dark:text-violet-400">{branchName}</strong> to unlock this terminal.
+          Please enter the terminal Username & PIN for <strong className="text-violet-600 dark:text-violet-400">{branchName}</strong> to unlock this terminal.
         </p>
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); onUnlock(); }} className="space-y-6">
+      <form onSubmit={(e) => { e.preventDefault(); onUnlock(); }} className="space-y-5">
         {isEvicted && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-semibold text-center animate-pulse">
             Session evicted: this kiosk was opened on another screen or its PIN was regenerated.
           </div>
         )}
         {kiosksList.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Kiosk Terminal</Label>
-            <div className="w-full h-12 px-4 flex items-center justify-between rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-semibold text-sm">
-              <span>{kiosksList.find((k: any) => String(k.id) === String(selectedKioskId))?.kiosk_identifier || kiosksList[0]?.kiosk_identifier || "None"}</span>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
-                Selected
+            <div className="w-full h-11 px-4 flex items-center justify-between rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-semibold text-sm">
+              <span className="truncate">{selectedKiosk?.kiosk_identifier || "None"}</span>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400 shrink-0">
+                KSK
               </span>
             </div>
           </div>
@@ -1156,14 +1177,37 @@ function KioskLockScreen({
             No kiosks provisioned for this branch. Allocate kiosk screens in your subscription config.
           </div>
         )}
-        <div className="space-y-6 relative flex flex-col items-center">
-          <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground self-start ml-1 mb-2">Enter 4-Digit Kiosk PIN</Label>
+
+        {/* Username Input */}
+        <div className="space-y-1.5">
+          <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Terminal Username</Label>
+          <Input
+            type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            data-lpignore="true"
+            data-form-type="other"
+            value={initUsername}
+            onChange={(e) => {
+              setInitPinError(null);
+              setInitUsername?.(e.target.value.toLowerCase().trim());
+            }}
+            placeholder="e.g. kiosk-1"
+            required
+            className="h-11 rounded-xl text-xs font-mono font-bold bg-background/80"
+          />
+        </div>
+
+        <div className="space-y-4 relative flex flex-col items-center">
+          <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground self-start ml-1">Enter 4-Digit Kiosk PIN</Label>
           <SegmentedPin length={4} value={initPin} onChange={(v) => { setInitPinError(null); setInitPin(v); }} error={!!initPinError} shakeTrigger={initPinError ? Date.now() : 0} />
           {initPinError && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-xs text-destructive font-bold text-center mt-2">{initPinError}</motion.p>
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-xs text-destructive font-bold text-center mt-1">{initPinError}</motion.p>
           )}
         </div>
-        <Button type="submit" disabled={initPin.length < 4 || kiosksList.length === 0} className="w-full h-14 text-lg font-bold rounded-full shadow-xl transition-transform active:scale-95 bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 text-white border-0 gap-2">
+        <Button type="submit" disabled={initPin.length < 4 || !initUsername.trim() || kiosksList.length === 0} className="w-full h-13 text-base font-bold rounded-full shadow-xl transition-transform active:scale-95 bg-gradient-to-r from-violet-500 to-blue-500 hover:from-violet-600 hover:to-blue-600 text-white border-0 gap-2">
           <Lock className="h-5 w-5 opacity-70" /> Unlock Terminal <ArrowRight className="h-5 w-5 opacity-70 ml-2" />
         </Button>
       </form>

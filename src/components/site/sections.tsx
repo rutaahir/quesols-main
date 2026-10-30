@@ -180,7 +180,7 @@ export function Hero() {
     <section
       id="hero-section"
       ref={ref}
-      className="relative z-20 flex h-[calc(100svh-clamp(105px,13.5vh,140px))] min-h-[480px] sm:min-h-[520px] lg:min-h-[560px] flex-col justify-between pt-16 sm:pt-18 pb-0 overflow-visible"
+      className="relative z-20 flex h-[calc(100svh-clamp(56px,8vh,80px))] min-h-[520px] sm:min-h-[560px] lg:min-h-[620px] flex-col justify-between pt-14 sm:pt-16 pb-0 overflow-visible"
     >
       {/* Background Video - Full Clarity & High Impact */}
       <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden>
@@ -200,11 +200,11 @@ export function Hero() {
       </div>
 
       {/* Middle Content Row: Hero Copy with High-Contrast Highlighted Typography (No Container Box) */}
-      <div className="mx-auto flex w-full max-w-[1728px] w-[98%] flex-1 items-center px-3 sm:px-6 lg:px-8 pb-[clamp(90px,12vh,130px)]">
+      <div className="mx-auto flex w-full max-w-[1728px] w-[98%] flex-1 items-center px-4 sm:px-8 lg:px-12 pb-[clamp(120px,18vh,180px)] sm:pb-[clamp(130px,20vh,190px)] lg:pb-[clamp(140px,20vh,200px)]">
         {/* Copy sitting directly over video with high contrast and smooth animations */}
         <m.div
           style={{ y: textY, opacity: textOpacity, scale: textScale }}
-          className="flex flex-col items-start text-left max-w-2xl py-2"
+          className="flex flex-col items-start text-left w-full max-w-[min(100%,600px)] sm:max-w-[min(90%,640px)] lg:max-w-2xl py-2"
         >
           {/* Ultra-Premium Glassmorphic Eyebrow Badge */}
           <m.div
@@ -221,7 +221,7 @@ export function Hero() {
           </m.div>
 
           {/* Animated, Bold, Highly Visible Headline */}
-          <h1 className="mt-3.5 font-display text-4xl sm:text-5xl lg:text-[3.5rem] xl:text-[4rem] font-black leading-[1.04] tracking-tight text-slate-950 dark:text-white drop-shadow-[0_2px_14px_rgba(255,255,255,0.95)] dark:drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]">
+          <h1 className="mt-3.5 font-display text-[clamp(1.85rem,6vw,2.5rem)] sm:text-[clamp(2.25rem,5vw,3rem)] lg:text-[3.5rem] xl:text-[4rem] font-black leading-[1.06] tracking-tight text-slate-950 dark:text-white drop-shadow-[0_2px_14px_rgba(255,255,255,0.95)] dark:drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]">
             <m.span {...enter(0.06)} className="inline-block">
               Smart Queue Management
             </m.span>
@@ -305,7 +305,7 @@ export function Hero() {
       </div>
 
       {/* Floating Image Cards Carousel Straddling the Bottom Boundary */}
-      <div className="absolute bottom-0 left-0 right-0 z-30 translate-y-1/2 pointer-events-none">
+      <div className="absolute bottom-0 left-0 right-0 z-30 translate-y-[45%] sm:translate-y-1/2 pointer-events-none">
         <div className="pointer-events-auto">
           <HeroFeaturesCarousel embedded />
         </div>

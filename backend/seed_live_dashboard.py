@@ -15,26 +15,33 @@ from accounts.models import User
 from audit.models import AuditLog
 from appointments.models import OnlineBooking
 
-company = Company.objects.get(id=17)
-head_office = Branch.objects.get(id=18)
-branch_2 = Branch.objects.get(id=19)
+company = Company.objects.first()
+if not company:
+    company = Company.objects.create(name="Quesole Demo Corp", is_active=True)
+
+branches = list(Branch.objects.filter(company=company))
+if len(branches) >= 2:
+    head_office, branch_2 = branches[0], branches[1]
+elif len(branches) == 1:
+    head_office = branches[0]
+    branch_2 = Branch.objects.create(company=company, name="Branch 2", is_active=True)
+else:
+    head_office = Branch.objects.create(company=company, name="Head Office", is_active=True)
+    branch_2 = Branch.objects.create(company=company, name="Branch 2", is_active=True)
+
 owner = User.objects.filter(company=company, role='company_admin').first() or User.objects.filter(company=company).first()
+if not owner:
+    owner = User.objects.filter(is_superuser=True).first()
 
 # 1. Update/Create Services for Head Office
-s1 = Service.all_objects.filter(id=23).first()
-if s1:
-    s1.name = "General Consultation"
-    s1.prefix = "A"
-    s1.est_service_minutes = 15
-    s1.save()
-
-s2 = Service.all_objects.filter(id=24).first()
-if s2:
-    s2.name = "Account Advisory"
-    s2.prefix = "B"
-    s2.est_service_minutes = 20
-    s2.save()
-
+s1, _ = Service.all_objects.get_or_create(
+    branch=head_office, prefix="A",
+    defaults={'company': company, 'name': 'General Consultation', 'est_service_minutes': 15, 'is_active': True}
+)
+s2, _ = Service.all_objects.get_or_create(
+    branch=head_office, prefix="B",
+    defaults={'company': company, 'name': 'Account Advisory', 'est_service_minutes': 20, 'is_active': True}
+)
 s3, _ = Service.all_objects.get_or_create(
     branch=head_office, prefix="C",
     defaults={'company': company, 'name': 'Document Verification', 'est_service_minutes': 10, 'is_active': True}
@@ -60,22 +67,14 @@ b2_s3, _ = Service.all_objects.get_or_create(
 
 # 2. Desks
 # Head office desks
-d_ho1 = Desk.all_objects.filter(id=16).first()
-if d_ho1:
-    d_ho1.name = "Desk 01 (General)"
-    d_ho1.status = "open"
-    d_ho1.is_active = True
-    d_ho1.current_operator = owner
-    d_ho1.save()
-
-d_ho2 = Desk.all_objects.filter(id=17).first()
-if d_ho2:
-    d_ho2.name = "Desk 02 (Advisory)"
-    d_ho2.status = "open"
-    d_ho2.is_active = True
-    d_ho2.current_operator = owner
-    d_ho2.save()
-
+d_ho1, _ = Desk.all_objects.get_or_create(
+    branch=head_office, name="Desk 01 (General)",
+    defaults={'company': company, 'status': 'open', 'is_active': True, 'current_operator': owner}
+)
+d_ho2, _ = Desk.all_objects.get_or_create(
+    branch=head_office, name="Desk 02 (Advisory)",
+    defaults={'company': company, 'status': 'open', 'is_active': True, 'current_operator': owner}
+)
 d_ho3, _ = Desk.all_objects.get_or_create(
     branch=head_office, name="Desk 03 (Cash & Verification)",
     defaults={'company': company, 'status': 'open', 'is_active': True, 'current_operator': owner}
@@ -86,21 +85,14 @@ d_ho4, _ = Desk.all_objects.get_or_create(
 )
 
 # Branch 2 desks
-d_b1 = Desk.all_objects.filter(id=18).first()
-if d_b1:
-    d_b1.name = "Desk 01 (Main Counter)"
-    d_b1.status = "open"
-    d_b1.is_active = True
-    d_b1.current_operator = owner
-    d_b1.save()
-
-d_b2 = Desk.all_objects.filter(id=19).first()
-if d_b2:
-    d_b2.name = "Desk 02 (Advisory Desk)"
-    d_b2.status = "open"
-    d_b2.is_active = True
-    d_b2.current_operator = owner
-    d_b2.save()
+d_b1, _ = Desk.all_objects.get_or_create(
+    branch=branch_2, name="Desk 01 (Main Counter)",
+    defaults={'company': company, 'status': 'open', 'is_active': True, 'current_operator': owner}
+)
+d_b2, _ = Desk.all_objects.get_or_create(
+    branch=branch_2, name="Desk 02 (Advisory Desk)",
+    defaults={'company': company, 'status': 'open', 'is_active': True, 'current_operator': owner}
+)
 
 # Map desk services
 all_desks = [d_ho1, d_ho2, d_ho3, d_ho4, d_b1, d_b2]

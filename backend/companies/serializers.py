@@ -10,9 +10,9 @@ class CompanyRegistrationSerializer(serializers.Serializer):
     company_name = serializers.CharField(min_length=2, max_length=120, required=True)
     industry = serializers.CharField(max_length=255, required=False, default="Education", allow_blank=True)
     contact_email = serializers.EmailField(required=True)
-    contact_phone = serializers.CharField(max_length=50, required=True)
-    address = serializers.CharField(required=True)
-    city = serializers.CharField(required=True)
+    contact_phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    address = serializers.CharField(required=False, allow_blank=True)
+    city = serializers.CharField(required=False, allow_blank=True)
     logo = serializers.FileField(required=False, allow_null=True)
     brand_primary_color = serializers.CharField(max_length=7, required=False, default="#6366F1")
     estimated_branch_count = serializers.IntegerField(min_value=1, required=True)
@@ -24,16 +24,33 @@ class CompanyRegistrationSerializer(serializers.Serializer):
     # Admin details
     admin_first_name = serializers.CharField(max_length=150, required=True)
     admin_last_name = serializers.CharField(max_length=150, required=True)
+    admin_username = serializers.CharField(max_length=150, required=False, allow_blank=True)
     admin_email = serializers.EmailField(required=True)
-    admin_password = serializers.CharField(write_only=True, required=True)
-    admin_confirm_password = serializers.CharField(write_only=True, required=True)
-    admin_phone = serializers.CharField(max_length=50, required=True)
+    admin_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    admin_confirm_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    admin_phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
     
     terms_consent = serializers.BooleanField(required=True)
 
+    def validate_admin_username(self, value):
+        if value:
+            import re
+            val = str(value).strip()
+            if len(val) < 3:
+                raise serializers.ValidationError("Username must be at least 3 characters long.")
+            if len(val) > 30:
+                raise serializers.ValidationError("Username cannot exceed 30 characters.")
+            if not re.match(r'^[a-zA-Z0-9_.-]+$', val):
+                raise serializers.ValidationError("Username can only contain letters, numbers, underscores, hyphens, and periods.")
+            existing = User.objects.filter(username__iexact=val).first()
+            if existing and not (existing.company and existing.company.onboarding_status in ["pending_payment", "pending_invoice_approval"]):
+                raise serializers.ValidationError("This username is already taken. Please choose another.")
+            return val
+        return value
+
     def validate_contact_email(self, value):
         existing = Company.objects.filter(contact_email=value).first()
-        if existing and existing.onboarding_status != "pending_payment":
+        if existing and existing.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
             raise serializers.ValidationError("A company is already registered with this contact email.")
         return value
 
@@ -43,14 +60,14 @@ class CompanyRegistrationSerializer(serializers.Serializer):
             if not re.match(r'^[a-z0-9-]+$', value):
                 raise serializers.ValidationError("Slug must only contain lowercase alphanumeric characters and hyphens.")
             existing = Company.objects.filter(slug=value).first()
-            if existing and existing.onboarding_status != "pending_payment":
+            if existing and existing.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
                 raise serializers.ValidationError("This company URL slug is already taken.")
         return value
 
     def validate_admin_email(self, value):
         existing = User.objects.filter(email=value).first()
         if existing:
-            if not (existing.company and existing.company.onboarding_status == "pending_payment"):
+            if not (existing.company and existing.company.onboarding_status in ["pending_payment", "pending_invoice_approval"]):
                 raise serializers.ValidationError("A user account is already registered with this login email.")
         return value
 
@@ -71,10 +88,13 @@ class CompanyRegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_admin_password(self, value):
-        if not any(char.isdigit() for char in value):
-            raise serializers.ValidationError("Password must contain at least one number.")
-        if not any(char.isalpha() for char in value):
-            raise serializers.ValidationError("Password must contain at least one letter.")
+        if value:
+            if len(value) < 6:
+                raise serializers.ValidationError("Password must be at least 6 characters.")
+            if not any(char.isdigit() for char in value):
+                raise serializers.ValidationError("Password must contain at least one number.")
+            if not any(char.isalpha() for char in value):
+                raise serializers.ValidationError("Password must contain at least one letter.")
         return value
 
     def validate_terms_consent(self, value):
@@ -83,8 +103,19 @@ class CompanyRegistrationSerializer(serializers.Serializer):
         return value
 
     def validate(self, data):
-        if data.get("admin_password") != data.get("admin_confirm_password"):
-            raise serializers.ValidationError({"admin_confirm_password": "Passwords do not match."})
+        admin_email = data.get("admin_email")
+        existing_user = User.objects.filter(email=admin_email).first()
+        is_pending = existing_user and existing_user.company and existing_user.company.onboarding_status in ["pending_payment", "pending_invoice_approval"]
+
+        password = data.get("admin_password")
+        confirm = data.get("admin_confirm_password")
+
+        if not is_pending and not password:
+            raise serializers.ValidationError({"admin_password": "Password is required."})
+
+        if password or confirm:
+            if password != confirm:
+                raise serializers.ValidationError({"admin_confirm_password": "Passwords do not match."})
         return data
 
 

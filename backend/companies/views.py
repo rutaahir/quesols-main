@@ -67,28 +67,29 @@ class CompanyRegistrationView(APIView):
             if "admin_confirm_password" not in raw_data:
                 raw_data["admin_confirm_password"] = raw_data["password"]
 
-        if "admin_password" in raw_data and "admin_confirm_password" not in raw_data:
-            raw_data["admin_confirm_password"] = raw_data["admin_password"]
-                
-        if "phone" in raw_data:
-            if "contact_phone" not in raw_data:
-                raw_data["contact_phone"] = raw_data["phone"]
-            if "admin_phone" not in raw_data:
-                raw_data["admin_phone"] = raw_data["phone"]
+        existing_company_pre = Company.objects.filter(contact_email=raw_data.get("email") or raw_data.get("contact_email")).first()
+
+        phone_val = str(raw_data.get("phone") or raw_data.get("contact_phone") or "").strip()
+        if not phone_val and existing_company_pre:
+            phone_val = str(existing_company_pre.contact_phone or "").strip()
+        if not phone_val:
+            phone_val = "9999999999"
+
+        raw_data["phone"] = phone_val
+        raw_data["contact_phone"] = phone_val
+        raw_data["admin_phone"] = phone_val
                 
         # Sensible defaults for required fields
-        if "contact_phone" not in raw_data:
-            raw_data["contact_phone"] = "9999999999"
-        if "admin_phone" not in raw_data:
-            raw_data["admin_phone"] = "9999999999"
-        if "address" not in raw_data:
-            raw_data["address"] = "Main Office Address"
+        if not raw_data.get("address"):
+            raw_data["address"] = (existing_company_pre.address if existing_company_pre else "") or "Main Office Address"
+        if not raw_data.get("city"):
+            raw_data["city"] = (existing_company_pre.city if existing_company_pre else "") or "Default City"
         if "estimated_branch_count" not in raw_data:
             raw_data["estimated_branch_count"] = 1
         if "billing_cycle" not in raw_data:
             raw_data["billing_cycle"] = "monthly"
         if "industry" not in raw_data or not raw_data["industry"]:
-            raw_data["industry"] = "Education"
+            raw_data["industry"] = (existing_company_pre.industry if existing_company_pre else "") or "Education"
         if "terms_consent" not in raw_data:
             raw_data["terms_consent"] = True
             
@@ -189,7 +190,7 @@ class CompanyRegistrationView(APIView):
             with transaction.atomic():
                 # 1. Create or update Company
                 existing_company = Company.objects.filter(contact_email=data["contact_email"]).first()
-                if existing_company and existing_company.onboarding_status == "pending_payment":
+                if existing_company and existing_company.onboarding_status in ["pending_payment", "pending_invoice_approval"]:
                     company = existing_company
                     company.name = data["company_name"]
                     if data.get("slug"):
@@ -209,6 +210,13 @@ class CompanyRegistrationView(APIView):
                     company.package = data["package"]
                     company.solution = request.data.get("solution", "ONSITE_ONLINE")
                     company.save()
+
+                    # Clean up existing pending allocations, branches, and subscriptions for this company to prevent unique collisions
+                    from branches.models import Branch
+                    from billing.models import CompanyPlanAllocation, Subscription
+                    Branch.objects.filter(company=company).delete()
+                    CompanyPlanAllocation.objects.filter(company=company).delete()
+                    Subscription.objects.filter(company=company, status__in=["pending", "pending_payment"]).delete()
                 else:
                     company = Company.objects.create(
                         name=data["company_name"],
@@ -233,15 +241,17 @@ class CompanyRegistrationView(APIView):
                 # Initialize BookingPageConfig for the company with submitted or default portal customization details
                 from appointments.models import BookingPageConfig
                 portal_color = request.data.get("primary_color") or request.data.get("primaryColor") or data.get("brand_primary_color") or "#7C3AED"
-                BookingPageConfig.objects.create(
+                BookingPageConfig.objects.update_or_create(
                     company=company,
-                    logo_url=logo_url or request.data.get("logo_url") or request.data.get("logoUrl") or "",
-                    portal_name=request.data.get("portal_name") or request.data.get("portalName") or company.name,
-                    primary_color=portal_color,
-                    display_address=request.data.get("display_address") or request.data.get("displayAddress") or company.address or "",
-                    enabled_customer_fields=request.data.get("enabled_customer_fields") or request.data.get("enabledCustomerFields") or ["name", "email", "phone"],
-                    enabled_booking_fields=request.data.get("enabled_booking_fields") or request.data.get("enabledBookingFields") or ["date_slot", "message"],
-                    enabled_notification_channels=request.data.get("enabled_notification_channels") or request.data.get("enabledNotificationChannels") or ["email"]
+                    defaults={
+                        "logo_url": logo_url or request.data.get("logo_url") or request.data.get("logoUrl") or "",
+                        "portal_name": request.data.get("portal_name") or request.data.get("portalName") or company.name,
+                        "primary_color": portal_color,
+                        "display_address": request.data.get("display_address") or request.data.get("displayAddress") or company.address or "",
+                        "enabled_customer_fields": request.data.get("enabled_customer_fields") or request.data.get("enabledCustomerFields") or ["name", "email", "phone"],
+                        "enabled_booking_fields": request.data.get("enabled_booking_fields") or request.data.get("enabledBookingFields") or ["date_slot", "message"],
+                        "enabled_notification_channels": request.data.get("enabled_notification_channels") or request.data.get("enabledNotificationChannels") or ["email"],
+                    }
                 )
 
                 # Create itemized PlanComponent allocations and PlanPurchase
@@ -392,6 +402,7 @@ class CompanyRegistrationView(APIView):
                 )
                 
                 # 3. Create or update Admin User
+                admin_username = data.get("admin_username") or raw_data.get("admin_username") or raw_data.get("username")
                 existing_admin = User.objects.filter(email=data["admin_email"]).first()
                 if existing_admin:
                     admin_user = existing_admin
@@ -400,12 +411,16 @@ class CompanyRegistrationView(APIView):
                     admin_user.role = "company_admin"
                     admin_user.company = company
                     admin_user.phone = data["admin_phone"]
-                    admin_user.set_password(data["admin_password"])
+                    if admin_username:
+                        admin_user.username = admin_username
+                    if data.get("admin_password"):
+                        admin_user.set_password(data["admin_password"])
                     admin_user.save()
                 else:
                     admin_user = User.objects.create_user(
                         email=data["admin_email"],
-                        password=data["admin_password"],
+                        username=admin_username,
+                        password=data.get("admin_password") or "TempPass123!",
                         first_name=data["admin_first_name"],
                         last_name=data["admin_last_name"],
                         role="company_admin",
@@ -1058,6 +1073,41 @@ class RegisterStep1View(APIView):
         existing = User.objects.filter(email=email).first()
         if existing and existing.company and existing.company.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
             return Response({"available": False, "message": "This email is already registered. Please sign in."})
+        if existing and existing.company:
+            comp = existing.company
+            cand = InterestedCandidate.objects.filter(email=email).first()
+            raw_phone = str(comp.contact_phone or existing.phone or "").strip()
+            c_code = "+91"
+            phone_num = raw_phone
+            if raw_phone.startswith("+"):
+                parts = raw_phone.split(" ", 1)
+                if len(parts) == 2:
+                    c_code, phone_num = parts[0], parts[1]
+                else:
+                    c_code = raw_phone[:3]
+                    phone_num = raw_phone[3:].strip()
+            elif cand and cand.country_code:
+                c_code = cand.country_code
+                phone_num = cand.phone
+
+            return Response({
+                "available": True,
+                "is_pending_resume": True,
+                "company": {
+                    "company_name": comp.name,
+                    "contact_name": f"{existing.first_name} {existing.last_name}".strip(),
+                    "contact_phone": comp.contact_phone or existing.phone or "",
+                    "phone": phone_num,
+                    "country_code": c_code,
+                    "address": comp.address or "",
+                    "city": comp.city or "",
+                    "state": comp.state or "",
+                    "country": comp.country or "India",
+                    "industry": comp.industry or "Healthcare",
+                    "custom_industry": comp.custom_industry or "",
+                    "website": comp.website or "",
+                }
+            })
         return Response({"available": True})
 
     def post(self, request):
@@ -1075,30 +1125,55 @@ class RegisterStep1View(APIView):
         phone = data.get("phone", "").strip()
         country_code = data.get("country_code", "+91").strip()
         website = data.get("website", "").strip() or None
+        username = data.get("username", "").strip() or data.get("admin_username", "").strip() or None
 
-        if not email or not password or not company_name:
+        if username:
+            import re
+            if len(username) < 3 or len(username) > 30 or not re.match(r'^[a-zA-Z0-9_.-]+$', username):
+                return Response(
+                    {"error": "Username must be 3-30 characters and only contain letters, numbers, underscores, hyphens, and periods.", "field": "username"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            u_existing = User.objects.filter(username__iexact=username).first()
+            if u_existing and u_existing.email != email:
+                if not (u_existing.company and u_existing.company.onboarding_status in ["pending_payment", "pending_invoice_approval"]):
+                    return Response(
+                        {"error": "This username is already taken. Please choose another.", "field": "username"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+        existing_user = User.objects.filter(email=email).first()
+        is_pending = existing_user and existing_user.company and existing_user.company.onboarding_status in ["pending_payment", "pending_invoice_approval"]
+
+        if not email or not company_name:
+            return Response(
+                {"error": "Company name and administrator email are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not is_pending and not password:
             return Response(
                 {"error": "Company name, administrator email, and password are required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if len(password) < 6:
-            return Response(
-                {"error": "Password must be at least 6 characters.", "field": "password"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if not any(char.isalpha() for char in password):
-            return Response(
-                {"error": "Password must contain at least one letter.", "field": "password"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if not any(char.isdigit() for char in password):
-            return Response(
-                {"error": "Password must contain at least one number.", "field": "password"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if password:
+            if len(password) < 6:
+                return Response(
+                    {"error": "Password must be at least 6 characters.", "field": "password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not any(char.isalpha() for char in password):
+                return Response(
+                    {"error": "Password must contain at least one letter.", "field": "password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not any(char.isdigit() for char in password):
+                return Response(
+                    {"error": "Password must contain at least one number.", "field": "password"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        existing_user = User.objects.filter(email=email).first()
         if existing_user and existing_user.company and existing_user.company.onboarding_status not in ["pending_payment", "pending_invoice_approval"]:
             return Response(
                 {"error": "A company account is already registered with this login email. Please sign in.", "field": "email"},
@@ -1146,6 +1221,7 @@ class RegisterStep1View(APIView):
             if not user:
                 user = User.objects.create_user(
                     email=email,
+                    username=username,
                     password=password,
                     first_name=first_name,
                     last_name=last_name,
@@ -1158,7 +1234,10 @@ class RegisterStep1View(APIView):
                 user.last_name = last_name
                 user.company = company
                 user.role = "company_admin"
-                user.set_password(password)
+                if username:
+                    user.username = username
+                if password:
+                    user.set_password(password)
                 user.save()
 
             # 3. InterestedCandidate record
@@ -1230,6 +1309,61 @@ class InterestedCandidateViewSet(viewsets.ModelViewSet):
                 Q(city__icontains=q)
             )
         return qs
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        new_status = serializer.validated_data.get("status") or self.request.data.get("status")
+
+        if new_status == "plan_purchased":
+            comp = instance.company
+            if not comp and instance.email:
+                comp = Company.objects.filter(contact_email=instance.email).first()
+            if comp:
+                comp.status = "active"
+                comp.onboarding_status = "active"
+                comp.save()
+
+                from billing.models import Subscription, PlanPurchase
+                Subscription.objects.filter(company=comp).update(status="active")
+                PlanPurchase.objects.filter(company=comp, payment_status="pending").update(payment_status="paid")
+
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                User.objects.filter(company=comp).update(is_active=True)
+
+                from branches.models import Branch
+                if not Branch.objects.filter(company=comp).exists():
+                    Branch.objects.create(
+                        company=comp,
+                        name="Main Branch",
+                        slug="main-branch",
+                        city=comp.city or "Default City",
+                        address=comp.address or "Default Address",
+                        status="active"
+                    )
+
+                log_audit(
+                    actor=self.request.user if self.request.user.is_authenticated else None,
+                    company=comp,
+                    branch=None,
+                    action="candidate_converted_to_active",
+                    object_type="Company",
+                    object_id=comp.id,
+                    changes={"status": "active", "onboarding_status": "active"}
+                )
+        elif new_status == "invoice_requested":
+            comp = instance.company or (Company.objects.filter(contact_email=instance.email).first() if instance.email else None)
+            if comp:
+                comp.onboarding_status = "pending_invoice_approval"
+                comp.status = "pending"
+                comp.save()
+        elif new_status in ["interested", "plan_pending"]:
+            comp = instance.company or (Company.objects.filter(contact_email=instance.email).first() if instance.email else None)
+            if comp and comp.onboarding_status != "active":
+                comp.onboarding_status = "pending_payment"
+                comp.status = "pending"
+                comp.save()
+
 
 
 def _resolve_company_from_request(request):

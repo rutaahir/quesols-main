@@ -493,7 +493,7 @@ export function BillingPlanConfigurator({
     async function calculateQuote() {
       setLoadingQuote(true);
       try {
-        const res = await fetch(`http://${window.location.hostname}:8000/api/billing/calculate-quote/`, {
+        const res = await fetch(getApiUrl("/api/billing/calculate-quote/"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(debouncedQuotePayload),
@@ -1376,32 +1376,43 @@ export function BillingPlanConfigurator({
                               </div>
 
                               {/* Price Display */}
-                              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-3 space-y-1">
-                                <div className="flex items-baseline gap-1">
-                                  <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                                    ₹{effectiveMonthly.toLocaleString("en-IN")}
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground font-semibold">/ month</span>
+                              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-3 space-y-1.5">
+                                <div className="flex items-baseline justify-between">
+                                  <div className="flex items-baseline gap-1">
+                                    <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                                      ₹{effectiveMonthly.toLocaleString("en-IN")}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-semibold">/ month</span>
+                                  </div>
+                                  {savings > 0 && (
+                                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800/60">
+                                      Save ₹{savings.toLocaleString("en-IN")} ({tier.discountPercent}%)
+                                    </span>
+                                  )}
                                 </div>
 
-                                <div className="flex items-center justify-between text-[11px]">
-                                  <span className="text-muted-foreground font-medium">Total Billed:</span>
-                                  <strong className="text-slate-900 dark:text-white font-bold">
-                                    ₹{grandTotal.toLocaleString("en-IN")}
-                                  </strong>
+                                <div className="space-y-0.5 pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {tier.months > 1 && (
+                                    <div className="flex items-center justify-between">
+                                      <span>Term Subtotal:</span>
+                                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                        ₹{Math.round(subtotal).toLocaleString("en-IN")}
+                                      </span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center justify-between">
+                                    <span>+ 18% GST:</span>
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                      ₹{Math.round(gst).toLocaleString("en-IN")}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white">
+                                    <span>Total Billed:</span>
+                                    <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">
+                                      ₹{grandTotal.toLocaleString("en-IN")}
+                                    </span>
+                                  </div>
                                 </div>
-
-                                {savings > 0 ? (
-                                  <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center justify-between pt-0.5">
-                                    <span>Duration Discount:</span>
-                                    <span>Save ₹{savings.toLocaleString("en-IN")}</span>
-                                  </div>
-                                ) : (
-                                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5">
-                                    <span>GST Included (18%):</span>
-                                    <span>₹{Math.round(gst).toLocaleString("en-IN")}</span>
-                                  </div>
-                                )}
                               </div>
                             </button>
                           );

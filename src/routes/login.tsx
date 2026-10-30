@@ -7,6 +7,7 @@ import { useQuesole } from "@/lib/quesole/store";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AnimatedAuthBackground } from "@/components/auth/animated-auth-background";
+import { OtpVerificationCard } from "@/components/auth/otp-verification-card";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -120,7 +121,7 @@ function ThemeToggle() {
 }
 
 function LoginPage() {
-  const { signIn, signOut, state } = useQuesole();
+  const { signIn, verifyLoginOtp, resendLoginOtp, signOut, state } = useQuesole();
   const navigate = useNavigate();
   const [email, setEmail] = useState("rhea.mehta@apollocare.in");
   const [password, setPassword] = useState("admin123");
@@ -130,12 +131,59 @@ function LoginPage() {
   const [passwordError, setPasswordError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [pendingInvoiceInfo, setPendingInvoiceInfo] = useState<{ companyName: string; email: string; companyId: string; slug?: string | undefined } | null>(null);
+  const [authStep, setAuthStep] = useState<"credentials" | "otp">("credentials");
+  const [otpData, setOtpData] = useState<{ tempToken: string; maskedEmail: string } | null>(null);
+
+  const handlePostLoginRedirect = async (sessionData: any) => {
+    const company = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
+    const branch = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
+    
+    const isPendingInvoice = 
+      sessionData.onboardingStatus === "pending_invoice_approval" ||
+      company?.onboardingStatus === "pending_invoice_approval";
+
+    if (isPendingInvoice) {
+      await signOut();
+      setPendingInvoiceInfo({
+        companyName: company?.name || sessionData.companyName || "Your Organization",
+        email: sessionData.email,
+        companyId: sessionData.companyId,
+        slug: company?.slug || sessionData.companySlug,
+      });
+      toast.info("Invoice Request Pending Approval", {
+        description: "Our executive team is reviewing your inquiry. Dashboard access will be activated once approved."
+      });
+      return;
+    }
+
+    toast.success("Signed in", { description: "Welcome back to your operations console." });
+    
+    if (sessionData.role === "super_admin") {
+      void navigate({ to: "/app" });
+    } else if (sessionData.role === "company_admin" && !sessionData.hasPurchasedPlan) {
+      toast.info("Plan Selection Required", { description: "Please configure and purchase a plan to activate your dashboard." });
+      void navigate({ to: "/signup", search: { step: 1 } });
+    } else if (sessionData.role === "company_admin" && (company?.slug || sessionData.companySlug)) {
+      void navigate({ to: "/$companySlug/admin", params: { companySlug: company?.slug || sessionData.companySlug! } });
+    } else if (
+      (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
+      company?.slug &&
+      branch?.slug
+    ) {
+      void navigate({
+        to: "/$companySlug/branches/$branchSlug",
+        params: { companySlug: company.slug, branchSlug: branch.slug },
+      });
+    } else {
+      void navigate({ to: "/app" });
+    }
+  };
 
   async function submit(e?: React.FormEvent) {
     if (e) e.preventDefault();
     
     let hasError = false;
-    if (!email.includes("@")) {
+    if (!email.trim() || email.trim().length < 3) {
       setEmailError(true);
       hasError = true;
     } else {
@@ -160,56 +208,38 @@ function LoginPage() {
     setLoading(true);
     
     try {
-      const sessionData = await signIn(email, password);
+      const res = await signIn(email.trim(), password);
       
-      const company = state.companies.find((c) => String(c.id) === String(sessionData.companyId));
-      const branch = state.branches.find((b) => String(b.id) === String(sessionData.branchId));
-      
-      const isPendingInvoice = 
-        sessionData.onboardingStatus === "pending_invoice_approval" ||
-        company?.onboardingStatus === "pending_invoice_approval";
-
-      if (isPendingInvoice) {
-        await signOut();
-        setPendingInvoiceInfo({
-          companyName: company?.name || sessionData.companyName || "Your Organization",
-          email: sessionData.email,
-          companyId: sessionData.companyId,
-          slug: company?.slug || sessionData.companySlug,
+      if (res?.otpRequired) {
+        setOtpData({
+          tempToken: res.tempToken,
+          maskedEmail: res.maskedEmail,
         });
-        toast.info("Invoice Request Pending Approval", {
-          description: "Our executive team is reviewing your inquiry. Dashboard access will be activated once approved."
+        setAuthStep("otp");
+        toast.info("Verification code sent", {
+          description: `A 6-digit verification code has been sent to ${res.maskedEmail}.`,
         });
         return;
       }
 
-      toast.success("Signed in", { description: "Welcome back to your operations console." });
-      
-      if (sessionData.role === "super_admin") {
-        void navigate({ to: "/app" });
-      } else if (sessionData.role === "company_admin" && !sessionData.hasPurchasedPlan) {
-        toast.info("Plan Selection Required", { description: "Please configure and purchase a plan to activate your dashboard." });
-        void navigate({ to: "/signup", search: { step: 1 } });
-      } else if (sessionData.role === "company_admin" && (company?.slug || sessionData.companySlug)) {
-        void navigate({ to: "/$companySlug/admin", params: { companySlug: company?.slug || sessionData.companySlug! } });
-      } else if (
-        (sessionData.role === "branch_admin" || sessionData.role === "operator") &&
-        company?.slug &&
-        branch?.slug
-      ) {
-        void navigate({
-          to: "/$companySlug/branches/$branchSlug",
-          params: { companySlug: company.slug, branchSlug: branch.slug },
-        });
-      } else {
-        void navigate({ to: "/app" });
-      }
+      await handlePostLoginRedirect(res);
     } catch (err: any) {
-      setError(err?.message || "Invalid email or password.");
+      setError(err?.message || "Invalid email/username or password.");
       toast.error("Sign in failed", { description: err?.message || "Please check your credentials." });
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleVerifyOtp(code: string) {
+    if (!otpData) return;
+    const sessionData = await verifyLoginOtp(otpData.tempToken, code);
+    await handlePostLoginRedirect(sessionData);
+  }
+
+  async function handleResendOtp() {
+    if (!otpData) return;
+    await resendLoginOtp(otpData.tempToken);
   }
 
   return (
@@ -326,40 +356,55 @@ function LoginPage() {
               </div>
 
           {/* Section Divider */}
-          <div className="flex items-center justify-between pb-0.5">
-            <div className="flex items-center gap-2">
-              <User className="h-4 w-4 text-[#4F46E5]" />
-              <span className="text-xs sm:text-sm font-bold text-[#181B34] dark:text-white">
-                Admin & Operator Credentials
-              </span>
-            </div>
-            <div className="flex-1 h-[1px] bg-slate-100 dark:bg-slate-800 mx-3 hidden sm:block" />
-            <span className="text-xs text-slate-400 dark:text-slate-500 italic">
-              Authorized access
-            </span>
-          </div>
-
-          {/* Form */}
-          <form className="space-y-3.5" onSubmit={submit}>
-            {error && (
-              <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs font-semibold text-destructive flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-destructive shrink-0" />
-                {error}
-              </div>
-            )}
-
-            <FormInputField
-              id="email"
-              label="Work Email Address"
-              required
-              type="email"
-              value={email}
-              onChange={setEmail}
-              error={emailError}
-              errorMessage="Enter a valid work email address"
-              placeholder="name@company.com"
-              icon={Mail}
+          {authStep === "otp" && otpData ? (
+            <OtpVerificationCard
+              maskedEmail={otpData.maskedEmail}
+              tempToken={otpData.tempToken}
+              onVerify={handleVerifyOtp}
+              onResend={handleResendOtp}
+              onBack={() => {
+                setAuthStep("credentials");
+                setError(null);
+              }}
+              brandPrimaryColor="#4F46E5"
+              portalName="Quesole"
             />
+          ) : (
+            <>
+              <div className="flex items-center justify-between pb-0.5">
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-[#4F46E5]" />
+                  <span className="text-xs sm:text-sm font-bold text-[#181B34] dark:text-white">
+                    Admin & Operator Credentials
+                  </span>
+                </div>
+                <div className="flex-1 h-[1px] bg-slate-100 dark:bg-slate-800 mx-3 hidden sm:block" />
+                <span className="text-xs text-slate-400 dark:text-slate-500 italic">
+                  Authorized access
+                </span>
+              </div>
+
+              {/* Form */}
+              <form className="space-y-3.5" onSubmit={submit}>
+                {error && (
+                  <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs font-semibold text-destructive flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-destructive shrink-0" />
+                    {error}
+                  </div>
+                )}
+
+                <FormInputField
+                  id="email"
+                  label="Email or Username"
+                  required
+                  type="text"
+                  value={email}
+                  onChange={setEmail}
+                  error={emailError}
+                  errorMessage="Enter a valid email or username (min. 3 characters)"
+                  placeholder="Enter your email or username"
+                  icon={User}
+                />
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between min-h-[22px]">
@@ -425,30 +470,32 @@ function LoginPage() {
             </div>
           </form>
 
-          {/* SSO Options */}
-          <div className="space-y-2.5 pt-1 border-t border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block text-center">
-              Or sign in with
-            </span>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => toast.info("Single Sign-On is not configured for your domain.")}
-                className="flex items-center justify-center gap-2 h-10 sm:h-11 px-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-sm transition-all text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
-              >
-                <img src="https://www.svgrepo.com/show/355037/google.svg" className="h-4 w-4" alt="" />
-                Google
-              </button>
-              <button
-                type="button"
-                onClick={() => toast.info("Single Sign-On is not configured for your domain.")}
-                className="flex items-center justify-center gap-2 h-10 sm:h-11 px-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-sm transition-all text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
-              >
-                <img src="https://www.svgrepo.com/show/448240/microsoft.svg" className="h-4 w-4" alt="" />
-                Microsoft
-              </button>
-            </div>
-          </div>
+              {/* SSO Options */}
+              <div className="space-y-2.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block text-center">
+                  Or sign in with
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => toast.info("Single Sign-On is not configured for your domain.")}
+                    className="flex items-center justify-center gap-2 h-10 sm:h-11 px-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-sm transition-all text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    <img src="https://www.svgrepo.com/show/355037/google.svg" className="h-4 w-4" alt="" />
+                    Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toast.info("Single Sign-On is not configured for your domain.")}
+                    className="flex items-center justify-center gap-2 h-10 sm:h-11 px-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 shadow-sm transition-all text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    <img src="https://www.svgrepo.com/show/448240/microsoft.svg" className="h-4 w-4" alt="" />
+                    Microsoft
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Footer inside card */}
           <div className="flex flex-col items-center justify-center gap-1.5 pt-1 text-center">

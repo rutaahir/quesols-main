@@ -52,6 +52,7 @@ class Kiosk(BaseModel):
     company = models.ForeignKey("companies.Company", on_delete=models.CASCADE, related_name="kiosks")
     branch = models.ForeignKey("branches.Branch", on_delete=models.CASCADE, related_name="kiosks")
     kiosk_identifier = models.CharField(max_length=255)
+    username = models.CharField(max_length=150, null=True, blank=True)
     pin = models.CharField(max_length=255)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
 
@@ -92,6 +93,7 @@ class KotTerminal(BaseModel):
     company = models.ForeignKey("companies.Company", on_delete=models.CASCADE, related_name="kot_terminals")
     branch = models.ForeignKey("branches.Branch", on_delete=models.CASCADE, related_name="kot_terminals")
     terminal_identifier = models.CharField(max_length=255)
+    username = models.CharField(max_length=150, null=True, blank=True)
     pin = models.CharField(max_length=255)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
 

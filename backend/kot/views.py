@@ -226,9 +226,45 @@ class KioskViewSet(viewsets.ModelViewSet):
     serializer_class = KioskSerializer
 
     def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
+        if self.action in ["list", "retrieve", "check_username"]:
             return [IsBranchAdmin()]
         return [IsBranchAdminOnly()]
+
+    @action(detail=False, methods=["get"], url_path="check-username")
+    def check_username(self, request):
+        username = (request.query_params.get("username") or "").strip().lower()
+        exclude_id = request.query_params.get("exclude_id")
+        branch_id = request.query_params.get("branch_id") or request.query_params.get("branch")
+
+        if not username:
+            return Response({"available": False, "message": "Username cannot be empty."}, status=status.HTTP_200_OK)
+
+        if len(username) < 2:
+            return Response({"available": False, "message": "Username must be at least 2 characters."}, status=status.HTTP_200_OK)
+
+        import re
+        if not re.match(r'^[a-z0-9_-]+$', username):
+            return Response({"available": False, "message": "Username can only contain lowercase letters, numbers, hyphens, and underscores."}, status=status.HTTP_200_OK)
+
+        user = request.user
+        qs = Kiosk.all_objects.all()
+
+        if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+            if str(branch_id).isdigit():
+                qs = qs.filter(branch_id=int(branch_id))
+            else:
+                qs = qs.filter(branch__slug=branch_id)
+        elif getattr(user, "company", None):
+            qs = qs.filter(company=user.company)
+
+        if exclude_id and str(exclude_id).isdigit():
+            qs = qs.exclude(id=int(exclude_id))
+
+        taken = qs.filter(username__iexact=username).exists()
+        if taken:
+            return Response({"available": False, "message": f"Username '{username}' is already taken in this branch."}, status=status.HTTP_200_OK)
+
+        return Response({"available": True, "message": f"Username '{username}' is available!"}, status=status.HTTP_200_OK)
 
     def get_queryset(self):
         user = self.request.user
@@ -242,32 +278,71 @@ class KioskViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
+        company = getattr(user, "company", None)
         branch = serializer.validated_data.get("branch") or getattr(user, "branch", None)
         if not branch:
+            branch_id = self.request.data.get("branch") or self.request.data.get("branch_id")
+            if branch_id:
+                from branches.models import Branch
+                branch = Branch.objects.filter(id=branch_id).first()
+
+        if not branch:
             raise ValidationError("You must specify a branch to create a kiosk.")
-        
-        # Enforce kiosk quota
-        from kot.provisioning import provision_kiosks_for_branch
-        # Let's count existing kiosks
-        current_count = Kiosk.objects.filter(branch=branch, status="active").count()
-        
-        # Determine quota
+
+        if not company:
+            company = branch.company
+
+        # If a kiosk with same identifier already exists in this branch, reactivate or inform
+        kiosk_identifier = serializer.validated_data.get("kiosk_identifier", "").strip()
+        existing_kiosk = Kiosk.objects.filter(branch=branch, kiosk_identifier__iexact=kiosk_identifier).first()
+        if existing_kiosk:
+            if existing_kiosk.status != "active":
+                existing_kiosk.status = "active"
+                if serializer.validated_data.get("pin"):
+                    existing_kiosk.pin = serializer.validated_data.get("pin")
+                existing_kiosk.save()
+                serializer.instance = existing_kiosk
+                return
+            else:
+                raise ValidationError(f"A kiosk with the name '{kiosk_identifier}' already exists in this branch. Please choose a different name.")
+
+        # Determine quota from branch allocations, pooled company allocations, or fallback
         from billing.models import CompanyPlanAllocation
         alloc = CompanyPlanAllocation.objects.filter(
-            company=user.company, branch=branch, plan_component__key="paper_roll_screens"
+            company=company, branch=branch, plan_component__key__in=["paper_roll_screens", "kiosks"]
         ).first()
-        if alloc:
+        if alloc and alloc.purchased_qty is not None and alloc.purchased_qty > 0:
             quota = alloc.purchased_qty
         else:
             comp_alloc = CompanyPlanAllocation.objects.filter(
-                company=user.company, branch__isnull=True, plan_component__key="paper_roll_screens"
+                company=company, branch__isnull=True, plan_component__key__in=["paper_roll_screens", "kiosks"]
             ).first()
-            quota = comp_alloc.purchased_qty if comp_alloc else getattr(user.company.package, "max_kiosks", 0)
+            if comp_alloc and comp_alloc.purchased_qty is not None and comp_alloc.purchased_qty > 0:
+                quota = comp_alloc.purchased_qty
+            else:
+                from django.db.models import Sum
+                res = CompanyPlanAllocation.objects.filter(
+                    company=company, plan_component__key__in=["paper_roll_screens", "kiosks"]
+                ).aggregate(total=Sum('purchased_qty'))
+                if res['total'] is not None and res['total'] > 0:
+                    quota = res['total']
+                else:
+                    pkg = None
+                    try:
+                        pkg = getattr(company, "package", None)
+                    except Exception:
+                        pkg = None
+                    quota = getattr(pkg, "max_kiosks", 2) if pkg else 2
 
+        username = (serializer.validated_data.get("username") or self.request.data.get("username") or "").strip().lower()
+        if username and Kiosk.all_objects.filter(branch=branch, username__iexact=username).exists():
+            raise ValidationError(f"Username '{username}' is already in use by another kiosk in this branch.")
+
+        current_count = Kiosk.objects.filter(branch=branch, status="active").count()
         if current_count >= quota:
-            raise ValidationError(f"Plan limit reached: you cannot create more than {quota} active kiosks.")
+            raise ValidationError(f"Plan limit reached: you cannot create more than {quota} active kiosks for this branch. Please purchase an add-on.")
 
-        serializer.save(company=user.company, branch=branch)
+        serializer.save(company=company, branch=branch)
 
     @action(detail=True, methods=["post"], url_path="regenerate-pin")
     def regenerate_pin(self, request, pk=None):
@@ -316,14 +391,35 @@ class KioskLoginView(APIView):
 
     def post(self, request):
         kiosk_id = request.data.get("kiosk_id")
-        pin = request.data.get("pin")
+        branch_id = request.data.get("branch_id")
+        username = (request.data.get("username") or "").strip()
+        pin = str(request.data.get("pin") or "").strip()
 
-        if not kiosk_id or not pin:
-            return Response({"error": "kiosk_id and pin are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not pin:
+            return Response({"error": "PIN is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not username and not kiosk_id:
+            return Response({"error": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Lookup kiosk
+        kiosk = None
+        if kiosk_id:
+            try:
+                kiosk = Kiosk.objects.get(id=kiosk_id, status="active")
+            except Kiosk.DoesNotExist:
+                return Response({"error": "Kiosk terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        elif branch_id and username:
+            kiosk = Kiosk.objects.filter(branch_id=branch_id, username__iexact=username, status="active").first()
+            if not kiosk:
+                kiosk = Kiosk.objects.filter(branch_id=branch_id, kiosk_identifier__iexact=username, status="active").first()
+        elif username:
+            kiosk = Kiosk.objects.filter(username__iexact=username, status="active").first()
+
+        if not kiosk:
+            return Response({"error": "No active kiosk terminal found matching this username."}, status=status.HTTP_404_NOT_FOUND)
 
         # Scoped failed attempts lockout key
-        lockout_key = f"kiosk_lockout_{kiosk_id}"
-        cooldown_key = f"kiosk_cooldown_{kiosk_id}"
+        lockout_key = f"kiosk_lockout_{kiosk.id}"
+        cooldown_key = f"kiosk_cooldown_{kiosk.id}"
 
         # Check cooldown
         if cache.get(cooldown_key):
@@ -331,12 +427,14 @@ class KioskLoginView(APIView):
                 "error": "Too many failed attempts. Please try again after 60 seconds."
             }, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        try:
-            kiosk = Kiosk.objects.get(id=kiosk_id, status="active")
-        except Kiosk.DoesNotExist:
-            return Response({"error": "Kiosk not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        # Validate username match if both provided
+        if username and kiosk.username and kiosk.username.lower() != username.lower():
+            if kiosk.kiosk_identifier.lower() != username.lower():
+                fails = cache.get(lockout_key, 0) + 1
+                cache.set(lockout_key, fails, timeout=300)
+                return Response({"error": "Invalid username or PIN."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if kiosk.pin == pin:
+        if str(kiosk.pin).strip() == pin:
             current_token = request.data.get("session_token")
             if kiosk.is_session_active() and kiosk.session_token != current_token:
                 return Response({
@@ -371,6 +469,7 @@ class KioskLoginView(APIView):
                 "session_token": new_session_token,
                 "kiosk_id": str(kiosk.id),
                 "kiosk_identifier": kiosk.kiosk_identifier,
+                "username": kiosk.username,
             }, status=status.HTTP_200_OK)
         else:
             # Increment failed attempts
@@ -385,7 +484,7 @@ class KioskLoginView(APIView):
                     "error": "Too many failed attempts. Please try again after 60 seconds."
                 }, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-            return Response({"error": f"Invalid PIN. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"Invalid username or PIN. {5 - fails} attempts remaining."}, status=status.HTTP_400_BAD_REQUEST)
 
 class KioskLogoutView(APIView):
     permission_classes = [AllowAny]
@@ -421,6 +520,42 @@ from kot.serializers import KotTerminalSerializer, PublicKotTerminalSerializer
 class KotTerminalViewSet(viewsets.ModelViewSet):
     serializer_class = KotTerminalSerializer
     permission_classes = [IsBranchAdmin]
+
+    @action(detail=False, methods=["get"], url_path="check-username")
+    def check_username(self, request):
+        username = (request.query_params.get("username") or "").strip().lower()
+        exclude_id = request.query_params.get("exclude_id")
+        branch_id = request.query_params.get("branch_id") or request.query_params.get("branch")
+
+        if not username:
+            return Response({"available": False, "message": "Username cannot be empty."}, status=status.HTTP_200_OK)
+
+        if len(username) < 2:
+            return Response({"available": False, "message": "Username must be at least 2 characters."}, status=status.HTTP_200_OK)
+
+        import re
+        if not re.match(r'^[a-z0-9_-]+$', username):
+            return Response({"available": False, "message": "Username can only contain lowercase letters, numbers, hyphens, and underscores."}, status=status.HTTP_200_OK)
+
+        user = request.user
+        qs = KotTerminal.all_objects.all()
+
+        if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+            if str(branch_id).isdigit():
+                qs = qs.filter(branch_id=int(branch_id))
+            else:
+                qs = qs.filter(branch__slug=branch_id)
+        elif getattr(user, "company", None):
+            qs = qs.filter(company=user.company)
+
+        if exclude_id and str(exclude_id).isdigit():
+            qs = qs.exclude(id=int(exclude_id))
+
+        taken = qs.filter(username__iexact=username).exists()
+        if taken:
+            return Response({"available": False, "message": f"Username '{username}' is already taken in this branch."}, status=status.HTTP_200_OK)
+
+        return Response({"available": True, "message": f"Username '{username}' is available!"}, status=status.HTTP_200_OK)
 
     def list(self, request, *args, **kwargs):
         branch_id = request.query_params.get("branch_id") or request.query_params.get("branch")
@@ -511,6 +646,10 @@ class KotTerminalViewSet(viewsets.ModelViewSet):
                 next_num += 1
             requested_identifier = f"KOT {next_num}"
 
+        username = (serializer.validated_data.get("username") or self.request.data.get("username") or "").strip().lower()
+        if username and KotTerminal.all_objects.filter(branch=branch, username__iexact=username).exists():
+            raise ValidationError(f"Username '{username}' is already in use by another KOT terminal in this branch.")
+
         pin = serializer.validated_data.get("pin") or "".join(str(random.randint(0, 9)) for _ in range(4))
         serializer.save(company=user.company, branch=branch, terminal_identifier=requested_identifier, pin=pin)
 
@@ -567,25 +706,48 @@ class KotTerminalLoginView(APIView):
 
     def post(self, request):
         terminal_id = request.data.get("terminal_id") or request.data.get("kot_id")
-        pin = request.data.get("pin")
+        branch_id = request.data.get("branch_id")
+        username = (request.data.get("username") or "").strip()
+        pin = str(request.data.get("pin") or "").strip()
 
-        if not terminal_id or not pin:
-            return Response({"error": "terminal_id and pin are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not pin:
+            return Response({"error": "PIN is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not username and not terminal_id:
+            return Response({"error": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        lockout_key = f"kot_lockout_{terminal_id}"
-        cooldown_key = f"kot_cooldown_{terminal_id}"
+        # Lookup terminal
+        terminal = None
+        if terminal_id:
+            try:
+                terminal = KotTerminal.objects.get(id=terminal_id, status="active")
+            except KotTerminal.DoesNotExist:
+                return Response({"error": "KOT terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        elif branch_id and username:
+            terminal = KotTerminal.objects.filter(branch_id=branch_id, username__iexact=username, status="active").first()
+            if not terminal:
+                terminal = KotTerminal.objects.filter(branch_id=branch_id, terminal_identifier__iexact=username, status="active").first()
+        elif username:
+            terminal = KotTerminal.objects.filter(username__iexact=username, status="active").first()
+
+        if not terminal:
+            return Response({"error": "No active KOT terminal found matching this username."}, status=status.HTTP_404_NOT_FOUND)
+
+        lockout_key = f"kot_lockout_{terminal.id}"
+        cooldown_key = f"kot_cooldown_{terminal.id}"
 
         if cache.get(cooldown_key):
             return Response({
                 "error": "Too many failed attempts. Please try again after 60 seconds."
             }, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        try:
-            terminal = KotTerminal.objects.get(id=terminal_id, status="active")
-        except KotTerminal.DoesNotExist:
-            return Response({"error": "KOT terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        # Validate username match if provided
+        if username and terminal.username and terminal.username.lower() != username.lower():
+            if terminal.terminal_identifier.lower() != username.lower():
+                fails = cache.get(lockout_key, 0) + 1
+                cache.set(lockout_key, fails, timeout=300)
+                return Response({"error": "Invalid username or PIN."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if terminal.pin == pin:
+        if str(terminal.pin).strip() == pin:
             cache.delete(lockout_key)
 
             new_session_token = str(uuid.uuid4())
@@ -611,6 +773,7 @@ class KotTerminalLoginView(APIView):
                 "session_token": new_session_token,
                 "terminal_id": str(terminal.id),
                 "terminal_identifier": terminal.terminal_identifier,
+                "username": terminal.username or "",
             }, status=status.HTTP_200_OK)
         else:
             fails = cache.get(lockout_key, 0) + 1

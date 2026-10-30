@@ -130,19 +130,43 @@ class DeskViewSet(viewsets.ModelViewSet):
         
         # Enforce operator_screens branch-scoped or company plan limit
         from billing.models import CompanyPlanAllocation
-        # 1. Check branch-specific allocation
-        alloc = CompanyPlanAllocation.objects.filter(company=company, branch=branch, plan_component__key="operator_screens").first()
-        if alloc:
+        # 1. Check branch-specific allocation first
+        alloc = CompanyPlanAllocation.objects.filter(
+            company=company,
+            branch=branch,
+            plan_component__key__in=["operator_screens", "operator_seats"]
+        ).first()
+
+        if alloc and alloc.purchased_qty is not None and alloc.purchased_qty > 0:
             purchased_qty = alloc.purchased_qty
             current_total = Desk.objects.filter(branch=branch, is_active=True).count()
             limit_msg = f"Branch plan limit reached ({purchased_qty} operator screens allocated for this branch). Please purchase an add-on."
         else:
-            # 2. Fallback to company-wide pooled limit (legacy fallback)
-            from django.db.models import Sum
-            res = CompanyPlanAllocation.objects.filter(company=company, plan_component__key="operator_screens").aggregate(total=Sum('purchased_qty'))
-            purchased_qty = res['total'] if res['total'] is not None else 1
-            current_total = Desk.objects.filter(company=company, is_active=True).count()
-            limit_msg = f"Plan limit reached ({purchased_qty} operator screens allocated). Please purchase an add-on."
+            # 2. Check company-wide pooled allocation (branch__isnull=True)
+            pooled_alloc = CompanyPlanAllocation.objects.filter(
+                company=company,
+                branch__isnull=True,
+                plan_component__key__in=["operator_screens", "operator_seats"]
+            ).first()
+            if pooled_alloc and pooled_alloc.purchased_qty is not None and pooled_alloc.purchased_qty > 0:
+                purchased_qty = pooled_alloc.purchased_qty
+                current_total = Desk.objects.filter(company=company, is_active=True).count()
+                limit_msg = f"Plan limit reached ({purchased_qty} operator screens allocated). Please purchase an add-on."
+            else:
+                from django.db.models import Sum
+                res = CompanyPlanAllocation.objects.filter(
+                    company=company,
+                    plan_component__key__in=["operator_screens", "operator_seats"]
+                ).aggregate(total=Sum('purchased_qty'))
+                
+                if res['total'] is not None and res['total'] > 0:
+                    purchased_qty = res['total']
+                    current_total = Desk.objects.filter(company=company, is_active=True).count()
+                    limit_msg = f"Plan limit reached ({purchased_qty} operator screens allocated). Please purchase an add-on."
+                else:
+                    purchased_qty = 5
+                    current_total = Desk.objects.filter(branch=branch, is_active=True).count()
+                    limit_msg = f"Plan limit reached ({purchased_qty} operator screens allocated). Please purchase an add-on."
 
         if current_total >= purchased_qty:
             raise ValidationError(limit_msg)
@@ -1702,7 +1726,7 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
             qs = OperatorAttendance.objects.filter(company=user.company)
         
         branch_id = self.request.query_params.get("branch") or self.request.query_params.get("branch_id")
-        if branch_id:
+        if branch_id and str(branch_id).lower() != "all":
             qs = qs.filter(branch_id=branch_id)
 
         user_id = self.request.query_params.get("user_id")
@@ -1728,7 +1752,7 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
             user=user,
             status__in=["checked_in", "on_break"]
         )
-        if branch_id:
+        if branch_id and str(branch_id).lower() != "all":
             qs = qs.filter(branch_id=branch_id)
             
         attendance = qs.order_by("-check_in_time").first()
@@ -1743,6 +1767,17 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="check-in")
     def check_in(self, request):
         user = request.user
+        staff_id = request.data.get("user_id") or request.data.get("staff_id")
+        if staff_id and user.role in ["company_admin", "super_admin", "branch_admin"]:
+            from accounts.models import User
+            try:
+                if user.role == "super_admin":
+                    user = User.objects.get(id=staff_id)
+                else:
+                    user = User.objects.get(id=staff_id, company=user.company)
+            except User.DoesNotExist:
+                return Response({"error": "Selected staff member not found."}, status=status.HTTP_404_NOT_FOUND)
+
         branch_id = request.data.get("branch_id") or request.data.get("branch")
         desk_id = request.data.get("desk_id") or request.data.get("desk")
 
@@ -1804,7 +1839,12 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
         desk_id = request.data.get("desk_id") or request.data.get("desk")
 
         if attendance_id:
-            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+            if user.role in ["company_admin", "super_admin"]:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, company=user.company).first() if user.role != "super_admin" else OperatorAttendance.objects.filter(id=attendance_id).first()
+            elif user.role == "branch_admin":
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, branch_id=user.branch_id).first()
+            else:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
         else:
             attendance = OperatorAttendance.objects.filter(user=user, status__in=["checked_in", "on_break"]).order_by("-check_in_time").first()
 
@@ -1863,7 +1903,12 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
         desk_id = request.data.get("desk_id") or request.data.get("desk")
 
         if attendance_id:
-            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+            if user.role in ["company_admin", "super_admin"]:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, company=user.company).first() if user.role != "super_admin" else OperatorAttendance.objects.filter(id=attendance_id).first()
+            elif user.role == "branch_admin":
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, branch_id=user.branch_id).first()
+            else:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
         else:
             attendance = OperatorAttendance.objects.filter(user=user, status="on_break").order_by("-check_in_time").first()
 
@@ -1913,7 +1958,12 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
         notes = request.data.get("notes", "")
 
         if attendance_id:
-            attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
+            if user.role in ["company_admin", "super_admin"]:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, company=user.company).first() if user.role != "super_admin" else OperatorAttendance.objects.filter(id=attendance_id).first()
+            elif user.role == "branch_admin":
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, branch_id=user.branch_id).first()
+            else:
+                attendance = OperatorAttendance.objects.filter(id=attendance_id, user=user).first()
         else:
             attendance = OperatorAttendance.objects.filter(user=user, status__in=["checked_in", "on_break"]).order_by("-check_in_time").first()
 
@@ -1946,7 +1996,7 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
 
             if attendance.desk:
                 attendance.desk.status = "offline"
-                if attendance.desk.current_operator == user:
+                if attendance.desk.current_operator in [attendance.user, user]:
                     attendance.desk.current_operator = None
                 attendance.desk.save()
                 channel_layer = get_channel_layer()
@@ -1956,3 +2006,9 @@ class OperatorAttendanceViewSet(viewsets.ModelViewSet):
                     async_to_sync(channel_layer.group_send)(f"branch_{attendance.branch.id}_public", payload)
 
         return Response(OperatorAttendanceSerializer(attendance).data, status=status.HTTP_200_OK)
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if user.role != "super_admin" and instance.company != user.company:
+            raise PermissionDenied("You do not have permission to delete this attendance record.")
+        instance.delete()

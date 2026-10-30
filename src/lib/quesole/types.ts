@@ -148,6 +148,7 @@ export interface Staff {
   companyId: string;
   branchId: string;
   name: string;
+  username?: string | null | undefined;
   email: string;
   role: Exclude<Role, "customer" | "super_admin">;
   status: "online" | "break" | "offline";
@@ -366,6 +367,7 @@ export interface Kiosk {
   company: number;
   branch: number;
   kiosk_identifier: string;
+  username?: string;
   pin: string;
   status: "active" | "inactive";
   session_token: string | null;

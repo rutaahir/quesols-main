@@ -1,12 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard, ShieldCheck, Loader2, CloudSun, MapPin, TrendingUp, TrendingDown, CheckCircle2, MoreHorizontal, Activity, FileText, BarChart3, PieChart as PieChartIcon, LayoutDashboard, Tv } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard, ShieldCheck, Loader2, CloudSun, MapPin, TrendingUp, TrendingDown, CheckCircle2, MoreHorizontal, Activity, FileText, BarChart3, PieChart as PieChartIcon, LayoutDashboard, Tv, AtSign, AlertCircle, KeyRound, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch, planOf, useQuesole, branchStats, isNoServiceMode, calculateBranchReadiness } from "@/lib/quesole/store";
-import { getNetworkOrigin } from "@/lib/api-config";
+import { getNetworkOrigin, getApiUrl } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
 import { DisplayTerminalsManager } from "@/components/console/display-terminals-manager";
 import { BranchAttendanceLogsView } from "@/components/console/branch-attendance-logs";
@@ -35,15 +35,15 @@ export function BranchDesksServicesManager({
 }) {
   const { state, actions, session, refresh } = useQuesole();
   const isBranchAdmin = session?.role === "branch_admin";
-  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot">(() => {
+  const [activeTab, setActiveTab] = useState<"overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot" | "qr">(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const urlTab = params.get("tab") as any;
-      if (urlTab && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot"].includes(urlTab)) {
+      if (urlTab && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot", "qr"].includes(urlTab)) {
         return urlTab;
       }
       const saved = sessionStorage.getItem(`branch_active_tab_${branchId}`) || localStorage.getItem(`branch_active_tab_${branchId}`);
-      if (saved && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot"].includes(saved)) {
+      if (saved && ["overview", "services", "desks", "staff", "attendance", "kiosks", "displays", "online_booking", "kot", "qr"].includes(saved)) {
         return saved as any;
       }
     }
@@ -77,7 +77,7 @@ export function BranchDesksServicesManager({
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const handleTabSelect = (tab: "overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot") => {
+  const handleTabSelect = (tab: "overview" | "services" | "desks" | "staff" | "attendance" | "kiosks" | "displays" | "online_booking" | "kot" | "qr") => {
     setActiveTab(tab);
     
     // Auto-scroll so the tabview bar goes smoothly to top and docks stickily
@@ -115,8 +115,21 @@ export function BranchDesksServicesManager({
   // Add Kiosk Form State
   const [isAddKioskModalOpen, setIsAddKioskModalOpen] = useState(false);
   const [newKioskName, setNewKioskName] = useState("");
+  const [newKioskUsername, setNewKioskUsername] = useState("");
   const [newKioskPin, setNewKioskPin] = useState("");
+  const [isKioskUserManuallyEdited, setIsKioskUserManuallyEdited] = useState(false);
+  const [addKioskUserStatus, setAddKioskUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [addKioskUserMessage, setAddKioskUserMessage] = useState("");
   const [isCreatingKiosk, setIsCreatingKiosk] = useState(false);
+
+  // Edit Kiosk Credentials State
+  const [editingKiosk, setEditingKiosk] = useState<any | null>(null);
+  const [editKioskName, setEditKioskName] = useState("");
+  const [editKioskUsername, setEditKioskUsername] = useState("");
+  const [editKioskPin, setEditKioskPin] = useState("");
+  const [editKioskUserStatus, setEditKioskUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [editKioskUserMessage, setEditKioskUserMessage] = useState("");
+  const [isSavingKioskEdit, setIsSavingKioskEdit] = useState(false);
 
   const branch = state.branches.find((b) => String(b.id) === String(branchId));
   const company = state.companies.find((c) => String(c.id) === String(branch?.companyId));
@@ -258,7 +271,7 @@ export function BranchDesksServicesManager({
 
         return {
           id: d.id,
-          name: d.name || `Desk ${idx + 1}`,
+          name: (d as any).name || d.label || `Desk ${idx + 1}`,
           status: isOffline ? "Offline" : isBusy ? "Busy" : "Available",
           statusVariant: isOffline ? "offline" : isBusy ? "busy" : "available",
           queueCount: isOffline ? "-" : `${qCount} in queue`,
@@ -285,11 +298,12 @@ export function BranchDesksServicesManager({
     if (branchRecent.length >= 3) {
       return branchRecent.map((t, idx) => {
         const sName = branchServices.find((s) => s.id === t.serviceId)?.name || (idx % 2 === 0 ? "Prepaid" : "Post Paid");
-        const dName = branchDesks.find((d) => d.id === t.deskId)?.name || `Desk ${(idx % 3) + 1}`;
+        const targetDesk = branchDesks.find((d) => d.id === t.deskId);
+        const dName = targetDesk ? ((targetDesk as any).name || targetDesk.label || `Desk ${(idx % 3) + 1}`) : `Desk ${(idx % 3) + 1}`;
         const timeStr = t.joinedAt ? new Date(t.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : `10:${25 - idx * 5} AM`;
         return {
-          token: t.token_number || t.number || `A03${6 - idx}`,
-          customer: t.customer_name || t.customerName || ["Amit Patel", "Neha Shah", "Ketan Joshi", "Priya Desai", "Rahul Mehta"][idx] || "Customer",
+          token: (t as any).token_number || t.number || `A03${6 - idx}`,
+          customer: (t as any).customer_name || t.customerName || ["Amit Patel", "Neha Shah", "Ketan Joshi", "Priya Desai", "Rahul Mehta"][idx] || "Customer",
           service: sName,
           desk: dName,
           time: timeStr,
@@ -308,13 +322,116 @@ export function BranchDesksServicesManager({
     ];
   }, [state.tickets, branchId, branchServices, branchDesks]);
 
-  // Auto-initialize new kiosk form fields on open
+  // Real-time username availability check for Add Kiosk
   useEffect(() => {
-    if (isAddKioskModalOpen) {
-      setNewKioskName(`Kiosk ${branchKiosks.length + 1}`);
-      setNewKioskPin(Math.floor(1000 + Math.random() * 9000).toString());
+    if (!isAddKioskModalOpen) {
+      setAddKioskUserStatus("idle");
+      setAddKioskUserMessage("");
+      return;
     }
-  }, [isAddKioskModalOpen, branchKiosks.length]);
+    const clean = newKioskUsername.trim().toLowerCase();
+    if (!clean) {
+      setAddKioskUserStatus("invalid");
+      setAddKioskUserMessage("Username is required.");
+      return;
+    }
+    if (clean.length < 2) {
+      setAddKioskUserStatus("invalid");
+      setAddKioskUserMessage("Min 2 characters required.");
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(clean)) {
+      setAddKioskUserStatus("invalid");
+      setAddKioskUserMessage("Only letters, numbers, hyphens, and underscores allowed.");
+      return;
+    }
+
+    setAddKioskUserStatus("checking");
+    setAddKioskUserMessage("Checking availability in database...");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/kot/kiosks/check-username/?username=${encodeURIComponent(clean)}&branch_id=${branchId}`
+        );
+        if (res.available) {
+          setAddKioskUserStatus("available");
+          setAddKioskUserMessage(res.message || "Username is available!");
+        } else {
+          setAddKioskUserStatus("taken");
+          setAddKioskUserMessage(res.message || "Username already taken.");
+        }
+      } catch (err: any) {
+        setAddKioskUserStatus("invalid");
+        setAddKioskUserMessage(err.message || "Error validating username.");
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [newKioskUsername, isAddKioskModalOpen, branchId]);
+
+  // Real-time username availability check for Edit Kiosk
+  useEffect(() => {
+    if (!editingKiosk) {
+      setEditKioskUserStatus("idle");
+      setEditKioskUserMessage("");
+      return;
+    }
+    const clean = editKioskUsername.trim().toLowerCase();
+    if (!clean) {
+      setEditKioskUserStatus("invalid");
+      setEditKioskUserMessage("Username is required.");
+      return;
+    }
+    if (clean.length < 2) {
+      setEditKioskUserStatus("invalid");
+      setEditKioskUserMessage("Min 2 characters required.");
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(clean)) {
+      setEditKioskUserStatus("invalid");
+      setEditKioskUserMessage("Only letters, numbers, hyphens, and underscores allowed.");
+      return;
+    }
+
+    setEditKioskUserStatus("checking");
+    setEditKioskUserMessage("Checking availability in database...");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/kot/kiosks/check-username/?username=${encodeURIComponent(clean)}&branch_id=${branchId}&exclude_id=${editingKiosk.id}`
+        );
+        if (res.available) {
+          setEditKioskUserStatus("available");
+          setEditKioskUserMessage(res.message || "Username is available!");
+        } else {
+          setEditKioskUserStatus("taken");
+          setEditKioskUserMessage(res.message || "Username already taken.");
+        }
+      } catch (err: any) {
+        setEditKioskUserStatus("invalid");
+        setEditKioskUserMessage(err.message || "Error validating username.");
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [editKioskUsername, editingKiosk, branchId]);
+
+  const openAddKioskModal = () => {
+    const existingNums = branchKiosks
+      .map(k => {
+        const m = (k.kiosk_identifier || "").match(/\d+/);
+        return m ? parseInt(m[0], 10) : 0;
+      })
+      .filter(n => n > 0);
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : branchKiosks.length + 1;
+    setNewKioskName(`Kiosk ${nextNum}`);
+    setNewKioskUsername("");
+    setNewKioskPin(String(Math.floor(1000 + Math.random() * 9000)));
+    setIsKioskUserManuallyEdited(false);
+    setAddKioskUserStatus("idle");
+    setAddKioskUserMessage("");
+    setIsAddKioskModalOpen(true);
+  };
 
   const handleCreateKiosk = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,8 +439,24 @@ export function BranchDesksServicesManager({
       toast.error("Kiosk name is required.");
       return;
     }
+    if (!newKioskUsername.trim()) {
+      toast.error("Kiosk username is required.");
+      return;
+    }
     if (newKioskPin.length !== 4) {
       toast.error("Kiosk PIN must be exactly 4 digits.");
+      return;
+    }
+    if (addKioskUserStatus === "taken") {
+      toast.error(addKioskUserMessage || "Username is already taken.");
+      return;
+    }
+    if (addKioskUserStatus === "checking") {
+      toast.error("Please wait while verifying username availability.");
+      return;
+    }
+    if (addKioskUserStatus === "invalid") {
+      toast.error(addKioskUserMessage || "Please enter a valid username.");
       return;
     }
     setIsCreatingKiosk(true);
@@ -332,19 +465,80 @@ export function BranchDesksServicesManager({
         method: "POST",
         body: JSON.stringify({
           kiosk_identifier: newKioskName.trim(),
+          username: newKioskUsername.trim().toLowerCase(),
           pin: newKioskPin,
           branch: branchId
         })
       });
-      toast.success("Kiosk created successfully!");
+      toast.success(`Kiosk "${newKioskName.trim()}" created successfully!`);
       setIsAddKioskModalOpen(false);
       setNewKioskName("");
+      setNewKioskUsername("");
       setNewKioskPin("");
       await refresh();
     } catch (err: any) {
-      toast.error(err.message || "Failed to create kiosk.");
+      if (err.message && (err.message.toLowerCase().includes("limit") || err.message.toLowerCase().includes("reached"))) {
+        toast.error(
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold text-xs leading-normal">{err.message}</span>
+            <span className="text-[10px] text-muted-foreground leading-normal">
+              You can upgrade your subscription limits in the Billing tab of the Company Admin Console.
+            </span>
+          </div>,
+          { duration: 8000 }
+        );
+      } else {
+        toast.error(err.message || "Failed to create kiosk.");
+      }
     } finally {
       setIsCreatingKiosk(false);
+    }
+  };
+
+  const handleUpdateKioskCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingKiosk) return;
+    if (!editKioskName.trim()) {
+      toast.error("Kiosk name is required.");
+      return;
+    }
+    if (!editKioskUsername.trim()) {
+      toast.error("Username is required.");
+      return;
+    }
+    if (editKioskPin.length !== 4) {
+      toast.error("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (editKioskUserStatus === "taken") {
+      toast.error(editKioskUserMessage || "Username is already taken.");
+      return;
+    }
+    if (editKioskUserStatus === "checking") {
+      toast.error("Please wait while verifying username availability.");
+      return;
+    }
+    if (editKioskUserStatus === "invalid") {
+      toast.error(editKioskUserMessage || "Please enter a valid username.");
+      return;
+    }
+    setIsSavingKioskEdit(true);
+    try {
+      await apiFetch(`/api/kot/kiosks/${editingKiosk.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          kiosk_identifier: editKioskName.trim(),
+          username: editKioskUsername.trim().toLowerCase(),
+          pin: editKioskPin.trim(),
+        }),
+      });
+      toast.success("Kiosk credentials updated successfully!");
+      setEditingKiosk(null);
+      await refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update kiosk credentials.");
+    } finally {
+      setIsSavingKioskEdit(false);
     }
   };
 
@@ -368,8 +562,9 @@ export function BranchDesksServicesManager({
   const isServiceLimitReached = usedServices >= purchasedServices;
 
   const noService = isNoServiceMode(companyId, state.companyAllocations);
-  const purchasedKiosks = getPurchasedQty("paper_roll_screens", 0);
-  const purchasedQRs = getPurchasedQty("printed_qr", 0);
+  const purchasedKiosks = getPurchasedQty("paper_roll_screens", 2);
+  const purchasedDisplays = getPurchasedQty("live_display_screens", 1);
+  const purchasedQRs = getPurchasedQty("printed_qr", 1);
   const showServicesTab = branch?.mode === "SERVICE_BASED" && !noService;
   const isSingleQueue = branch?.mode === "NON_SERVICE_BASED" || noService;
 
@@ -417,10 +612,46 @@ export function BranchDesksServicesManager({
   const [addStaffStep, setAddStaffStep] = useState<1 | 2>(1);
   const [newStaffFirstName, setNewStaffFirstName] = useState("");
   const [newStaffLastName, setNewStaffLastName] = useState("");
+  const [newStaffUsername, setNewStaffUsername] = useState("");
+  const [usernameCheckStatus, setUsernameCheckStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [usernameCheckMessage, setUsernameCheckMessage] = useState("");
   const [newStaffEmail, setNewStaffEmail] = useState("");
   const [newStaffPassword, setNewStaffPassword] = useState("Staff123!");
   const [showPassword, setShowPassword] = useState(false);
   const [newStaffRole, setNewStaffRole] = useState<"desk_staff" | "branch_admin">("desk_staff");
+
+  const checkStaffUsername = async (rawUsername: string) => {
+    const clean = rawUsername.trim().toLowerCase();
+    if (!clean) {
+      setUsernameCheckStatus("idle");
+      setUsernameCheckMessage("");
+      return;
+    }
+    if (clean.length < 3) {
+      setUsernameCheckStatus("invalid");
+      setUsernameCheckMessage("Min 3 characters");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_.-]+$/.test(clean)) {
+      setUsernameCheckStatus("invalid");
+      setUsernameCheckMessage("Letters, numbers, _, -, . only");
+      return;
+    }
+    setUsernameCheckStatus("checking");
+    try {
+      const res = await fetch(getApiUrl(`/api/users/check-username/?username=${encodeURIComponent(clean)}`));
+      const data = await res.json();
+      if (data.available) {
+        setUsernameCheckStatus("available");
+        setUsernameCheckMessage("Available");
+      } else {
+        setUsernameCheckStatus("taken");
+        setUsernameCheckMessage(data.message || "Username is already taken");
+      }
+    } catch {
+      setUsernameCheckStatus("idle");
+    }
+  };
 
   // Step 2 Desk Assignment Options
   const [deskOption, setDeskOption] = useState<"existing" | "new">("existing");
@@ -648,8 +879,19 @@ export function BranchDesksServicesManager({
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     const emailStr = newStaffEmail.trim();
+    const usernameStr = newStaffUsername.trim().toLowerCase();
     if (!emailStr || !newStaffFirstName.trim() || !newStaffLastName.trim()) {
       toast.error("Please fill in all required fields.");
+      return;
+    }
+
+    if (usernameStr && usernameStr.length < 3) {
+      toast.error("Username must be at least 3 characters.");
+      return;
+    }
+
+    if (usernameCheckStatus === "taken") {
+      toast.error("The username is already taken. Please choose another.");
       return;
     }
 
@@ -677,6 +919,7 @@ export function BranchDesksServicesManager({
         await actions.createBranchStaff({
           branchId: branch.id,
           email: emailStr,
+          username: usernameStr || undefined,
           password: newStaffPassword.trim() || "Staff123!",
           firstName: newStaffFirstName.trim(),
           lastName: newStaffLastName.trim(),
@@ -684,6 +927,8 @@ export function BranchDesksServicesManager({
         });
         toast.success(`Branch Admin "${emailStr}" created successfully!`);
         setIsAddStaffModalOpen(false);
+        setNewStaffUsername("");
+        setUsernameCheckStatus("idle");
       } catch (err: any) {
         toast.error(err.message || "Failed to create Branch Admin.");
       } finally {
@@ -747,6 +992,7 @@ export function BranchDesksServicesManager({
       const res = await actions.createBranchStaff({
         branchId: branch.id,
         email: emailStr,
+        username: usernameStr || undefined,
         password: newStaffPassword.trim() || "Staff123!",
         firstName: newStaffFirstName.trim(),
         lastName: newStaffLastName.trim(),
@@ -763,6 +1009,8 @@ export function BranchDesksServicesManager({
       const assignedDeskLabel = branchDesks.find((d) => d.id === targetDeskId)?.label || inlineDeskName.trim() || "assigned desk";
       toast.success(`Desk Operator "${emailStr}" created & assigned to ${assignedDeskLabel}!`);
       setIsAddStaffModalOpen(false);
+      setNewStaffUsername("");
+      setUsernameCheckStatus("idle");
     } catch (err: any) {
       toast.error(err.message || "Failed to create staff account.");
     } finally {
@@ -890,9 +1138,39 @@ export function BranchDesksServicesManager({
             </button>
           )}
           <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-          <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
-            {branch.name}
-          </span>
+          {state.branches.filter((b) => String(b.companyId) === String(companyId)).length > 1 ? (
+            <select
+              value={branch?.id || branchId}
+              onChange={(e) => {
+                const newId = e.target.value;
+                if (typeof window !== "undefined") {
+                  const params = new URLSearchParams(window.location.search);
+                  params.set("branchId", newId);
+                  params.set("view", "branch_desks");
+                  if (activeTab) params.set("tab", activeTab);
+                  if (companySlug) {
+                    sessionStorage.setItem(`admin_selected_branch_${companySlug}`, newId);
+                    localStorage.setItem(`admin_selected_branch_${companySlug}`, newId);
+                  }
+                  window.location.href = window.location.pathname + "?" + params.toString();
+                }
+              }}
+              className="font-bold text-slate-800 dark:text-slate-200 bg-transparent border-b border-dashed border-slate-400 hover:border-[#5B50EB] hover:text-[#5B50EB] cursor-pointer text-sm py-0.5 focus:outline-none"
+              title="Click to switch branch"
+            >
+              {state.branches
+                .filter((b) => String(b.companyId) === String(companyId))
+                .map((b) => (
+                  <option key={b.id} value={b.id} className="bg-background text-foreground font-medium">
+                    {b.name}
+                  </option>
+                ))}
+            </select>
+          ) : (
+            <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
+              {branch?.name}
+            </span>
+          )}
         </div>
 
         {/* Right side: Open Live Display, More Actions, Active Status */}
@@ -1193,7 +1471,7 @@ export function BranchDesksServicesManager({
             )}
 
             {/* Tab 6: Kiosks */}
-            {purchasedKiosks > 0 && branch?.channel_type !== "ONLINE_ONLY" && (
+            {branch?.channel_type !== "ONLINE_ONLY" && (
               <button
                 onClick={() => handleTabSelect("kiosks")}
                 className={cn(
@@ -1203,7 +1481,13 @@ export function BranchDesksServicesManager({
                     : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
                 )}
               >
-                <Monitor className="h-3.5 w-3.5" /> Kiosks
+                <Printer className="h-3.5 w-3.5" /> Kiosks
+                <span className={cn(
+                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
+                  activeTab === "kiosks" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
+                )}>
+                  {branchKiosks.length}
+                </span>
               </button>
             )}
 
@@ -1219,16 +1503,25 @@ export function BranchDesksServicesManager({
                 )}
               >
                 <Tv className="h-3.5 w-3.5" /> Live Displays
-                <span className={cn(
-                  "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold font-mono",
-                  activeTab === "displays" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600/60"
-                )}>
-                  2
-                </span>
               </button>
             )}
 
-            {/* Tab 8: Online Booking */}
+            {/* Tab 8: QR Displays */}
+            {branch?.channel_type !== "ONLINE_ONLY" && (
+              <button
+                onClick={() => handleTabSelect("qr")}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95",
+                  activeTab === "qr"
+                    ? "bg-[#5B50EB] text-white shadow-sm shadow-[#5B50EB]/30 ring-1 ring-[#5B50EB]/50 font-black"
+                    : "bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border border-slate-200/70 dark:border-slate-700/60 shadow-2xs hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-950 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-750"
+                )}
+              >
+                <QrCode className="h-3.5 w-3.5" /> QR Displays
+              </button>
+            )}
+
+            {/* Tab 9: Online Booking */}
             {branch?.channel_type !== "ONSITE_ONLY" && (
               <button
                 onClick={() => handleTabSelect("online_booking")}
@@ -1243,9 +1536,8 @@ export function BranchDesksServicesManager({
               </button>
             )}
 
-            {/* Tab 9: KOT Delivery */}
-            {(session?.role === "company_admin" || session?.role === "branch_admin") && 
-             (branch?.enabledMethods?.map(Number).includes(3) || branch?.enabledMethods?.map(Number).includes(4)) && (
+            {/* Tab 10: KOT Delivery */}
+            {(session?.role === "company_admin" || session?.role === "branch_admin") && (
               <button
                 onClick={() => handleTabSelect("kot")}
                 className={cn(
@@ -1274,17 +1566,35 @@ export function BranchDesksServicesManager({
 
       {/* Attendance & Shift Logs Tab */}
       {activeTab === "attendance" && (
-        <BranchAttendanceLogsView branchId={branch.id} branchName={branch.name} />
+        <BranchAttendanceLogsView
+          branchId={branch?.id || branchId}
+          branchName={branch?.name || "Branch"}
+          onBranchChange={(newBranchId) => {
+            if (newBranchId && newBranchId !== "all") {
+              if (typeof window !== "undefined") {
+                const params = new URLSearchParams(window.location.search);
+                params.set("branchId", newBranchId);
+                window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+                if (companySlug) {
+                  sessionStorage.setItem(`admin_selected_branch_${companySlug}`, newBranchId);
+                  localStorage.setItem(`admin_selected_branch_${companySlug}`, newBranchId);
+                }
+              }
+            }
+          }}
+        />
       )}
 
       {/* Live Displays Tab Content */}
       {activeTab === "displays" && (
         <div className="z-10 relative">
           <DisplayTerminalsManager
-            branchId={branch.id}
+            branchId={branch?.id || branchId}
             branchDesks={branchDesks}
             companySlug={companySlug}
             branchSlug={branchSlug}
+            purchasedDisplays={purchasedDisplays}
+            setView={setView}
           />
         </div>
       )}
@@ -2672,7 +2982,12 @@ export function BranchDesksServicesManager({
                               <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-600 text-[10px] font-black uppercase shrink-0">
                                 {st.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
                               </span>
-                              <span className="font-black text-foreground">{st.name || "Staff Member"}</span>
+                              <div>
+                                <span className="font-black text-foreground block">{st.name || "Staff Member"}</span>
+                                {st.username && (
+                                  <span className="text-[10px] font-mono text-muted-foreground/75 block">@{st.username}</span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="p-3.5 text-muted-foreground font-mono text-[10px]">{st.email}</td>
@@ -2782,8 +3097,20 @@ export function BranchDesksServicesManager({
               <Button
                 variant="brand"
                 size="sm"
-                onClick={() => setIsAddKioskModalOpen(true)}
-                disabled={branchKiosks.filter(k => k.status === 'active').length >= purchasedKiosks}
+                onClick={() => {
+                  const activeCount = branchKiosks.filter(k => k.status === 'active').length;
+                  if (activeCount >= purchasedKiosks) {
+                    toast.error(
+                      <div className="flex flex-col gap-1">
+                        <span className="font-semibold text-xs leading-normal">Plan limit reached ({purchasedKiosks} kiosks allocated).</span>
+                        <span className="text-[10px] text-muted-foreground leading-normal">You can purchase additional kiosk terminals in the Billing tab of the Company Admin Console.</span>
+                      </div>,
+                      { duration: 8000 }
+                    );
+                    return;
+                  }
+                  openAddKioskModal();
+                }}
                 className="h-8 gap-1.5 text-xs font-bold shadow-md shadow-brand/10 shrink-0"
               >
                 <Plus className="h-3.5 w-3.5" /> Add Kiosk
@@ -2839,7 +3166,12 @@ export function BranchDesksServicesManager({
                     <div className="flex-1 min-w-0 space-y-2">
                       <div>
                         <h3 className="font-black text-sm text-foreground truncate">{kiosk.kiosk_identifier}</h3>
-                        <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KSK-0{idx + 1}</span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KSK-0{idx + 1}</span>
+                          <span className="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded-md font-mono font-bold flex items-center gap-1">
+                            @{kiosk.username || `kiosk-${kiosk.id}`}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-[10px]">
@@ -2873,8 +3205,8 @@ export function BranchDesksServicesManager({
                           <span className="font-bold text-foreground block mt-0.5">Reception</span>
                         </div>
                         <div>
-                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Last Sync</span>
-                          <span className="font-semibold text-muted-foreground block mt-0.5">1 min ago</span>
+                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Username</span>
+                          <span className="font-mono text-muted-foreground font-bold block mt-0.5 truncate">{kiosk.username || `kiosk-${kiosk.id}`}</span>
                         </div>
                       </div>
 
@@ -2882,7 +3214,7 @@ export function BranchDesksServicesManager({
                         <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Kiosk Link</span>
                         <div className="flex items-center gap-2">
                           {(() => {
-                            const terminalSlug = kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id;
+                            const terminalSlug = kiosk.username || (kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id);
                             const singleKioskUrl = companySlug && branchSlug
                               ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
                               : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
@@ -2916,7 +3248,22 @@ export function BranchDesksServicesManager({
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1">
+                  <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditingKiosk(kiosk);
+                        setEditKioskName(kiosk.kiosk_identifier || "");
+                        setEditKioskUsername(kiosk.username || `kiosk-${kiosk.id}`);
+                        setEditKioskPin(kiosk.pin || "");
+                        setEditKioskUserStatus("idle");
+                        setEditKioskUserMessage("");
+                      }}
+                      className="h-8 text-xs font-bold gap-1"
+                    >
+                      <KeyRound className="h-3 w-3 text-brand" /> Edit Credentials
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -2973,6 +3320,131 @@ export function BranchDesksServicesManager({
         <div className="animate-in fade-in-50 duration-300">
           <KotSettingsPanel branch={branch} company={company} setView={setView} />
         </div>
+      )}
+
+      {/* Tab Panel: QR Displays */}
+      {activeTab === "qr" && (
+        <motion.div
+          key="qr-tab"
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          variants={tabVariants}
+          transition={transition}
+          className="space-y-6"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/40 pb-4">
+            <div>
+              <h2 className="text-base font-black text-foreground flex items-center gap-2">
+                <QrCode className="h-4 w-4 text-[#5B50EB]" /> Self-Ticketing QR Displays &amp; Standees
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Physical display posters and digital QR codes for walk-in visitor self-ticketing.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground bg-accent/20 px-3 py-1.5 rounded-lg border border-border/40 font-bold shrink-0">
+                QR Displays Allocated: {purchasedQRs}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.print()}
+                className="h-8 gap-1.5 text-xs font-bold"
+              >
+                <Printer className="h-3.5 w-3.5" /> Print Standee
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Live QR Standee Poster Card */}
+            <div className="rounded-3xl border border-border/60 bg-white dark:bg-slate-900 p-6 shadow-sm flex flex-col items-center justify-center space-y-4 text-center">
+              <div className="p-5 bg-white rounded-2xl shadow-md border border-slate-200 flex flex-col items-center">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
+                    `${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`
+                  )}`}
+                  alt={`Entrance QR Code for ${branch.name}`}
+                  className="h-56 w-56 object-contain rounded-xl"
+                />
+                <span className="text-[10px] font-black text-[#5B50EB] uppercase tracking-[0.2em] mt-3 bg-[#5B50EB]/10 px-3 py-1 rounded-full border border-[#5B50EB]/20">
+                  SCAN WITH SMARTPHONE CAMERA
+                </span>
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-foreground">{branch.name} — Entrance Check-In</h4>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  Place this QR standee at the reception or front door. Visitors scan without installing any app.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <Button
+                  variant="brand"
+                  size="sm"
+                  onClick={() => {
+                    const link = document.createElement("a");
+                    link.href = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(
+                      `${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`
+                    )}`;
+                    link.download = `${branch.name}-qr-standee.png`;
+                    link.target = "_blank";
+                    link.click();
+                  }}
+                  className="h-8 gap-1.5 text-xs font-bold"
+                >
+                  <Download className="h-3.5 w-3.5" /> Download High-Res Poster
+                </Button>
+              </div>
+            </div>
+
+            {/* Direct Join Link & Configuration Card */}
+            <div className="rounded-3xl border border-border/60 bg-white dark:bg-slate-900 p-6 shadow-sm flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-foreground">Digital Queue Join URL</h3>
+                <p className="text-xs text-muted-foreground">
+                  This direct link can also be shared via SMS, WhatsApp, or embedded on your branch landing page.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <Input
+                    readOnly
+                    value={`${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`}
+                    className="text-xs font-mono bg-slate-50 dark:bg-slate-800 rounded-xl"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${typeof window !== "undefined" ? getNetworkOrigin() : ""}${joinUrl}`);
+                      toast.success("Branch queue URL copied to clipboard!");
+                    }}
+                    className="shrink-0 h-9"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/40 bg-slate-50/60 dark:bg-slate-800/40 p-4 space-y-2">
+                <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-[#5B50EB]" /> Customer Experience Highlights
+                </div>
+                <ul className="text-[11px] text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>Instant token generation upon scan — no app installation required.</li>
+                  <li>Live token queue progress with estimated wait time on their phone.</li>
+                  <li>Works on any smartphone browser (iOS Safari, Android Chrome).</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-border/40 pt-3">
+                <span className="text-xs text-muted-foreground font-semibold">Standee Allocation Status</span>
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                  Active &amp; Ready
+                </span>
+              </div>
+            </div>
+          </div>
+        </motion.div>
       )}
 
       {/* Modal: Create Staff Account &       {/* Modal: Create Staff Account & Credentials Wizard */}
@@ -3037,6 +3509,49 @@ export function BranchDesksServicesManager({
                         className="h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-medium"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/80 flex items-center gap-1">
+                        <AtSign className="h-3 w-3 text-brand" /> Username *
+                      </Label>
+                      {usernameCheckStatus === "checking" && (
+                        <span className="text-[10px] text-brand flex items-center gap-1 font-semibold">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                        </span>
+                      )}
+                      {usernameCheckStatus === "available" && (
+                        <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+                          <Check className="h-3 w-3" /> Available
+                        </span>
+                      )}
+                      {usernameCheckStatus === "taken" && (
+                        <span className="text-[10px] text-destructive font-bold flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" /> {usernameCheckMessage || "Taken"}
+                        </span>
+                      )}
+                      {usernameCheckStatus === "invalid" && (
+                        <span className="text-[10px] text-destructive font-medium">
+                          {usernameCheckMessage}
+                        </span>
+                      )}
+                    </div>
+                    <Input
+                      value={newStaffUsername}
+                      onChange={(e) => {
+                        const val = e.target.value.toLowerCase().replace(/\s+/g, "");
+                        setNewStaffUsername(val);
+                        checkStaffUsername(val);
+                      }}
+                      placeholder="e.g. ramesh_op"
+                      required
+                      className={cn(
+                        "h-10 text-xs rounded-xl bg-slate-50/50 dark:bg-slate-900/50 border-border/60 focus:border-brand focus:ring-2 focus:ring-brand/20 font-mono",
+                        usernameCheckStatus === "available" && "border-emerald-500/60 focus:border-emerald-500",
+                        (usernameCheckStatus === "taken" || usernameCheckStatus === "invalid") && "border-destructive/80 focus:border-destructive"
+                      )}
+                    />
                   </div>
 
                   <div>
@@ -4550,11 +5065,69 @@ export function BranchDesksServicesManager({
                 <Input
                   type="text"
                   value={newKioskName}
-                  onChange={(e) => setNewKioskName(e.target.value)}
+                  onChange={(e) => {
+                    setNewKioskName(e.target.value);
+                  }}
                   placeholder="e.g. Kiosk 1 or Reception Lobby Kiosk"
                   required
                   className="mt-1 text-xs rounded-xl h-9 font-medium"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
+                  {addKioskUserStatus === "checking" && (
+                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {addKioskUserStatus === "available" && (
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Available
+                    </span>
+                  )}
+                  {addKioskUserStatus === "taken" && (
+                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" /> Already taken
+                    </span>
+                  )}
+                  {addKioskUserStatus === "invalid" && addKioskUserMessage && (
+                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {addKioskUserMessage}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  value={newKioskUsername}
+                  onChange={(e) => {
+                    setIsKioskUserManuallyEdited(true);
+                    setNewKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
+                  }}
+                  placeholder="e.g. kiosk-1 or reception-kiosk"
+                  required
+                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
+                    addKioskUserStatus === "available"
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                      : addKioskUserStatus === "taken"
+                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                      : "text-brand"
+                  }`}
+                />
+                {addKioskUserStatus === "taken" ? (
+                  <p className="text-[10px] text-rose-500 font-medium mt-1">
+                    {addKioskUserMessage}
+                  </p>
+                ) : addKioskUserStatus === "available" ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                    ✓ {addKioskUserMessage}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Required for terminal login. Staff or operators enter this username along with PIN to unlock the kiosk.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -4586,10 +5159,128 @@ export function BranchDesksServicesManager({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isCreatingKiosk || newKioskPin.length !== 4}
-                  className="text-xs h-9"
+                  disabled={isCreatingKiosk || newKioskPin.length !== 4 || !newKioskUsername.trim() || addKioskUserStatus === "taken" || addKioskUserStatus === "checking" || addKioskUserStatus === "invalid"}
+                  className="text-xs h-9 bg-brand hover:bg-brand/90 text-white"
                 >
                   {isCreatingKiosk ? "Creating..." : "Create Kiosk"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Kiosk Credentials */}
+      {editingKiosk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-brand" />
+                <div>
+                  <h3 className="text-base font-bold">Edit Kiosk Credentials</h3>
+                  <p className="text-[11px] text-muted-foreground">{editingKiosk.kiosk_identifier}</p>
+                </div>
+              </div>
+              <button onClick={() => setEditingKiosk(null)} className="text-muted-foreground hover:text-foreground font-bold">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateKioskCredentials} className="space-y-4">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Kiosk Identifier Name *</Label>
+                <Input
+                  type="text"
+                  value={editKioskName}
+                  onChange={(e) => setEditKioskName(e.target.value)}
+                  required
+                  className="mt-1 text-xs rounded-xl h-9 font-medium"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
+                  {editKioskUserStatus === "checking" && (
+                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {editKioskUserStatus === "available" && (
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Available
+                    </span>
+                  )}
+                  {editKioskUserStatus === "taken" && (
+                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" /> Already taken
+                    </span>
+                  )}
+                  {editKioskUserStatus === "invalid" && editKioskUserMessage && (
+                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {editKioskUserMessage}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  value={editKioskUsername}
+                  onChange={(e) => setEditKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                  placeholder="e.g. kiosk-1"
+                  required
+                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
+                    editKioskUserStatus === "available"
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                      : editKioskUserStatus === "taken"
+                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                      : "text-brand"
+                  }`}
+                />
+                {editKioskUserStatus === "taken" ? (
+                  <p className="text-[10px] text-rose-500 font-medium mt-1">
+                    {editKioskUserMessage}
+                  </p>
+                ) : editKioskUserStatus === "available" ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                    ✓ {editKioskUserMessage}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Unique login username for this kiosk terminal.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{4}"
+                  maxLength={4}
+                  value={editKioskPin}
+                  onChange={(e) => setEditKioskPin(e.target.value.replace(/[^0-9]/g, ''))}
+                  required
+                  className="mt-1 font-mono text-xs rounded-xl h-9"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingKiosk(null)}
+                  className="text-xs h-9"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSavingKioskEdit || editKioskPin.length !== 4 || !editKioskUsername.trim() || editKioskUserStatus === "taken" || editKioskUserStatus === "checking" || editKioskUserStatus === "invalid"}
+                  className="text-xs h-9 bg-brand hover:bg-brand/90 text-white"
+                >
+                  {isSavingKioskEdit ? "Saving..." : "Save Credentials"}
                 </Button>
               </div>
             </form>
@@ -5607,6 +6298,22 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
   const [kotTerminals, setKotTerminals] = useState<any[]>([]);
   const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
   const [isAddingTerminal, setIsAddingTerminal] = useState(false);
+  const [isAddKotModalOpen, setIsAddKotModalOpen] = useState(false);
+  const [newKotIdentifier, setNewKotIdentifier] = useState("");
+  const [newKotUsername, setNewKotUsername] = useState("");
+  const [newKotPin, setNewKotPin] = useState("");
+  const [isKotUserManuallyEdited, setIsKotUserManuallyEdited] = useState(false);
+  const [addKotUserStatus, setAddKotUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [addKotUserMessage, setAddKotUserMessage] = useState("");
+
+  const [editingKot, setEditingKot] = useState<any | null>(null);
+  const [editKotIdentifier, setEditKotIdentifier] = useState("");
+  const [editKotUsername, setEditKotUsername] = useState("");
+  const [editKotPin, setEditKotPin] = useState("");
+  const [editKotUserStatus, setEditKotUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [editKotUserMessage, setEditKotUserMessage] = useState("");
+  const [isSavingKotEdit, setIsSavingKotEdit] = useState(false);
+
   const [smsTemplate, setSmsTemplate] = useState<any | null>(null);
   const [whatsappTemplate, setWhatsappTemplate] = useState<any | null>(null);
   const [smsText, setSmsText] = useState("");
@@ -5650,7 +6357,6 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
   const fetchKotData = async () => {
     setIsLoading(true);
     try {
-      if (typeof refresh === "function") refresh();
       await fetchKotTerminals();
       if (targetBranchId) {
         const templatesData: any[] = await apiFetch(`/api/kot-message-templates/?branch=${targetBranchId}`);
@@ -5689,7 +6395,7 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
     }
   };
 
-  const handleAddTerminal = async () => {
+  const openAddKotModal = () => {
     if (kotTerminals.filter(t => t.status === "active").length >= purchasedKotTerminals) {
       toast.error(`KOT terminal quota reached (${purchasedKotTerminals} allocated). Purchase an add-on under Plan & usage to add more KOT terminals.`, {
         action: setView ? {
@@ -5699,28 +6405,210 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
       });
       return;
     }
+    const nextNumber = kotTerminals.length + 1;
+    setNewKotIdentifier(`KOT ${nextNumber}`);
+    setNewKotUsername("");
+    setNewKotPin(Math.floor(1000 + Math.random() * 9000).toString());
+    setIsKotUserManuallyEdited(false);
+    setAddKotUserStatus("idle");
+    setAddKotUserMessage("");
+    setIsAddKotModalOpen(true);
+  };
 
+  // Real-time username availability check for Add KOT
+  useEffect(() => {
+    if (!isAddKotModalOpen) {
+      setAddKotUserStatus("idle");
+      setAddKotUserMessage("");
+      return;
+    }
+    const clean = newKotUsername.trim().toLowerCase();
+    if (!clean) {
+      setAddKotUserStatus("invalid");
+      setAddKotUserMessage("Username is required.");
+      return;
+    }
+    if (clean.length < 2) {
+      setAddKotUserStatus("invalid");
+      setAddKotUserMessage("Min 2 characters required.");
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(clean)) {
+      setAddKotUserStatus("invalid");
+      setAddKotUserMessage("Only letters, numbers, hyphens, and underscores allowed.");
+      return;
+    }
+
+    setAddKotUserStatus("checking");
+    setAddKotUserMessage("Checking availability in database...");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/kot/terminals/check-username/?username=${encodeURIComponent(clean)}&branch_id=${targetBranchId}`
+        );
+        if (res.available) {
+          setAddKotUserStatus("available");
+          setAddKotUserMessage(res.message || "Username is available!");
+        } else {
+          setAddKotUserStatus("taken");
+          setAddKotUserMessage(res.message || "Username already taken.");
+        }
+      } catch (err: any) {
+        setAddKotUserStatus("invalid");
+        setAddKotUserMessage(err.message || "Error checking username.");
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [newKotUsername, isAddKotModalOpen, targetBranchId]);
+
+  // Real-time username availability check for Edit KOT
+  useEffect(() => {
+    if (!editingKot) {
+      setEditKotUserStatus("idle");
+      setEditKotUserMessage("");
+      return;
+    }
+    const clean = editKotUsername.trim().toLowerCase();
+    if (!clean) {
+      setEditKotUserStatus("invalid");
+      setEditKotUserMessage("Username is required.");
+      return;
+    }
+    if (clean.length < 2) {
+      setEditKotUserStatus("invalid");
+      setEditKotUserMessage("Min 2 characters required.");
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(clean)) {
+      setEditKotUserStatus("invalid");
+      setEditKotUserMessage("Only letters, numbers, hyphens, and underscores allowed.");
+      return;
+    }
+
+    setEditKotUserStatus("checking");
+    setEditKotUserMessage("Checking availability in database...");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/kot/terminals/check-username/?username=${encodeURIComponent(clean)}&branch_id=${targetBranchId}&exclude_id=${editingKot.id}`
+        );
+        if (res.available) {
+          setEditKotUserStatus("available");
+          setEditKotUserMessage(res.message || "Username is available!");
+        } else {
+          setEditKotUserStatus("taken");
+          setEditKotUserMessage(res.message || "Username already taken.");
+        }
+      } catch (err: any) {
+        setEditKotUserStatus("invalid");
+        setEditKotUserMessage(err.message || "Error checking username.");
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [editKotUsername, editingKot, targetBranchId]);
+
+  const handleCreateKotTerminal = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!targetBranchId) {
       toast.error("Unable to identify current branch.");
+      return;
+    }
+    if (!newKotIdentifier.trim()) {
+      toast.error("Terminal identifier is required.");
+      return;
+    }
+    if (!newKotUsername.trim()) {
+      toast.error("Username is required.");
+      return;
+    }
+    if (newKotPin.length !== 4) {
+      toast.error("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (addKotUserStatus === "taken") {
+      toast.error(addKotUserMessage || "Username is already taken.");
+      return;
+    }
+    if (addKotUserStatus === "checking") {
+      toast.error("Please wait while verifying username availability.");
+      return;
+    }
+    if (addKotUserStatus === "invalid") {
+      toast.error(addKotUserMessage || "Please enter a valid username.");
       return;
     }
 
     setIsAddingTerminal(true);
     try {
-      const nextNumber = kotTerminals.length + 1;
       await apiFetch(`/api/kot/terminals/`, {
         method: "POST",
         body: JSON.stringify({
           branch: targetBranchId,
-          terminal_identifier: `KOT ${nextNumber}`
+          terminal_identifier: newKotIdentifier.trim(),
+          username: newKotUsername.trim().toLowerCase(),
+          pin: newKotPin.trim()
         })
       });
-      toast.success(`KOT ${nextNumber} terminal created successfully!`);
+      toast.success(`KOT Terminal "${newKotIdentifier.trim()}" created successfully!`);
+      setIsAddKotModalOpen(false);
+      setNewKotIdentifier("");
+      setNewKotUsername("");
+      setNewKotPin("");
       fetchKotTerminals();
     } catch (err: any) {
       toast.error(err.message || "Failed to create KOT terminal.");
     } finally {
       setIsAddingTerminal(false);
+    }
+  };
+
+  const handleUpdateKotCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingKot) return;
+    if (!editKotIdentifier.trim()) {
+      toast.error("Terminal identifier is required.");
+      return;
+    }
+    if (!editKotUsername.trim()) {
+      toast.error("Username is required.");
+      return;
+    }
+    if (editKotPin.length !== 4) {
+      toast.error("PIN must be exactly 4 digits.");
+      return;
+    }
+    if (editKotUserStatus === "taken") {
+      toast.error(editKotUserMessage || "Username is already taken.");
+      return;
+    }
+    if (editKotUserStatus === "checking") {
+      toast.error("Please wait while verifying username availability.");
+      return;
+    }
+    if (editKotUserStatus === "invalid") {
+      toast.error(editKotUserMessage || "Please enter a valid username.");
+      return;
+    }
+
+    setIsSavingKotEdit(true);
+    try {
+      await apiFetch(`/api/kot/terminals/${editingKot.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          terminal_identifier: editKotIdentifier.trim(),
+          username: editKotUsername.trim().toLowerCase(),
+          pin: editKotPin.trim(),
+        }),
+      });
+      toast.success("KOT Terminal credentials updated successfully!");
+      setEditingKot(null);
+      fetchKotTerminals();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update KOT credentials.");
+    } finally {
+      setIsSavingKotEdit(false);
     }
   };
 
@@ -5818,7 +6706,7 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
           <Button
             variant="brand"
             size="sm"
-            onClick={handleAddTerminal}
+            onClick={openAddKotModal}
             disabled={isAddingTerminal || kotTerminals.filter(t => t.status === "active").length >= purchasedKotTerminals}
             className="h-8 gap-1.5 text-xs font-bold shadow-md shadow-brand/10 shrink-0"
           >
@@ -5867,7 +6755,12 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                 <div className="flex-1 min-w-0 space-y-2">
                   <div>
                     <h3 className="font-black text-sm text-foreground truncate">{terminal.terminal_identifier}</h3>
-                    <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KOT-0{idx + 1}</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KOT-0{idx + 1}</span>
+                      <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-md font-mono font-bold">
+                        @{terminal.username || `kot-${terminal.id}`}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-[10px]">
@@ -5895,8 +6788,19 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div>
+                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Username</span>
+                      <span className="font-mono text-muted-foreground font-bold block mt-0.5 truncate">{terminal.username || `kot-${terminal.id}`}</span>
+                    </div>
+                    <div>
+                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Channel</span>
+                      <span className="font-semibold text-foreground block mt-0.5">SMS / WhatsApp</span>
+                    </div>
+                  </div>
+
                   {(() => {
-                    const terminalSlug = terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, "-") : `kot-${terminal.id}`;
+                    const terminalSlug = terminal.username || (terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, "-") : `kot-${terminal.id}`);
                     const terminalKotUrl = `${kotUrl}?terminal=${terminalSlug}`;
                     return (
                       <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
@@ -5929,7 +6833,22 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1">
+              <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1 flex-wrap">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingKot(terminal);
+                    setEditKotIdentifier(terminal.terminal_identifier || "");
+                    setEditKotUsername(terminal.username || `kot-${terminal.id}`);
+                    setEditKotPin(terminal.pin || "");
+                    setEditKotUserStatus("idle");
+                    setEditKotUserMessage("");
+                  }}
+                  className="h-8 text-xs font-bold gap-1"
+                >
+                  <KeyRound className="h-3 w-3 text-emerald-600" /> Edit Credentials
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -6196,6 +7115,248 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
           </div>
         </div>
       </div>
+      {/* Modal: Add KOT Terminal */}
+      {isAddKotModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-emerald-600" />
+                <div>
+                  <h3 className="text-base font-bold">Add Digital KOT Terminal</h3>
+                  <p className="text-[11px] text-muted-foreground">{branch.name}</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAddKotModalOpen(false)} className="text-muted-foreground hover:text-foreground font-bold">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateKotTerminal} className="space-y-4">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Identifier Name *</Label>
+                <Input
+                  type="text"
+                  value={newKotIdentifier}
+                  onChange={(e) => {
+                    setNewKotIdentifier(e.target.value);
+                  }}
+                  placeholder="e.g. KOT 1 or Lobby KOT"
+                  required
+                  className="mt-1 text-xs rounded-xl h-9 font-medium"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
+                  {addKotUserStatus === "checking" && (
+                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {addKotUserStatus === "available" && (
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Available
+                    </span>
+                  )}
+                  {addKotUserStatus === "taken" && (
+                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" /> Already taken
+                    </span>
+                  )}
+                  {addKotUserStatus === "invalid" && addKotUserMessage && (
+                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {addKotUserMessage}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  value={newKotUsername}
+                  onChange={(e) => {
+                    setIsKotUserManuallyEdited(true);
+                    setNewKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
+                  }}
+                  placeholder="e.g. kot-1"
+                  required
+                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
+                    addKotUserStatus === "available"
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                      : addKotUserStatus === "taken"
+                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                      : "text-emerald-600"
+                  }`}
+                />
+                {addKotUserStatus === "taken" ? (
+                  <p className="text-[10px] text-rose-500 font-medium mt-1">
+                    {addKotUserMessage}
+                  </p>
+                ) : addKotUserStatus === "available" ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                    ✓ {addKotUserMessage}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Unique login username for this KOT terminal screen.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{4}"
+                  maxLength={4}
+                  value={newKotPin}
+                  onChange={(e) => setNewKotPin(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="e.g. 1234"
+                  required
+                  className="mt-1 font-mono text-xs rounded-xl h-9"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddKotModalOpen(false)}
+                  className="text-xs h-9"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isAddingTerminal || newKotPin.length !== 4 || !newKotUsername.trim() || addKotUserStatus === "taken" || addKotUserStatus === "checking" || addKotUserStatus === "invalid"}
+                  className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {isAddingTerminal ? "Creating..." : "Create KOT Terminal"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit KOT Terminal Credentials */}
+      {editingKot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-emerald-600" />
+                <div>
+                  <h3 className="text-base font-bold">Edit KOT Credentials</h3>
+                  <p className="text-[11px] text-muted-foreground">{editingKot.terminal_identifier}</p>
+                </div>
+              </div>
+              <button onClick={() => setEditingKot(null)} className="text-muted-foreground hover:text-foreground font-bold">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateKotCredentials} className="space-y-4">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Identifier Name *</Label>
+                <Input
+                  type="text"
+                  value={editKotIdentifier}
+                  onChange={(e) => setEditKotIdentifier(e.target.value)}
+                  required
+                  className="mt-1 text-xs rounded-xl h-9 font-medium"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
+                  {editKotUserStatus === "checking" && (
+                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {editKotUserStatus === "available" && (
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Available
+                    </span>
+                  )}
+                  {editKotUserStatus === "taken" && (
+                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" /> Already taken
+                    </span>
+                  )}
+                  {editKotUserStatus === "invalid" && editKotUserMessage && (
+                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> {editKotUserMessage}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  value={editKotUsername}
+                  onChange={(e) => setEditKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                  placeholder="e.g. kot-1"
+                  required
+                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
+                    editKotUserStatus === "available"
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                      : editKotUserStatus === "taken"
+                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                      : "text-emerald-600"
+                  }`}
+                />
+                {editKotUserStatus === "taken" ? (
+                  <p className="text-[10px] text-rose-500 font-medium mt-1">
+                    {editKotUserMessage}
+                  </p>
+                ) : editKotUserStatus === "available" ? (
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                    ✓ {editKotUserMessage}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Staff or operators enter this username along with PIN to unlock the KOT check-in screen.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{4}"
+                  maxLength={4}
+                  value={editKotPin}
+                  onChange={(e) => setEditKotPin(e.target.value.replace(/[^0-9]/g, ''))}
+                  required
+                  className="mt-1 font-mono text-xs rounded-xl h-9"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingKot(null)}
+                  className="text-xs h-9"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSavingKotEdit || editKotPin.length !== 4 || !editKotUsername.trim() || editKotUserStatus === "taken" || editKotUserStatus === "checking" || editKotUserStatus === "invalid"}
+                  className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {isSavingKotEdit ? "Saving..." : "Save Credentials"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

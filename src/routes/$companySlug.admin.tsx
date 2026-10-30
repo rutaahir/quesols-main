@@ -12,6 +12,7 @@ import {
   BarChart3,
   Sliders,
   Sparkles,
+  Clock,
 } from "lucide-react";
 import { ConsoleShell, type NavItem } from "@/components/console/shell";
 import { CompanyAdminView } from "@/components/console/company-admin";
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   { id: "branches", label: "Branches", icon: Building2 },
   { id: "online_booking_fields", label: "Online Booking Form", icon: FileText },
   { id: "staff", label: "Team Management", icon: Users },
+  { id: "attendance", label: "Attendance Logs", icon: Clock },
   { id: "appointments", label: "Appointments", icon: Calendar },
   { id: "alerts", label: "Alert Rules", icon: Bell },
   { id: "branding", label: "Branding", icon: Sparkles },

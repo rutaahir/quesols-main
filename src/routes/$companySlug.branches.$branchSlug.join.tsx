@@ -54,8 +54,8 @@ function JoinQueue() {
   const [showInstructions, setShowInstructions] = useState(false);
 
   const fetchBaseUrl = typeof window !== "undefined"
-    ? `http://${window.location.hostname}:8000`
-    : "http://localhost:8000";
+    ? getApiUrl("")
+    : "http://localhost:8001";
 
   // Resolve Company & Branch Slugs
   useEffect(() => {

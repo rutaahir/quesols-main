@@ -97,22 +97,25 @@ function ConsolePage() {
 
     const company = state.companies.find((c) => String(c.id) === String(session.companyId));
     const branch = state.branches.find((b) => String(b.id) === String(session.branchId));
+    const targetSlug = session.companySlug || company?.slug;
 
-    if (session.role === "company_admin" && company?.slug) {
-      void navigate({ to: "/$companySlug/admin", params: { companySlug: company.slug } });
+    if (session.role === "company_admin" && targetSlug) {
+      void navigate({ to: "/$companySlug/admin", params: { companySlug: targetSlug } });
+      return;
     } else if (
       (session.role === "branch_admin" || session.role === "operator") &&
-      company?.slug &&
+      targetSlug &&
       branch?.slug
     ) {
       void navigate({
         to: "/$companySlug/branches/$branchSlug",
-        params: { companySlug: company.slug, branchSlug: branch.slug },
+        params: { companySlug: targetSlug, branchSlug: branch.slug },
       });
+      return;
     }
   }, [session, state.companies, state.branches, navigate]);
 
-  if (!session || session.role !== "super_admin") {
+  if (!session) {
     return null;
   }
 

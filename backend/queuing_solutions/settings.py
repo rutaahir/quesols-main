@@ -8,26 +8,28 @@ import urllib.parse
 from datetime import timedelta
 from dotenv import load_dotenv
 
-# Use pymysql as MySQLdb
-import pymysql
-pymysql.install_as_MySQLdb()
-
-# Bypass MariaDB version check for local dev (MariaDB 10.4 is running)
-from django.db.backends.base.base import BaseDatabaseWrapper
-BaseDatabaseWrapper.check_database_version_supported = lambda self: None
-
-# Disable insert returning for MariaDB < 10.5 (as XAMPP is 10.4.28)
-from django.db.backends.mysql.features import DatabaseFeatures
-DatabaseFeatures.can_return_columns_from_insert = property(lambda self: False)
-
-# Load env variables from .env
+# Load env variables from .env FIRST before applying any DB patches
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "mysql://root@127.0.0.1:3306/queuing_solutions")
+
+# Apply MySQL/MariaDB-specific patches only when actually using MySQL
+if DATABASE_URL.startswith("mysql"):
+    import pymysql
+    pymysql.install_as_MySQLdb()
+    # Bypass MariaDB version check for local dev (MariaDB 10.4 is running)
+    from django.db.backends.base.base import BaseDatabaseWrapper
+    BaseDatabaseWrapper.check_database_version_supported = lambda self: None
+    # Disable insert returning for MariaDB < 10.5 (as XAMPP is 10.4.28)
+    from django.db.backends.mysql.features import DatabaseFeatures
+    DatabaseFeatures.can_return_columns_from_insert = property(lambda self: False)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-default-key")
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+
 
 # Application definition
 INSTALLED_APPS = [
@@ -100,24 +102,53 @@ TEMPLATES = [
 WSGI_APPLICATION = "queuing_solutions.wsgi.application"
 ASGI_APPLICATION = "queuing_solutions.asgi.application"
 
-# Database Configuration (MySQL/MariaDB parsing)
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql://root@127.0.0.1:3306/queuing_solutions")
+# ---------- Database Configuration (auto-detect engine from DATABASE_URL) ----------
 urllib.parse.uses_netloc.append("mysql")
-url = urllib.parse.urlparse(DATABASE_URL)
+urllib.parse.uses_netloc.append("postgres")
+urllib.parse.uses_netloc.append("postgresql")
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": url.path[1:],
-        "USER": url.username,
-        "PASSWORD": urllib.parse.unquote(url.password) if url.password else "",
-        "HOST": url.hostname,
-        "PORT": url.port or 3306,
-        "OPTIONS": {
-            "charset": "utf8mb4",
-        },
+_db_url = DATABASE_URL
+
+if _db_url.startswith("sqlite"):
+    # SQLite — for local dev without MySQL/Postgres
+    _sqlite_path = _db_url.replace("sqlite:///", "")
+    if not _sqlite_path.startswith(("C:", "/", "D:")):
+        _sqlite_path = str(BASE_DIR / _sqlite_path)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": _sqlite_path,
+        }
     }
-}
+elif _db_url.startswith("postgres"):
+    # PostgreSQL
+    _url = urllib.parse.urlparse(_db_url)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": _url.path[1:],
+            "USER": _url.username or "postgres",
+            "PASSWORD": urllib.parse.unquote(_url.password) if _url.password else "",
+            "HOST": _url.hostname or "127.0.0.1",
+            "PORT": _url.port or 5432,
+        }
+    }
+else:
+    # MySQL / MariaDB (default)
+    _url = urllib.parse.urlparse(_db_url)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": _url.path[1:],
+            "USER": _url.username,
+            "PASSWORD": urllib.parse.unquote(_url.password) if _url.password else "",
+            "HOST": _url.hostname,
+            "PORT": _url.port or 3306,
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
+    }
 
 # Redis/In-Memory Channels configuration for WebSockets
 # Switched to RedisChannelLayer to prevent silent message drop at target scale (~2000 WS connections)
@@ -141,6 +172,11 @@ else:
 
 # Auth User Model configuration
 AUTH_USER_MODEL = "accounts.User"
+
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.EmailOrUsernameModelBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 # SimpleJWT configuration
 SIMPLE_JWT = {
@@ -185,6 +221,8 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "socialbuzz31@gmail.com")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "mxykeikdwbxdqmwc")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Quesoles Queue Management <socialbuzz31@gmail.com>")
+EMAIL_TIMEOUT = 5
+
 
 # CORS configuration
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if os.getenv("CORS_ALLOWED_ORIGINS") else []

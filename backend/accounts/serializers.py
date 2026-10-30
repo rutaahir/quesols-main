@@ -6,16 +6,30 @@ from accounts.models import UserInvite
 User = get_user_model()
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Allow username or email in the primary field
+        self.fields[self.username_field].required = False
+        self.fields['username'] = serializers.CharField(required=False)
+        self.fields['identifier'] = serializers.CharField(required=False)
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
         token['email'] = user.email
+        token['username'] = user.username or ""
         token['role'] = user.role
         token['company_id'] = user.company_id
         token['branch_id'] = user.branch_id
         return token
 
     def validate(self, attrs):
+        # Map username or identifier to the expected username_field ('email')
+        identifier = attrs.get("email") or attrs.get("username") or attrs.get("identifier")
+        if not identifier:
+            raise serializers.ValidationError({"email": "Please enter your email or username."})
+        attrs[self.username_field] = identifier.strip()
+
         request = self.context.get("request")
         company_slug = None
         if request:
@@ -36,7 +50,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 elif hasattr(request, "META") and request.META:
                     company_slug = request.META.get("HTTP_X_COMPANY_SLUG")
 
-        # Let's perform standard authentication first (checks password/credentials)
+        # Standard authentication checks credentials against email or username
         data = super().validate(attrs)
         user = self.user
 
@@ -50,12 +64,34 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         company_status = ""
         company_name = ""
         if user.role != "super_admin" and user.company:
+            # Self-healing sync: If user was marked 'plan_purchased' in candidate records, activate company and branch
+            from companies.models import InterestedCandidate
+            cand = InterestedCandidate.objects.filter(email=user.email).first()
+            if cand and cand.status == "plan_purchased" and user.company.onboarding_status != "active":
+                user.company.onboarding_status = "active"
+                user.company.status = "active"
+                user.company.save()
+                from billing.models import Subscription, PlanPurchase
+                Subscription.objects.filter(company=user.company).update(status="active")
+                PlanPurchase.objects.filter(company=user.company, payment_status="pending").update(payment_status="paid")
+                from branches.models import Branch
+                if not Branch.objects.filter(company=user.company).exists():
+                    Branch.objects.create(
+                        company=user.company,
+                        name="Main Branch",
+                        slug="main-branch",
+                        city=user.company.city or "Default City",
+                        address=user.company.address or "Default Address",
+                        status="active"
+                    )
+
             has_purchased = (user.company.onboarding_status == "active")
             company_status = user.company.status
             company_name = user.company.name
 
         data['user'] = {
             'email': user.email,
+            'username': user.username or "",
             'role': user.role,
             'first_name': user.first_name,
             'last_name': user.last_name,
@@ -75,14 +111,38 @@ class UserSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source="branch.name", read_only=True)
     password = serializers.CharField(write_only=True, required=False, style={"input_type": "password"})
     password_confirm = serializers.CharField(write_only=True, required=False, style={"input_type": "password"})
+    username = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = User
         fields = (
-            'id', 'email', 'first_name', 'last_name', 'role',
+            'id', 'username', 'email', 'first_name', 'last_name', 'role',
             'phone', 'is_active', 'branch', 'branch_name', 'company',
             'password', 'password_confirm',
         )
+
+    def validate_username(self, value):
+        if value:
+            val = str(value).strip()
+            if len(val) < 3:
+                raise serializers.ValidationError("Username must be at least 3 characters long.")
+            if len(val) > 30:
+                raise serializers.ValidationError("Username cannot exceed 30 characters.")
+            import re
+            if not re.match(r'^[a-zA-Z0-9_.-]+$', val):
+                raise serializers.ValidationError("Username can only contain letters, numbers, underscores (_), hyphens (-), and periods (.).")
+            
+            RESERVED = {"admin", "superadmin", "administrator", "root", "system", "api", "support", "help", "login", "signup"}
+            if val.lower() in RESERVED:
+                raise serializers.ValidationError("This username is reserved. Please choose another.")
+
+            qs = User.objects.filter(username__iexact=val)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError("This username is already taken. Please choose another.")
+            return val
+        return value
 
     def validate(self, attrs):
         password = attrs.get("password")
@@ -112,9 +172,9 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("password_confirm", None)
         password = validated_data.pop("password")
-        user = User(**validated_data)
-        user.set_password(password)
-        user.save()
+        username = validated_data.pop("username", None)
+        email = validated_data.pop("email")
+        user = User.objects.create_user(email=email, password=password, username=username, **validated_data)
         return user
 
     def update(self, instance, validated_data):
@@ -131,7 +191,7 @@ class UserReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            'id', 'email', 'first_name', 'last_name', 'role',
+            'id', 'username', 'email', 'first_name', 'last_name', 'role',
             'phone', 'is_active', 'branch', 'branch_name', 'company',
         )
 
@@ -141,4 +201,5 @@ class UserInviteSerializer(serializers.ModelSerializer):
         model = UserInvite
         fields = "__all__"
         read_only_fields = ("company", "token", "status", "expires_at")
+
 

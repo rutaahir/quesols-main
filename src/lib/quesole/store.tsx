@@ -71,7 +71,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     path.startsWith("/api/companies/check-slug/");
 
   const accessToken = localStorage.getItem("quesole.access_token");
-  if (accessToken && (!isPublicPath || path.includes("company-booking-config"))) {
+  if (accessToken && (!isPublicPath || path.includes("company-booking-config") || path.startsWith("/api/companies/register/"))) {
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
@@ -131,20 +131,57 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   if (!response.ok) {
     const isJson = response.headers.get("content-type")?.includes("application/json");
     const errorData = isJson ? await response.json().catch(() => ({})) : {};
-    let msg = errorData.detail || errorData.error;
+
+    // 1. Prefer a top-level detail or error string
+    let msg: string | undefined = errorData.detail || errorData.error || errorData.message;
+
+    // 2. Parse Django field-level validation errors into human-readable messages
     if (!msg && typeof errorData === "object" && Object.keys(errorData).length > 0) {
-      msg = Object.entries(errorData)
-        .map(([k, v]) => {
-          if (Array.isArray(v)) {
-            return v.map(item => typeof item === "string" ? item : String(item)).join(", ");
-          }
-          return typeof v === "string" ? v : String(v);
-        })
-        .join("; ");
+      // Map snake_case field names to readable labels
+      const fieldLabel = (key: string) =>
+        key
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+
+      const lines: string[] = [];
+      for (const [key, val] of Object.entries(errorData)) {
+        if (key === "non_field_errors" || key === "__all__") {
+          // Non-field errors — just show the message(s)
+          const msgs = Array.isArray(val) ? val : [val];
+          msgs.forEach((m) => {
+            const s = typeof m === "string" ? m.trim() : String(m).trim();
+            if (s && !lines.includes(s)) lines.push(s);
+          });
+        } else {
+          const label = fieldLabel(key);
+          const msgs = Array.isArray(val) ? val : [val];
+          const combined = msgs
+            .map((m) => (typeof m === "string" ? m.trim() : String(m).trim()))
+            .filter(Boolean)
+            .join(", ");
+          if (combined) lines.push(`${label}: ${combined}`);
+        }
+      }
+      msg = lines.join("\n");
     }
-    if (!msg && !isJson) {
-      msg = `Server Error (${response.status})`;
+
+    // 3. Fallback for non-JSON or empty bodies
+    if (!msg) {
+      const statusMessages: Record<number, string> = {
+        400: "The request contains invalid data. Please review your entries.",
+        401: "You are not authorised. Please sign in and try again.",
+        403: "You don't have permission to perform this action.",
+        404: "The requested resource was not found.",
+        409: "A conflict occurred. This record may already exist.",
+        422: "The server could not process your submission. Please check all fields.",
+        429: "Too many requests. Please wait a moment and try again.",
+        500: "A server error occurred. Please try again later.",
+        502: "The server is temporarily unavailable. Please try again.",
+        503: "Service unavailable. Please try again later.",
+      };
+      msg = statusMessages[response.status] || `Unexpected error (${response.status}). Please try again.`;
     }
+
     throw new Error(msg || `HTTP error status: ${response.status}`);
   }
   
@@ -189,7 +226,10 @@ interface Ctx {
   session: Session | null;
   simulating: boolean;
   tick: number;
-  signIn: (email: string, password: string, companySlug?: string) => Promise<Session>;
+  signIn: (emailOrUsername: string, password: string, companySlug?: string) => Promise<any>;
+  requestLoginOtp: (emailOrUsername: string, companySlug?: string) => Promise<any>;
+  verifyLoginOtp: (tempToken: string, otp: string, companySlug?: string) => Promise<Session>;
+  resendLoginOtp: (tempToken: string) => Promise<any>;
   signOut: () => Promise<void>;
   setSession: (patch: Partial<Session>) => void;
   setSimulating: (on: boolean) => void;
@@ -212,6 +252,7 @@ interface Ctx {
     createBranchStaff: (input: {
       branchId: string;
       email: string;
+      username?: string;
       password?: string;
       firstName?: string;
       lastName?: string;
@@ -253,7 +294,7 @@ interface Ctx {
     addDesk: (branchId: string, label: string, serviceIds: string[]) => Promise<void>;
     addService: (branchId: string, name: string, prefix: string, avgMinutes: number) => Promise<void>;
     inviteStaff: (input: Omit<Staff, "id" | "servedToday" | "avgHandleMin" | "status">) => Promise<void>;
-    createStaff: (input: { companyId: string; branchId: string; name: string; email: string; role: string; password: string; passwordConfirm: string }) => Promise<void>;
+    createStaff: (input: { companyId: string; branchId: string; name: string; email: string; username?: string; role: string; password: string; passwordConfirm: string }) => Promise<void>;
     removeStaff: (id: string) => Promise<void>;
     issueManualTicket: (input: { branchId: string; name?: string; phone?: string; serviceId?: string; deskId?: string }) => Promise<any>;
     bookAppointment: (input: { branchId: string; serviceId: string; customerName: string; contact: string; date: string; slot: string }) => Promise<string>;
@@ -281,6 +322,7 @@ interface Ctx {
       city: string;
       contactName: string;
       email: string;
+      username?: string;
       password: string;
       confirmPassword?: string;
       phone: string;
@@ -301,6 +343,7 @@ interface Ctx {
       website?: string;
       hpField?: string;
       paymentMode?: "online" | "invoice_request";
+      invoiceDetails?: any;
     }) => Promise<{ companyId: string; branchId: string; paymentMode?: string; onboardingStatus?: string }>;
       checkoutUpgrade: (input: {
         branches: any[];
@@ -320,6 +363,7 @@ interface Ctx {
         address: string;
         contactName: string;
         email: string;
+        username?: string;
         password: string;
         phone: string;
         countryCode: string;
@@ -404,7 +448,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
   const loadData = useCallback(async () => {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("quesole.access_token") : null;
-      const hasAuth = !!session || !!token;
+      const hasAuth = Boolean(session && token);
 
       // Always fetch public billing components, solution types, delivery methods, and duration tiers
       const [
@@ -575,7 +619,8 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
             id: String(u.id),
             companyId: String(u.company),
             branchId: String(u.branch),
-            name: `${u.first_name} ${u.last_name}`,
+            name: `${u.first_name} ${u.last_name}`.trim(),
+            username: u.username || "",
             email: u.email,
             role: u.role === "desk_staff" ? "operator" : u.role,
             status: u.is_active ? "online" : "offline",
@@ -779,12 +824,23 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
     };
   }, [session]);
 
-  const signIn = useCallback(async (email: string, password: string, companySlug?: string) => {
+  const signIn = useCallback(async (emailOrUsername: string, password: string, companySlug?: string) => {
     try {
       const data = await apiFetch("/api/auth/login/", {
         method: "POST",
-        body: JSON.stringify({ email, password, company_slug: companySlug }),
+        body: JSON.stringify({ email: emailOrUsername, password, company_slug: companySlug }),
       });
+
+      if (data.otp_required) {
+        return {
+          otpRequired: true,
+          tempToken: data.temp_token as string,
+          maskedEmail: (data.email || "") as string,
+          expiresInSeconds: (data.expires_in_seconds || 600) as number,
+          message: data.message as string,
+          devOtp: data.dev_otp as string | undefined,
+        };
+      }
       
       const access = data.access;
       const refresh = data.refresh;
@@ -815,6 +871,74 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       throw new Error(err.message || "Invalid credentials");
     }
   }, [persist]);
+
+  const requestLoginOtp = useCallback(async (emailOrUsername: string, companySlug?: string) => {
+    try {
+      const data = await apiFetch("/api/auth/request-otp/", {
+        method: "POST",
+        body: JSON.stringify({ email: emailOrUsername, company_slug: companySlug }),
+      });
+      return {
+        otpRequired: true,
+        tempToken: data.temp_token as string,
+        maskedEmail: (data.email || "") as string,
+        expiresInSeconds: (data.expires_in_seconds || 600) as number,
+        message: data.message as string,
+        devOtp: data.dev_otp as string | undefined,
+      };
+    } catch (err: any) {
+      throw new Error(err.message || "Failed to send verification code.");
+    }
+  }, []);
+
+  const verifyLoginOtp = useCallback(async (tempToken: string, otp: string, companySlug?: string) => {
+    try {
+      const data = await apiFetch("/api/auth/verify-otp/", {
+        method: "POST",
+        body: JSON.stringify({ temp_token: tempToken, otp, company_slug: companySlug }),
+      });
+
+      const access = data.access;
+      const refresh = data.refresh;
+
+      let rawRole = String(data.user.role || "");
+      let role: Role = (rawRole === "desk_staff" ? "operator" : rawRole) as Role;
+
+      const newSession: Session = {
+        role,
+        name: data.user.name,
+        email: data.user.email,
+        companyId: String(data.user.companyId || ""),
+        companyName: data.user.companyName || "",
+        companyStatus: data.user.companyStatus || "",
+        branchId: String(data.user.branchId || ""),
+        deskId: String(data.user.deskId || ""),
+        hasPurchasedPlan: Boolean(data.user.hasPurchasedPlan),
+        onboardingStatus: data.user.onboardingStatus || "",
+        companySlug: data.user.companySlug || "",
+      };
+
+      localStorage.setItem("quesole.access_token", access);
+      localStorage.setItem("quesole.refresh_token", refresh);
+      persist(newSession);
+
+      return newSession;
+    } catch (err: any) {
+      throw new Error(err.message || "Invalid verification code.");
+    }
+  }, [persist]);
+
+  const resendLoginOtp = useCallback(async (tempToken: string) => {
+    try {
+      const data = await apiFetch("/api/auth/resend-otp/", {
+        method: "POST",
+        body: JSON.stringify({ temp_token: tempToken }),
+      });
+      return data;
+    } catch (err: any) {
+      throw new Error(err.message || "Failed to resend verification code.");
+    }
+  }, []);
 
   const signOut = useCallback(async () => {
     if (session?.deskId) {
@@ -1441,6 +1565,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       async createBranchStaff(input: {
         branchId: string;
         email: string;
+        username?: string;
         password?: string;
         firstName?: string;
         lastName?: string;
@@ -1453,6 +1578,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           method: "POST",
           body: JSON.stringify({
             email: input.email.trim(),
+            username: input.username?.trim() || undefined,
             password: password,
             password_confirm: password,
             first_name: input.firstName?.trim() || "",
@@ -1507,6 +1633,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           method: "POST",
           body: JSON.stringify({
             name: label,
+            branch: branchId,
             status: "offline"
           })
         });
@@ -1524,6 +1651,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
           method: "POST",
           body: JSON.stringify({
             name,
+            branch: branchId,
             prefix,
             est_service_minutes: avgMinutes
           })
@@ -1531,13 +1659,14 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         loadData();
       },
 
-      async createStaff(input: { companyId: string; branchId: string; name: string; email: string; role: string; password: string; passwordConfirm: string }) {
+      async createStaff(input: { companyId: string; branchId: string; name: string; email: string; username?: string; role: string; password: string; passwordConfirm: string }) {
         const [firstName, ...lastParts] = input.name.split(" ");
         const apiRole = input.role === "operator" ? "desk_staff" : input.role;
         await apiFetch("/api/users/", {
           method: "POST",
           body: JSON.stringify({
             email: input.email,
+            username: input.username?.trim() || undefined,
             first_name: firstName || input.name,
             last_name: lastParts.join(" ") || "",
             role: apiRole,
@@ -1694,6 +1823,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         city: string;
         contactName: string;
         email: string;
+        username?: string;
         password: string;
         confirmPassword?: string;
         phone: string;
@@ -1728,6 +1858,8 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
             city: input.city,
             contact: input.contactName,
             email: input.email,
+            admin_username: input.username?.trim() || undefined,
+            username: input.username?.trim() || undefined,
             password: input.password,
             admin_confirm_password: input.confirmPassword || input.password,
             phone: input.phone || "9999999999",
@@ -1806,6 +1938,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
         address: string;
         contactName: string;
         email: string;
+        username?: string;
         password: string;
         phone: string;
         countryCode: string;
@@ -1823,6 +1956,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
             address: input.address,
             contact_name: input.contactName,
             email: input.email,
+            username: input.username?.trim() || undefined,
             password: input.password,
             phone: input.phone,
             country_code: input.countryCode,
@@ -1860,6 +1994,9 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       simulating,
       tick,
       signIn,
+      requestLoginOtp,
+      verifyLoginOtp,
+      resendLoginOtp,
       signOut,
       setSession: (patch: Partial<Session>) =>
         persist(session ? { ...session, ...patch } : session),
@@ -1867,7 +2004,7 @@ export function QuesoleProvider({ children }: { children: ReactNode }) {
       refresh: loadData,
       actions,
     }),
-    [state, session, simulating, tick, persist, signIn, signOut, loadData, actions],
+    [state, session, simulating, tick, persist, signIn, requestLoginOtp, verifyLoginOtp, resendLoginOtp, signOut, loadData, actions],
   );
 
   return <QuesoleContext.Provider value={value}>{children}</QuesoleContext.Provider>;

@@ -6,7 +6,17 @@ from analytics.views import ReportTrendsView, ReportExportView
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 from core.views import healthz, ContactSubmissionView, DemoRequestView, PartnershipRequestView
-from accounts.views import CustomTokenObtainPairView, LogoutView, UserInviteViewSet, InviteAcceptView, UserViewSet
+from accounts.views import (
+    CustomTokenObtainPairView,
+    LogoutView,
+    UserInviteViewSet,
+    InviteAcceptView,
+    UserViewSet,
+    VerifyLoginOtpView,
+    ResendLoginOtpView,
+    CheckUsernameView,
+    RequestLoginOtpView,
+)
 from companies.views import (
     CompanyRegistrationView,
     CompanyViewSet,
@@ -86,9 +96,18 @@ urlpatterns = [
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
     
     # Auth endpoints
+    path("api/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair_root"),
     path("api/auth/login/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/auth/request-otp/", RequestLoginOtpView.as_view(), name="request_login_otp"),
+    path("api/auth/send-otp/", RequestLoginOtpView.as_view(), name="send_login_otp"),
+    path("api/auth/verify-otp/", VerifyLoginOtpView.as_view(), name="verify_login_otp"),
+    path("api/auth/verify-login-otp/", VerifyLoginOtpView.as_view(), name="verify_login_otp_alt"),
+    path("api/auth/resend-otp/", ResendLoginOtpView.as_view(), name="resend_login_otp"),
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/logout/", LogoutView.as_view(), name="token_blacklist"),
+    path("api/users/check-username/", CheckUsernameView.as_view(), name="check_username"),
+    path("api/accounts/check-username/", CheckUsernameView.as_view(), name="check_username_accounts"),
+
     
     # Onboarding & Invites
     path("api/companies/register/", CompanyRegistrationView.as_view(), name="company_register"),

@@ -23,7 +23,10 @@ def provision_kiosks_for_branch(branch):
             N = comp_alloc.purchased_qty
         else:
             # Fallback to package max_kiosks
-            pkg = getattr(branch.company, "package", None)
+            try:
+                pkg = getattr(branch.company, "package", None)
+            except Exception:
+                pkg = None
             N = getattr(pkg, "max_kiosks", 0) if pkg else 0
 
     if N < 0:

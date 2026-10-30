@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { getApiUrl } from "@/lib/api-config";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
@@ -105,14 +106,15 @@ function DisplayBoardScreen() {
   // Terminals & Passcode State
   const [terminalsList, setTerminalsList] = useState<any[]>([]);
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>("");
+  const [displayUsername, setDisplayUsername] = useState("");
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
   const [isSubmittingPasscode, setIsSubmittingPasscode] = useState(false);
   const [evictionReason, setEvictionReason] = useState<string | null>(null);
 
   const fetchBaseUrl = typeof window !== "undefined"
-    ? `http://${window.location.hostname}:8000`
-    : "http://localhost:8000";
+    ? getApiUrl("")
+    : "http://localhost:8001";
 
   const branchId = branch?.id ? String(branch.id) : "";
 
@@ -201,6 +203,11 @@ function DisplayBoardScreen() {
       .catch((err) => console.error("Failed to fetch display terminals:", err));
   }, [branchId]);
 
+  // Never autofill display screen username on locked screen
+  useEffect(() => {
+    setDisplayUsername("");
+  }, [selectedTerminalId]);
+
   // When selected terminal changes, update terminal-scoped storage
   const handleSelectTerminal = (termId: string) => {
     setSelectedTerminalId(termId);
@@ -243,8 +250,12 @@ function DisplayBoardScreen() {
       setPasscodeError("Please select a display terminal.");
       return;
     }
+    if (!displayUsername.trim()) {
+      setPasscodeError("Terminal username is required.");
+      return;
+    }
     if (!passcode.trim()) {
-      setPasscodeError("Passcode is required.");
+      setPasscodeError("Passcode / PIN is required.");
       return;
     }
 
@@ -257,13 +268,15 @@ function DisplayBoardScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           terminal_id: selectedTerminalId,
+          username: displayUsername.trim(),
           passcode: passcode.trim(),
+          branch_id: branchId,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        setPasscodeError(data.error || "Invalid passcode.");
+        setPasscodeError(data.error || "Invalid username or passcode.");
         return;
       }
 
@@ -606,7 +619,30 @@ function DisplayBoardScreen() {
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
-                4-Digit Passcode
+                Terminal Username
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                data-lpignore="true"
+                data-form-type="other"
+                value={displayUsername}
+                onChange={(e) => {
+                  setPasscodeError(null);
+                  setDisplayUsername(e.target.value.toLowerCase().trim());
+                }}
+                placeholder="e.g. display-1"
+                required
+                className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 px-3 font-mono text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
+                4-Digit Passcode / PIN
               </label>
               <input
                 type="password"

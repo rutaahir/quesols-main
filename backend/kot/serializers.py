@@ -43,6 +43,7 @@ from kot.models import Kiosk
 class KioskSerializer(serializers.ModelSerializer):
     is_logged_in = serializers.SerializerMethodField()
     pin = serializers.CharField(required=False, allow_blank=True)
+    username = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Kiosk
@@ -51,6 +52,7 @@ class KioskSerializer(serializers.ModelSerializer):
             "company",
             "branch",
             "kiosk_identifier",
+            "username",
             "pin",
             "status",
             "session_token",
@@ -61,8 +63,40 @@ class KioskSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
+        validators = []
+
+    def validate(self, attrs):
+        branch = attrs.get("branch") or getattr(self.instance, "branch", None)
+        kiosk_identifier = attrs.get("kiosk_identifier")
+        if branch and kiosk_identifier:
+            qs = Kiosk.objects.filter(branch=branch, kiosk_identifier__iexact=kiosk_identifier.strip())
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({"kiosk_identifier": f"A kiosk named '{kiosk_identifier}' already exists in this branch. Please choose a different name."})
+
+        username = attrs.get("username")
+        if branch and username:
+            qs_u = Kiosk.objects.filter(branch=branch, username__iexact=username.strip())
+            if self.instance:
+                qs_u = qs_u.exclude(pk=self.instance.pk)
+            if qs_u.exists():
+                raise serializers.ValidationError({"username": f"Username '{username}' is already in use by another kiosk in this branch."})
+        return attrs
 
     def create(self, validated_data):
+        import re
+        if not validated_data.get("username"):
+            ident = validated_data.get("kiosk_identifier", "kiosk")
+            clean_user = re.sub(r'[^a-zA-Z0-9_-]', '', ident.lower().replace(' ', '-')) or "kiosk"
+            branch = validated_data.get("branch")
+            candidate = clean_user
+            idx = 1
+            while Kiosk.objects.filter(branch=branch, username__iexact=candidate).exists():
+                candidate = f"{clean_user}-{idx}"
+                idx += 1
+            validated_data["username"] = candidate
+
         if not validated_data.get("pin"):
             import random
             validated_data["pin"] = "".join(str(random.randint(0, 9)) for _ in range(4))
@@ -79,6 +113,7 @@ class PublicKioskSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "kiosk_identifier",
+            "username",
             "status",
             "is_logged_in",
         ]
@@ -92,6 +127,7 @@ from kot.models import KotTerminal
 class KotTerminalSerializer(serializers.ModelSerializer):
     is_logged_in = serializers.SerializerMethodField()
     pin = serializers.CharField(required=False, allow_blank=True)
+    username = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = KotTerminal
@@ -100,6 +136,7 @@ class KotTerminalSerializer(serializers.ModelSerializer):
             "company",
             "branch",
             "terminal_identifier",
+            "username",
             "pin",
             "status",
             "session_token",
@@ -112,7 +149,30 @@ class KotTerminalSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
         validators = []
 
+    def validate(self, attrs):
+        branch = attrs.get("branch") or getattr(self.instance, "branch", None)
+        username = attrs.get("username")
+        if branch and username:
+            qs_u = KotTerminal.objects.filter(branch=branch, username__iexact=username.strip())
+            if self.instance:
+                qs_u = qs_u.exclude(pk=self.instance.pk)
+            if qs_u.exists():
+                raise serializers.ValidationError({"username": f"Username '{username}' is already in use by another KOT terminal in this branch."})
+        return attrs
+
     def create(self, validated_data):
+        import re
+        if not validated_data.get("username"):
+            ident = validated_data.get("terminal_identifier", "kot")
+            clean_user = re.sub(r'[^a-zA-Z0-9_-]', '', ident.lower().replace(' ', '-')) or "kot"
+            branch = validated_data.get("branch")
+            candidate = clean_user
+            idx = 1
+            while KotTerminal.objects.filter(branch=branch, username__iexact=candidate).exists():
+                candidate = f"{clean_user}-{idx}"
+                idx += 1
+            validated_data["username"] = candidate
+
         if not validated_data.get("pin"):
             import random
             validated_data["pin"] = "".join(str(random.randint(0, 9)) for _ in range(4))
@@ -129,6 +189,7 @@ class PublicKotTerminalSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "terminal_identifier",
+            "username",
             "status",
             "is_logged_in",
         ]

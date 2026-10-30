@@ -3,6 +3,7 @@ import random
 from django.utils import timezone
 from django.core.cache import cache
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -151,13 +152,34 @@ class DisplayTerminalLoginView(APIView):
 
     def post(self, request):
         terminal_id = request.data.get("terminal_id")
-        passcode = request.data.get("passcode")
+        branch_id = request.data.get("branch_id")
+        username = (request.data.get("username") or "").strip()
+        passcode = request.data.get("passcode") or request.data.get("pin")
 
-        if not terminal_id or not passcode:
-            return Response({"error": "terminal_id and passcode are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not passcode:
+            return Response({"error": "Passcode / PIN is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not username and not terminal_id:
+            return Response({"error": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        lockout_key = f"display_lockout_{terminal_id}"
-        cooldown_key = f"display_cooldown_{terminal_id}"
+        # Lookup terminal
+        terminal = None
+        if terminal_id:
+            try:
+                terminal = DisplayTerminal.objects.get(id=terminal_id, status="active")
+            except DisplayTerminal.DoesNotExist:
+                return Response({"error": "Display terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        elif branch_id and username:
+            terminal = DisplayTerminal.objects.filter(branch_id=branch_id, username__iexact=username, status="active").first()
+            if not terminal:
+                terminal = DisplayTerminal.objects.filter(branch_id=branch_id, terminal_identifier__iexact=username, status="active").first()
+        elif username:
+            terminal = DisplayTerminal.objects.filter(username__iexact=username, status="active").first()
+
+        if not terminal:
+            return Response({"error": "No active display terminal found matching this username."}, status=status.HTTP_404_NOT_FOUND)
+
+        lockout_key = f"display_lockout_{terminal.id}"
+        cooldown_key = f"display_cooldown_{terminal.id}"
 
         if cache.get(cooldown_key):
             return Response(
@@ -165,10 +187,12 @@ class DisplayTerminalLoginView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS
             )
 
-        try:
-            terminal = DisplayTerminal.objects.get(id=terminal_id, status="active")
-        except DisplayTerminal.DoesNotExist:
-            return Response({"error": "Display terminal not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+        # Validate username match if provided
+        if username and terminal.username and terminal.username.lower() != username.lower():
+            if terminal.terminal_identifier.lower() != username.lower():
+                attempts = cache.get(lockout_key, 0) + 1
+                cache.set(lockout_key, attempts, timeout=300)
+                return Response({"error": "Invalid username or passcode."}, status=status.HTTP_400_BAD_REQUEST)
 
         if str(terminal.passcode).strip() == str(passcode).strip():
             cache.delete(lockout_key)
@@ -200,7 +224,8 @@ class DisplayTerminalLoginView(APIView):
             return Response({
                 "message": "Login successful",
                 "session_token": new_session_token,
-                "terminal": PublicDisplayTerminalSerializer(terminal).data
+                "terminal": PublicDisplayTerminalSerializer(terminal).data,
+                "username": terminal.username or "",
             }, status=status.HTTP_200_OK)
         else:
             attempts = cache.get(lockout_key, 0) + 1
@@ -284,43 +309,104 @@ class DisplayTerminalViewSet(viewsets.ModelViewSet):
     serializer_class = DisplayTerminalSerializer
 
     def list(self, request, *args, **kwargs):
-        branch_id = request.query_params.get("branch") or request.query_params.get("branch_id")
-        if branch_id:
-            from branches.models import Branch
-            from display.provisioning import provision_displays_for_branch
-            try:
-                branch = Branch.objects.get(id=branch_id)
-                provision_displays_for_branch(branch)
-            except Exception as e:
-                print(f"Auto-provisioning displays error: {e}")
-        elif request.user.is_authenticated and getattr(request.user, "company", None):
-            from branches.models import Branch
-            from display.provisioning import provision_displays_for_branch
-            for b in Branch.objects.filter(company=request.user.company):
+        # Auto-provision default slot for existing terminals that don't have slots yet
+        terminals = self.get_queryset()
+        for terminal in terminals:
+            if not terminal.slots.exists():
                 try:
-                    provision_displays_for_branch(b)
-                except Exception:
-                    pass
+                    from queuing.models import Desk
+                    from display.models import DisplayTerminalSlot
+                    branch_desks = list(Desk.objects.filter(branch=terminal.branch, is_active=True))
+                    if not branch_desks:
+                        branch_desks = list(Desk.objects.filter(branch=terminal.branch))
+                    slot = DisplayTerminalSlot.objects.create(terminal=terminal, order=1)
+                    if branch_desks:
+                        slot.desks.set(branch_desks)
+                    slot.save()
+                except Exception as e:
+                    print(f"Error provisioning default slot for terminal {terminal.id}: {e}")
 
         return super().list(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    f"display_{instance.id}",
+                    {
+                        "type": "display.force_logout",
+                        "session_token": "deleted",
+                        "message": "This display terminal was removed by an administrator."
+                    }
+                )
+            except Exception as e:
+                print(f"Eviction on terminal delete error: {e}")
+        instance.delete()
 
     def get_queryset(self):
         user = self.request.user
         if not user.is_authenticated:
-            return DisplayTerminal.objects.none()
+            return DisplayTerminal.all_objects.none()
         if user.role == "super_admin":
-            return DisplayTerminal.objects.all()
+            branch_id = self.request.query_params.get("branch") or self.request.query_params.get("branch_id")
+            if branch_id:
+                return DisplayTerminal.all_objects.filter(branch_id=branch_id)
+            return DisplayTerminal.all_objects.all()
         if user.role in ["company_admin", "branch_admin", "operator"]:
+            branch_id = self.request.query_params.get("branch") or self.request.query_params.get("branch_id")
+            if branch_id:
+                return DisplayTerminal.all_objects.filter(company=user.company, branch_id=branch_id)
             if user.branch:
-                return DisplayTerminal.objects.filter(company=user.company, branch=user.branch)
-            return DisplayTerminal.objects.filter(company=user.company)
-        return DisplayTerminal.objects.none()
+                return DisplayTerminal.all_objects.filter(company=user.company, branch=user.branch)
+            return DisplayTerminal.all_objects.filter(company=user.company)
+        return DisplayTerminal.all_objects.none()
+
+    @action(detail=False, methods=["get"], url_path="check-username")
+    def check_username(self, request):
+        username = (request.query_params.get("username") or "").strip().lower()
+        exclude_id = request.query_params.get("exclude_id")
+        branch_id = request.query_params.get("branch_id") or request.query_params.get("branch")
+
+        if not username:
+            return Response({"available": False, "message": "Username cannot be empty."}, status=status.HTTP_200_OK)
+
+        if len(username) < 2:
+            return Response({"available": False, "message": "Username must be at least 2 characters."}, status=status.HTTP_200_OK)
+
+        import re
+        if not re.match(r'^[a-z0-9_-]+$', username):
+            return Response({"available": False, "message": "Username can only contain lowercase letters, numbers, hyphens, and underscores."}, status=status.HTTP_200_OK)
+
+        user = request.user
+        qs = DisplayTerminal.all_objects.all()
+
+        if branch_id and str(branch_id).lower() not in ["undefined", "null", "none"]:
+            if str(branch_id).isdigit():
+                qs = qs.filter(branch_id=int(branch_id))
+            else:
+                qs = qs.filter(branch__slug=branch_id)
+        elif getattr(user, "company", None):
+            qs = qs.filter(company=user.company)
+
+        if exclude_id and str(exclude_id).isdigit():
+            qs = qs.exclude(id=int(exclude_id))
+
+        taken = qs.filter(username__iexact=username).exists()
+        if taken:
+            return Response({"available": False, "message": f"Username '{username}' is already taken in this branch."}, status=status.HTTP_200_OK)
+
+        return Response({"available": True, "message": f"Username '{username}' is available!"}, status=status.HTTP_200_OK)
 
     def perform_create(self, serializer):
         user = self.request.user
         branch = serializer.validated_data.get("branch")
         if not branch:
             raise ValidationError("You must specify a branch to create a display terminal.")
+
+        username = (serializer.validated_data.get("username") or self.request.data.get("username") or "").strip().lower()
+        if username and DisplayTerminal.all_objects.filter(branch=branch, username__iexact=username).exists():
+            raise ValidationError(f"Username '{username}' is already in use by another display screen in this branch.")
 
         from billing.models import CompanyPlanAllocation
         comp_alloc = CompanyPlanAllocation.objects.filter(
@@ -331,12 +417,24 @@ class DisplayTerminalViewSet(viewsets.ModelViewSet):
                 company=user.company, branch__isnull=True, plan_component__key="live_display_screens"
             ).first()
 
-        quota = comp_alloc.purchased_qty if comp_alloc else getattr(user.company.package, "max_displays", 0)
-        current_count = DisplayTerminal.objects.filter(branch=branch, status="active").count()
+        if comp_alloc:
+            quota = comp_alloc.purchased_qty
+        else:
+            try:
+                pkg = getattr(user.company, "package", None)
+                quota = getattr(pkg, "max_displays", 1) if pkg else 1
+            except Exception:
+                quota = 1
+        if not quota or quota <= 0:
+            quota = 1
+
+        current_count = DisplayTerminal.all_objects.filter(branch=branch, status="active").count()
         if current_count >= quota:
             raise ValidationError(f"Plan limit reached: you cannot create more than {quota} active display terminals.")
 
-        passcode = "".join(str(random.randint(0, 9)) for _ in range(4))
+        passcode = (self.request.data.get("passcode") or serializer.validated_data.get("passcode") or "").strip()
+        if not passcode:
+            passcode = "".join(str(random.randint(0, 9)) for _ in range(4))
         serializer.save(company=user.company, passcode=passcode)
 
 

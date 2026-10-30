@@ -137,7 +137,7 @@ export function PlanSummarySidebar({
                 ₹{grandTotal.toLocaleString("en-IN")}
               </span>
               <span className="text-[11px] font-semibold text-slate-500">
-                / {durationMonths} mo + GST
+                / {durationMonths} mo (incl. 18% GST)
               </span>
             </>
           )}

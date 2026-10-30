@@ -14,6 +14,7 @@ import {
   Map,
   Phone,
   User,
+  AtSign,
   Mail,
   Lock,
   Eye,
@@ -89,6 +90,7 @@ interface Form {
   website: string;
   hp_field: string;
   adminName: string;
+  username: string;
   email: string;
   password: string;
   confirmPassword: string;
@@ -325,6 +327,7 @@ function SignupPage() {
     website: "",
     hp_field: "",
     adminName: "",
+    username: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -413,23 +416,80 @@ function SignupPage() {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const stepParam = params.get("step");
-      if (stepParam === "1" || (session && session.role === "company_admin" && !session.hasPurchasedPlan)) {
-        setStep(1);
+      const isAuthAdmin = session && session.role === "company_admin";
+
+      if (isAuthAdmin && !session.hasPurchasedPlan) {
+        if (stepParam === "2") {
+          setStep(2);
+        } else {
+          setStep(1);
+        }
+      } else if (stepParam === "2") {
+        if (isAuthAdmin) {
+          setStep(2);
+        } else {
+          setStep(0);
+        }
+      } else if (stepParam === "1") {
+        if (isAuthAdmin) {
+          setStep(1);
+        } else {
+          // If no active company admin session exists, user must complete Step 1 first
+          setStep(0);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("step");
+          window.history.replaceState({}, "", url.pathname);
+        }
       }
     }
   }, [session]);
 
-  // Pre-fill form from existing session if available
+  // Keep browser URL synchronized with current active step
   useEffect(() => {
-    if (session && !form.company) {
-      const existingCompany = state.companies.find((c) => String(c.id) === String(session?.companyId));
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (step === 0) {
+        if (url.searchParams.has("step")) {
+          url.searchParams.delete("step");
+          window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+        }
+      } else {
+        if (url.searchParams.get("step") !== String(step)) {
+          url.searchParams.set("step", String(step));
+          window.history.replaceState({}, "", url.pathname + "?" + url.searchParams.toString());
+        }
+      }
+    }
+  }, [step]);
+
+  // Pre-fill form from existing session or authoritative backend company profile
+  useEffect(() => {
+    if (session?.email) {
+      // 1. Populate from state.companies if already in memory
+      const existingCompany = state.companies.find(
+        (c) => String(c.id) === String(session?.companyId) || (c.email && c.email.toLowerCase() === session?.email?.toLowerCase())
+      );
       if (existingCompany) {
+        let parsedCountryCode = "+91";
+        let parsedPhone = "";
+        const rawPhone = existingCompany.phone || existingCompany.adminPhone || existingCompany.supportPhone || "";
+        if (rawPhone) {
+          const match = rawPhone.match(/^(\+\d{1,4})\s*(.*)$/);
+          if (match) {
+            parsedCountryCode = match[1];
+            parsedPhone = match[2].replace(/[^\d]/g, "");
+          } else {
+            parsedPhone = rawPhone.replace(/[^\d]/g, "");
+          }
+        }
+
         setForm((f) => ({
           ...f,
           company: existingCompany.name || f.company,
-          email: session?.email || f.email,
-          adminName: session?.name || f.adminName,
-          phone: existingCompany.supportPhone || existingCompany.contact || f.phone,
+          email: session.email || f.email,
+          adminName: existingCompany.contact || existingCompany.adminName || session.name || f.adminName,
+          countryCode: parsedCountryCode || f.countryCode,
+          phone: parsedPhone || f.phone,
           address: existingCompany.address || f.address,
           city: existingCompany.city || f.city,
           country: existingCompany.country || f.country,
@@ -438,6 +498,31 @@ function SignupPage() {
           otherIndustry: existingCompany.customIndustry || f.otherIndustry,
         }));
       }
+
+      // 2. Fetch authoritative company profile from register-step1
+      fetch(`/api/companies/register-step1/?email=${encodeURIComponent(session.email)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.company) {
+            const c = data.company;
+            setForm((f) => ({
+              ...f,
+              company: c.company_name || f.company,
+              adminName: c.contact_name || f.adminName,
+              email: session.email || f.email,
+              countryCode: c.country_code || f.countryCode,
+              phone: c.phone ? String(c.phone).replace(/[^\d]/g, "") : f.phone,
+              address: c.address || f.address,
+              city: c.city || f.city,
+              state: c.state || f.state,
+              country: c.country || f.country,
+              industry: c.industry || f.industry,
+              otherIndustry: c.custom_industry || f.otherIndustry,
+              website: c.website || f.website,
+            }));
+          }
+        })
+        .catch(() => {});
     }
   }, [session, state.companies]);
 
@@ -466,6 +551,8 @@ function SignupPage() {
   const [dirtyFields, setDirtyFields] = useState<Record<string, boolean>>({});
   const [emailCheckStatus, setEmailCheckStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [emailCheckMessage, setEmailCheckMessage] = useState<string>("");
+  const [usernameCheckStatus, setUsernameCheckStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [usernameCheckMessage, setUsernameCheckMessage] = useState<string>("");
 
   const setFormKey = <K extends keyof Form>(k: K, v: Form[K]) => {
     setDirtyFields((prev) => ({ ...prev, [k]: true }));
@@ -513,10 +600,61 @@ function SignupPage() {
     return () => clearTimeout(timer);
   }, [form.email]);
 
+  // Real-time debounced username availability check
+  useEffect(() => {
+    const rawUsername = form.username.trim();
+    if (!rawUsername) {
+      setUsernameCheckStatus("idle");
+      setUsernameCheckMessage("");
+      return;
+    }
+
+    if (rawUsername.length < 3) {
+      setUsernameCheckStatus("invalid");
+      setUsernameCheckMessage("Username must be at least 3 characters.");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_.-]+$/.test(rawUsername)) {
+      setUsernameCheckStatus("invalid");
+      setUsernameCheckMessage("Letters, numbers, underscores, dashes, dots only.");
+      return;
+    }
+
+    setUsernameCheckStatus("checking");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(getApiUrl(`/api/users/check-username/?username=${encodeURIComponent(rawUsername)}`));
+        if (res.ok) {
+          const data = await res.json();
+          if (data.available) {
+            setUsernameCheckStatus("available");
+            setUsernameCheckMessage(data.message || "Username is available");
+          } else {
+            setUsernameCheckStatus("taken");
+            setUsernameCheckMessage(data.message || "This username is already taken. Please choose another.");
+          }
+        } else {
+          setUsernameCheckStatus("idle");
+        }
+      } catch {
+        setUsernameCheckStatus("idle");
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [form.username]);
+
   // Real-time password criteria computation
   const passwordHasLength = form.password.length >= 6;
   const passwordHasLetter = /[a-zA-Z]/.test(form.password);
   const passwordHasNumber = /[0-9]/.test(form.password);
+
+  // Check if current user is an existing authenticated company administrator or resuming with active session
+  const isExistingUser = Boolean(
+    (session && session.role === "company_admin") ||
+    (session?.email && form.email && session.email.toLowerCase() === form.email.toLowerCase())
+  );
 
   const errors: Partial<Record<keyof Form, string>> = {};
   if (step === 0) {
@@ -529,11 +667,23 @@ function SignupPage() {
     if (form.address.trim().length < 5) errors.address = "Specify complete company address (min 5 characters).";
     if (form.adminName.trim().length < 3) errors.adminName = "Enter administrator's full name (min 3 characters).";
     
+    if (!isExistingUser) {
+      if (!form.username.trim()) {
+        errors.username = "Administrator username is required.";
+      } else if (form.username.trim().length < 3) {
+        errors.username = "Username must be at least 3 characters.";
+      } else if (!/^[a-zA-Z0-9_.-]+$/.test(form.username.trim())) {
+        errors.username = "Letters, numbers, underscores, dashes, dots only.";
+      } else if (usernameCheckStatus === "taken") {
+        errors.username = usernameCheckMessage || "This username is already taken. Please choose another.";
+      }
+    }
+
     if (!form.email.trim()) {
       errors.email = "Work email is required.";
     } else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
       errors.email = "Valid work email required (e.g. name@company.com).";
-    } else if (emailCheckStatus === "taken") {
+    } else if (emailCheckStatus === "taken" && (!session || session.email !== form.email.trim())) {
       errors.email = emailCheckMessage || "An account with this email already exists. Please sign in.";
     }
 
@@ -544,26 +694,45 @@ function SignupPage() {
       errors.phone = "Phone number must be between 8 and 15 digits.";
     }
 
-    if (!form.password) {
-      errors.password = "Password is required.";
-    } else if (form.password.length < 6) {
-      errors.password = "Password must be at least 6 characters.";
-    } else if (!passwordHasLetter) {
-      errors.password = "Password must contain at least one letter.";
-    } else if (!passwordHasNumber) {
-      errors.password = "Password must contain at least one number.";
-    }
+    if (!isExistingUser) {
+      if (!form.password) {
+        errors.password = "Password is required.";
+      } else if (form.password.length < 6) {
+        errors.password = "Password must be at least 6 characters.";
+      } else if (!passwordHasLetter) {
+        errors.password = "Password must contain at least one letter.";
+      } else if (!passwordHasNumber) {
+        errors.password = "Password must contain at least one number.";
+      }
 
-    if (!form.confirmPassword) {
-      errors.confirmPassword = "Confirm password is required.";
-    } else if (form.confirmPassword !== form.password) {
-      errors.confirmPassword = "Passwords do not match.";
-    }
+      if (!form.confirmPassword) {
+        errors.confirmPassword = "Confirm password is required.";
+      } else if (form.confirmPassword !== form.password) {
+        errors.confirmPassword = "Passwords do not match.";
+      }
 
-    if (!form.captchaInput.trim()) {
-      errors.captchaInput = "Security verification code is required.";
-    } else if (form.captchaInput.trim() !== captchaCode) {
-      errors.captchaInput = "Incorrect security code.";
+      if (!form.captchaInput.trim()) {
+        errors.captchaInput = "Security verification code is required.";
+      } else if (form.captchaInput.trim() !== captchaCode) {
+        errors.captchaInput = "Incorrect security code.";
+      }
+    } else {
+      // Existing authenticated user: password update is optional
+      if (form.password) {
+        if (form.password.length < 6) {
+          errors.password = "Password must be at least 6 characters.";
+        } else if (!passwordHasLetter) {
+          errors.password = "Password must contain at least one letter.";
+        } else if (!passwordHasNumber) {
+          errors.password = "Password must contain at least one number.";
+        }
+
+        if (!form.confirmPassword) {
+          errors.confirmPassword = "Confirm password is required.";
+        } else if (form.confirmPassword !== form.password) {
+          errors.confirmPassword = "Passwords do not match.";
+        }
+      }
     }
   }
 
@@ -628,6 +797,7 @@ function SignupPage() {
         address: form.address.trim(),
         contactName: form.adminName.trim(),
         email: form.email.trim(),
+        username: form.username.trim() || undefined,
         password: form.password,
         phone: form.phone.trim(),
         countryCode: form.countryCode,
@@ -695,6 +865,39 @@ function SignupPage() {
   };
 
   async function handleSubmitPayment() {
+    // 1. Verify Step 0 (Company & Admin) fields before initiating checkout (only for unauthenticated users)
+    if (!isExistingUser && (!form.company.trim() || !form.email.trim() || !form.password)) {
+      setStep(0);
+      setTouched(true);
+      setDirtyFields((prev) => ({
+        ...prev,
+        company: !form.company.trim() ? true : Boolean(prev["company"]),
+        email: !form.email.trim() ? true : Boolean(prev["email"]),
+        password: !form.password ? true : Boolean(prev["password"]),
+      }));
+      toast.error("Step 1 (Company & Admin) Required", {
+        description: "Please complete your company details before proceeding.",
+        duration: 5000,
+      });
+      setTimeout(() => {
+        if (!form.company.trim()) document.getElementById("company")?.focus();
+        else if (!form.email.trim()) document.getElementById("email")?.focus();
+        else if (!form.password) document.getElementById("password")?.focus();
+      }, 150);
+      return;
+    }
+
+    // 2. Verify Step 1 (Plan Builder) has at least 1 branch configured
+    if (!form.branches || form.branches.length === 0) {
+      setStep(1);
+      toast.error("Step 2 (Plan Builder) Required", {
+        description: "Please configure your branches and queue methods in Step 2 before checkout.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    // 3. Verify Step 2 corporate billing fields if requesting an invoice
     if (paymentMode === "invoice_request") {
       const invErrs: Record<string, string> = {};
       if (!invoiceDetails.billingName.trim()) invErrs.billingName = "Billing legal name is required.";
@@ -702,16 +905,25 @@ function SignupPage() {
       if (!invoiceDetails.billerEmail.trim()) {
         invErrs.billerEmail = "Biller / accounts email is required.";
       } else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(invoiceDetails.billerEmail.trim())) {
-        invErrs.billerEmail = "Enter a valid billing email address.";
+        invErrs.billerEmail = "Enter a valid billing email address (e.g. accounts@company.com).";
       }
       if (!invoiceDetails.contactPerson.trim()) invErrs.contactPerson = "Contact person name is required.";
-      if (!invoiceDetails.contactPhone.trim()) invErrs.contactPhone = "Contact phone number is required.";
+      
+      const phoneVal = invoiceDetails.contactPhone.trim() || (form.phone ? `${form.countryCode} ${form.phone}`.trim() : "");
+      if (!phoneVal) {
+        invErrs.contactPhone = "Contact phone number is required.";
+      } else if (!invoiceDetails.contactPhone.trim()) {
+        setInvoiceDetails((prev) => ({ ...prev, contactPhone: phoneVal }));
+      }
 
       if (Object.keys(invErrs).length > 0) {
         setInvoiceErrors(invErrs);
         const firstKey = Object.keys(invErrs)[0];
         document.getElementById(`inv_${firstKey}`)?.focus();
-        toast.error("Please fill all required corporate billing fields.");
+        toast.error("Corporate Billing Details Needed", {
+          description: "Please fill in all required corporate billing fields below.",
+          duration: 5000,
+        });
         return;
       }
     }
@@ -720,7 +932,10 @@ function SignupPage() {
     try {
       const finalCity = form.city === "Other" && form.customCity ? form.customCity.trim() : form.city;
       const finalIndustry = form.industry === "Other" ? (form.otherIndustry.trim() || "Other") : form.industry;
-      const fullPhone = form.phone ? `${form.countryCode} ${form.phone}` : "9999999999";
+      const phoneDigits = form.phone ? form.phone.replace(/[^\d]/g, "") : "";
+      const fallbackPhone = invoiceDetails.contactPhone ? invoiceDetails.contactPhone.replace(/[^\d]/g, "") : "";
+      const effectiveDigits = phoneDigits || fallbackPhone || "9999999999";
+      const fullPhone = `${form.countryCode || "+91"} ${effectiveDigits}`.trim();
 
       const mappedBranches = form.branches ? form.branches.map((b) => ({
         name: b.name,
@@ -744,6 +959,7 @@ function SignupPage() {
         city: finalCity,
         contactName: form.adminName.trim(),
         email: form.email.trim(),
+        username: form.username.trim() || undefined,
         password: form.password,
         confirmPassword: form.confirmPassword,
         phone: fullPhone,
@@ -769,7 +985,7 @@ function SignupPage() {
           billing_address: invoiceDetails.billingAddress.trim(),
           biller_email: invoiceDetails.billerEmail.trim(),
           contact_person: invoiceDetails.contactPerson.trim(),
-          contact_phone: invoiceDetails.contactPhone.trim(),
+          contact_phone: invoiceDetails.contactPhone.trim() || fullPhone,
           gst_number: invoiceDetails.gstNumber.trim(),
           further_instructions: invoiceDetails.furtherInstructions.trim(),
           plan_timing: {
@@ -791,7 +1007,11 @@ function SignupPage() {
         }
         toast.success("Invoice PDF downloaded & request sent to Superadmin!");
       } else {
-        await signIn(form.email.trim(), form.password, portalConfig?.companySlug);
+        if (isExistingUser || !form.password) {
+          await actions.loadData();
+        } else {
+          await signIn(form.email.trim(), form.password, portalConfig?.companySlug);
+        }
         setSubmitting(false);
         setDone(true);
         if (typeof window !== "undefined") {
@@ -801,38 +1021,152 @@ function SignupPage() {
       }
     } catch (err: any) {
       setSubmitting(false);
-      const msg = err?.message || "Registration failed";
-      const lower = msg.toLowerCase();
-      
-      // If error belongs to Step 0 (credentials or profile)
-      if (lower.includes("password") || lower.includes("email") || lower.includes("company") || lower.includes("phone")) {
+      const rawMsg: string = err?.message || "Registration failed";
+      const lower = rawMsg.toLowerCase();
+
+      // If user is on Step 2 / Corporate Billing or Payment errors: STAY on Step 2!
+      if (step === 2 || paymentMode === "invoice_request") {
+        let friendlyTitle = paymentMode === "invoice_request" ? "Corporate Billing Error" : "Payment Authorization Issue";
+        let friendlyDesc = rawMsg;
+        const newInvErrs: Record<string, string> = {};
+
+        if (lower.includes("billing_name") || lower.includes("billing name")) {
+          friendlyDesc = "Please provide the registered corporate legal name for billing.";
+          newInvErrs.billingName = friendlyDesc;
+          document.getElementById("inv_billingName")?.focus();
+        } else if (lower.includes("biller_email") || lower.includes("billing email")) {
+          friendlyDesc = "Please enter a valid billing/accounts email address.";
+          newInvErrs.billerEmail = friendlyDesc;
+          document.getElementById("inv_billerEmail")?.focus();
+        } else if (lower.includes("billing_address") || lower.includes("billing address")) {
+          friendlyDesc = "Please provide the registered street address for corporate billing.";
+          newInvErrs.billingAddress = friendlyDesc;
+          document.getElementById("inv_billingAddress")?.focus();
+        } else if (lower.includes("contact_person") || lower.includes("contact person")) {
+          friendlyDesc = "Please enter the contact person's name for billing verification.";
+          newInvErrs.contactPerson = friendlyDesc;
+          document.getElementById("inv_contactPerson")?.focus();
+        } else if (lower.includes("contact_phone") || lower.includes("phone")) {
+          friendlyDesc = "Please enter a valid corporate billing contact phone number.";
+          newInvErrs.contactPhone = friendlyDesc;
+          document.getElementById("inv_contactPhone")?.focus();
+        } else if (lower.includes("gst")) {
+          friendlyDesc = "Please enter a valid GST number (15 alphanumeric characters).";
+          newInvErrs.gstNumber = friendlyDesc;
+          document.getElementById("inv_gstNumber")?.focus();
+        }
+
+        if (Object.keys(newInvErrs).length > 0) {
+          setInvoiceErrors((prev) => ({ ...prev, ...newInvErrs }));
+        }
+
+        toast.error(friendlyTitle, {
+          description: friendlyDesc,
+          duration: 6000,
+        });
+        return;
+      }
+
+      // Check if error is related to Step 1 (Plan Builder & Branch Configuration)
+      const isStep1Error =
+        lower.includes("branch") ||
+        lower.includes("kiosk") ||
+        lower.includes("desk") ||
+        lower.includes("quote") ||
+        lower.includes("channel") ||
+        lower.includes("operator") ||
+        lower.includes("service") ||
+        lower.includes("addon");
+
+      if (isStep1Error) {
+        setStep(1);
+        let friendlyTitle = "Step 2: Plan Builder Configuration Issue";
+        let friendlyDesc = "Please review your plan components and branch configurations in Step 2.";
+        if (lower.includes("quote") || lower.includes("expired")) {
+          friendlyTitle = "Step 2: Proposal Session Expired";
+          friendlyDesc = "Your pricing proposal session expired. Please review your selections to refresh the quote.";
+        } else if (lower.includes("branch")) {
+          friendlyTitle = "Step 2: Branch Allocation Required";
+          friendlyDesc = "At least 1 branch is required. Please check your branch setup in Step 2.";
+        }
+        toast.error(friendlyTitle, {
+          description: friendlyDesc,
+          duration: 6000,
+        });
+        return;
+      }
+
+      // Check if error is related to Step 0 (Company Profile & Admin Credentials) - only for unauthenticated new registrations
+      const isStep0Error =
+        !isExistingUser && (
+          lower.includes("password") ||
+          lower.includes("email") ||
+          lower.includes("company") ||
+          lower.includes("phone") ||
+          lower.includes("contact") ||
+          lower.includes("address") ||
+          lower.includes("city") ||
+          lower.includes("state") ||
+          lower.includes("captcha")
+        );
+
+      if (isStep0Error) {
         setStep(0);
         setTouched(true);
+
+        let friendlyTitle = "Step 1: Administrator Information Needed";
+        let friendlyDesc = "Please check your company profile and administrator details in Step 1.";
+
         if (lower.includes("password")) {
           setDirtyFields((prev) => ({ ...prev, password: true, confirmPassword: true }));
           setTimeout(() => document.getElementById("password")?.focus(), 150);
+          friendlyTitle = "Step 1: Password Required";
+          if (lower.includes("match")) {
+            friendlyDesc = "Passwords do not match. Please verify your password in Step 1.";
+          } else if (lower.includes("least 6") || lower.includes("min")) {
+            friendlyDesc = "Password must be at least 6 characters long.";
+          } else if (lower.includes("letter") || lower.includes("number")) {
+            friendlyDesc = "Password must contain at least one letter and one number.";
+          } else {
+            friendlyDesc = "Please enter an administrator password in Step 1 before proceeding.";
+          }
         } else if (lower.includes("email")) {
           setDirtyFields((prev) => ({ ...prev, email: true }));
           setTimeout(() => document.getElementById("email")?.focus(), 150);
+          friendlyTitle = "Step 1: Work Email Issue";
+          if (lower.includes("already") || lower.includes("exists") || lower.includes("taken")) {
+            friendlyDesc = "This work email is already registered. Please sign in or use a different email.";
+          } else {
+            friendlyDesc = "Please provide a valid corporate email address in Step 1.";
+          }
         } else if (lower.includes("company")) {
           setDirtyFields((prev) => ({ ...prev, company: true }));
           setTimeout(() => document.getElementById("company")?.focus(), 150);
+          friendlyTitle = "Step 1: Company Name Issue";
+          if (lower.includes("already") || lower.includes("exists")) {
+            friendlyDesc = "A company with this name is already registered. Please enter a different name.";
+          } else {
+            friendlyDesc = "Company name must be at least 3 characters.";
+          }
         } else if (lower.includes("phone")) {
           setDirtyFields((prev) => ({ ...prev, phone: true }));
           setTimeout(() => document.getElementById("phone")?.focus(), 150);
+          friendlyTitle = "Step 1: Contact Phone Required";
+          friendlyDesc = "Please provide a valid contact phone number (between 8 and 15 digits).";
         }
-        toast.error(`Please update your details: ${msg}`);
+
+        toast.error(friendlyTitle, {
+          description: friendlyDesc,
+          duration: 6000,
+        });
         return;
       }
 
-      // If error belongs to Step 1 (branches or quote configuration)
-      if (lower.includes("branch") || lower.includes("kiosk") || lower.includes("desk") || lower.includes("quote") || lower.includes("channel") || lower.includes("operator")) {
-        setStep(1);
-        toast.error(`Please review your plan settings: ${msg}`);
-        return;
-      }
-
-      toast.error(msg);
+      // Online card authorization or generic fallback
+      toast.error("Payment Authorization Issue", {
+        description: rawMsg,
+        duration: 6000,
+      });
     }
   }
 
@@ -990,7 +1324,16 @@ function SignupPage() {
 
                 <div className="relative z-10 flex items-start justify-between">
                   {/* Step 1: COMPANY & ADMIN */}
-                  <div className="flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (step > 0) setStep(0);
+                    }}
+                    className={cn(
+                      "flex flex-col items-center border-none bg-transparent p-0 outline-none transition-all",
+                      step > 0 ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                    )}
+                  >
                     <div className={cn(
                       "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-sm ring-4 ring-white dark:ring-[#0c101d]",
                       step >= 0 ? "bg-[#4F46E5] text-white" : "border-2 border-slate-300 bg-white text-slate-400"
@@ -1003,10 +1346,23 @@ function SignupPage() {
                     )}>
                       Company & Admin
                     </span>
-                  </div>
+                  </button>
 
                   {/* Step 2: BUILD YOUR PLAN */}
-                  <div className="flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (step > 1) {
+                        setStep(1);
+                      } else if (step === 0) {
+                        handleNextStep1();
+                      }
+                    }}
+                    className={cn(
+                      "flex flex-col items-center border-none bg-transparent p-0 outline-none transition-all",
+                      step !== 1 ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                    )}
+                  >
                     <div className={cn(
                       "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-sm ring-4 ring-white dark:ring-[#0c101d]",
                       step >= 1 
@@ -1021,7 +1377,7 @@ function SignupPage() {
                     )}>
                       Build Your Plan
                     </span>
-                  </div>
+                  </button>
 
                   {/* Step 3: PAYMENT */}
                   <div className="flex flex-col items-center">
@@ -1319,12 +1675,19 @@ function SignupPage() {
                       </div>
                       <div className="flex-1 h-[1px] bg-slate-100 dark:bg-slate-800 mx-3 hidden sm:block" />
                       <span className="text-xs text-slate-400 dark:text-slate-500 italic">
-                        Set up your administrator account
+                        {isExistingUser ? "Administrator account verified" : "Set up your administrator account"}
                       </span>
                     </div>
 
-                    {/* 4 columns on desktop! */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+                    {isExistingUser && (
+                      <div className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 text-xs sm:text-sm font-medium">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>Administrator account authenticated (<strong>{session?.email || form.email}</strong>). Existing login credentials remain active.</span>
+                      </div>
+                    )}
+
+                    {/* Row 1: Admin Name, Admin Username, Work Email */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
                       <FormInputField
                         id="adminName"
                         label="Name of Contact Person"
@@ -1337,6 +1700,43 @@ function SignupPage() {
                         placeholder="Enter full name"
                         icon={User}
                       />
+
+                      <FormInputField
+                        id="username"
+                        label="Administrator Username"
+                        required={!isExistingUser}
+                        value={form.username}
+                        onChange={(v) => setFormKey("username", v.toLowerCase().replace(/\s+/g, ""))}
+                        onBlur={() => handleBlur("username")}
+                        error={isFieldInvalid("username")}
+                        errorMessage={getFieldError("username")}
+                        placeholder="e.g. companyadmin"
+                        icon={AtSign}
+                        rightElement={
+                          usernameCheckStatus === "checking" ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                          ) : (isExistingUser || usernameCheckStatus === "available") && !isFieldInvalid("username") && form.username ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          ) : isFieldInvalid("username") ? (
+                            <AlertCircle className="h-4 w-4 text-destructive" />
+                          ) : null
+                        }
+                      >
+                        {(isExistingUser || (usernameCheckStatus === "available" && !isFieldInvalid("username"))) && form.username && (
+                          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1 ml-1 text-left flex items-center gap-1">
+                            <Check className="h-3.5 w-3.5 stroke-[2.5]" />
+                            <span>Username is available</span>
+                          </p>
+                        )}
+                        {usernameCheckStatus === "taken" && !isExistingUser && (
+                          <div className="mt-1 ml-1 text-xs text-rose-500 font-semibold flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>{usernameCheckMessage || "Username is already taken."}</span>
+                            </span>
+                          </div>
+                        )}
+                      </FormInputField>
 
                       <FormInputField
                         id="email"
@@ -1353,20 +1753,20 @@ function SignupPage() {
                         rightElement={
                           emailCheckStatus === "checking" ? (
                             <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-                          ) : emailCheckStatus === "available" && !isFieldInvalid("email") ? (
+                          ) : (isExistingUser || emailCheckStatus === "available") && !isFieldInvalid("email") ? (
                             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                           ) : isFieldInvalid("email") ? (
                             <AlertCircle className="h-4 w-4 text-destructive" />
                           ) : null
                         }
                       >
-                        {emailCheckStatus === "available" && !isFieldInvalid("email") && form.email && (
+                        {(isExistingUser || (emailCheckStatus === "available" && !isFieldInvalid("email"))) && form.email && (
                           <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1 ml-1 text-left flex items-center gap-1">
                             <Check className="h-3.5 w-3.5 stroke-[2.5]" />
-                            <span>Work email is available</span>
+                            <span>{isExistingUser ? "Administrator email verified" : "Work email is available"}</span>
                           </p>
                         )}
-                        {emailCheckStatus === "taken" && (
+                        {emailCheckStatus === "taken" && !isExistingUser && (
                           <div className="mt-1 ml-1 text-xs text-rose-500 font-semibold flex items-center justify-between">
                             <span className="flex items-center gap-1">
                               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -1378,18 +1778,22 @@ function SignupPage() {
                           </div>
                         )}
                       </FormInputField>
+                    </div>
+
+                    {/* Row 2: Password and Confirm Password */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4 pt-1">
 
                       <FormInputField
                         id="password"
-                        label="Password (Min. 8 chars)"
-                        required
+                        label={isExistingUser ? "Password (Optional)" : "Password (Min. 8 chars)"}
+                        required={!isExistingUser}
                         type={showPassword ? "text" : "password"}
                         value={form.password}
                         onChange={(v) => setFormKey("password", v)}
                         onBlur={() => handleBlur("password")}
                         error={isFieldInvalid("password")}
                         errorMessage={getFieldError("password")}
-                        placeholder="Create a password"
+                        placeholder={isExistingUser ? "•••••••• (Configured — leave blank to keep)" : "Create a password"}
                         icon={Lock}
                         rightElement={
                           <button
@@ -1403,49 +1807,58 @@ function SignupPage() {
                         }
                       >
                         {/* Real-time criteria status badges */}
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
-                              passwordHasLength
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
-                            )}
-                          >
-                            {passwordHasLength ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
-                            6+ chars
-                          </span>
+                        {isExistingUser && !form.password ? (
+                          <div className="pt-1">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                              <CheckCircle2 className="h-3 w-3 stroke-[2.5]" />
+                              Password Configured
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
+                                passwordHasLength
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                              )}
+                            >
+                              {passwordHasLength ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
+                              6+ chars
+                            </span>
 
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
-                              passwordHasLetter
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
-                            )}
-                          >
-                            {passwordHasLetter ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
-                            1+ letter
-                          </span>
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
+                                passwordHasLetter
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                              )}
+                            >
+                              {passwordHasLetter ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
+                              1+ letter
+                            </span>
 
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
-                              passwordHasNumber
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
-                            )}
-                          >
-                            {passwordHasNumber ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
-                            1+ number
-                          </span>
-                        </div>
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all duration-200",
+                                passwordHasNumber
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                  : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                              )}
+                            >
+                              {passwordHasNumber ? <Check className="h-3 w-3 stroke-[2.5]" /> : <Circle className="h-2.5 w-2.5 stroke-[2.5]" />}
+                              1+ number
+                            </span>
+                          </div>
+                        )}
                       </FormInputField>
 
                       <div className="w-full space-y-1.5 text-left">
                         <div className="flex items-center justify-between min-h-[22px]">
                           <label htmlFor="confirmPassword" className="text-[12px] sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 flex items-center">
-                            Confirm Password <span className="text-rose-500 ml-0.5 font-bold">*</span>
+                            Confirm Password {!isExistingUser && <span className="text-rose-500 ml-0.5 font-bold">*</span>}
                           </label>
                           {form.confirmPassword.length > 0 && (
                             <span className={cn(
@@ -1477,7 +1890,7 @@ function SignupPage() {
                             value={form.confirmPassword}
                             onChange={(e) => setFormKey("confirmPassword", e.target.value)}
                             onBlur={() => handleBlur("confirmPassword")}
-                            placeholder="Confirm your password"
+                            placeholder={isExistingUser ? "Leave blank to keep current" : "Confirm your password"}
                             className="w-full bg-transparent border-none outline-none text-sm font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400/90"
                           />
                           <button
@@ -1511,114 +1924,164 @@ function SignupPage() {
                       </div>
                       <div className="flex-1 h-[1px] bg-slate-100 dark:bg-slate-800 mx-3 hidden sm:block" />
                       <span className="text-xs text-slate-400 dark:text-slate-500 italic">
-                        Please verify characters to continue
+                        {isExistingUser ? "Session verified" : "Please verify characters to continue"}
                       </span>
                     </div>
 
-                    {/* Captcha Box & Input & Continue Button in responsive 3-column row */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-4 items-end">
-                      {/* Dotted Box Display */}
-                      <div className="w-full space-y-1.5 text-left">
-                        <label className="text-[12px] sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 flex items-center min-h-[22px]">
-                          Security Code
-                        </label>
-                        <div className="h-11 sm:h-12 rounded-xl border border-dashed border-indigo-200 dark:border-indigo-800/70 bg-indigo-50/60 dark:bg-indigo-950/40 px-3.5 flex items-center justify-between relative overflow-hidden select-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                          <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(#4f46e5_1.5px,transparent_1.5px)] [background-size:12px_12px]" />
-                          <span className="font-mono text-xl sm:text-2xl font-bold tracking-[0.35em] text-[#1E2342] dark:text-white flex-1 text-center pl-3">
-                            {captchaCode}
-                          </span>
+                    {isExistingUser ? (
+                      <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50/80 to-purple-50/80 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-200/80 dark:border-indigo-800/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-xl bg-indigo-600/10 dark:bg-indigo-400/10 flex items-center justify-center shrink-0">
+                            <ShieldCheck className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-slate-900 dark:text-white">Security Verification Verified</p>
+                              <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <Check className="h-3 w-3 stroke-[2.5]" /> Authenticated
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">Active session authenticated for {session?.email || form.email}.</p>
+                          </div>
+                        </div>
+                        <div className="w-full sm:w-auto">
                           <button
                             type="button"
-                            onClick={generateCaptcha}
-                            className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg transition-transform active:rotate-180 duration-300 text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 cursor-pointer shrink-0 z-10 border-none bg-transparent"
-                            aria-label="Refresh Captcha"
+                            id="step0SubmitBtn"
+                            disabled={savingStep1}
+                            onClick={handleNextStep1}
+                            className={cn(
+                              "w-full sm:w-auto min-w-[240px] h-11 sm:h-12 px-6 rounded-xl text-white font-semibold text-sm sm:text-base shadow-lg transition-all flex items-center justify-center gap-2 border-none cursor-pointer",
+                              !valid
+                                ? "bg-slate-800/90 hover:bg-slate-800 text-slate-200 shadow-slate-900/20"
+                                : "bg-gradient-to-r from-[#3B66F5] via-[#4F46E5] to-[#7C3AED] shadow-indigo-500/25 hover:shadow-indigo-500/35 hover:brightness-105 active:scale-[0.99]"
+                            )}
                           >
-                            <RotateCw className="h-4 w-4" />
+                            {savingStep1 ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Saving Profile...</span>
+                              </>
+                            ) : !valid ? (
+                              <>
+                                <ShieldAlert className="h-4 w-4 text-amber-400" />
+                                <span>Complete Step 1 to Continue</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Continue to Plan Builder</span>
+                                <ArrowRight className="h-4 w-4 ml-0.5" />
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
-
-                      {/* Captcha Input */}
-                      <div className="w-full space-y-1.5 text-left">
-                        <div className="flex items-center justify-between min-h-[22px]">
-                          <label htmlFor="captchaInput" className="text-[12px] sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 flex items-center">
-                            Enter Security Code <span className="text-rose-500 ml-0.5 font-bold">*</span>
+                    ) : (
+                      /* Captcha Box & Input & Continue Button in responsive 3-column row */
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 sm:gap-4 items-end">
+                        {/* Dotted Box Display */}
+                        <div className="w-full space-y-1.5 text-left">
+                          <label className="text-[12px] sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 flex items-center min-h-[22px]">
+                            Security Code
                           </label>
-                          {form.captchaInput.length > 0 && (
-                            <span className={cn(
-                              "text-[10px] sm:text-[11px] font-semibold flex items-center gap-1",
-                              form.captchaInput.trim() === captchaCode ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500"
-                            )}>
-                              {form.captchaInput.trim() === captchaCode ? (
-                                <>
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Verified
-                                </>
-                              ) : (
-                                <>
-                                  <AlertCircle className="h-3.5 w-3.5 text-amber-500" /> Incomplete
-                                </>
-                              )}
+                          <div className="h-11 sm:h-12 rounded-xl border border-dashed border-indigo-200 dark:border-indigo-800/70 bg-indigo-50/60 dark:bg-indigo-950/40 px-3.5 flex items-center justify-between relative overflow-hidden select-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(#4f46e5_1.5px,transparent_1.5px)] [background-size:12px_12px]" />
+                            <span className="font-mono text-xl sm:text-2xl font-bold tracking-[0.35em] text-[#1E2342] dark:text-white flex-1 text-center pl-3">
+                              {captchaCode}
                             </span>
-                          )}
+                            <button
+                              type="button"
+                              onClick={generateCaptcha}
+                              className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg transition-transform active:rotate-180 duration-300 text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200 cursor-pointer shrink-0 z-10 border-none bg-transparent"
+                              aria-label="Refresh Captcha"
+                            >
+                              <RotateCw className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
-                        <div
-                          className={cn(
-                            "h-11 sm:h-12 w-full rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 px-3.5 flex items-center transition-all duration-200 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-600/10 focus-within:bg-white dark:focus-within:bg-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.02)]",
-                            isFieldInvalid("captchaInput") && "border-destructive/80 focus-within:border-destructive focus-within:ring-destructive/10"
-                          )}
-                        >
-                          <ShieldCheck className="h-4 w-4 text-slate-400 dark:text-slate-500 shrink-0 mr-2.5" />
-                          <input
-                            id="captchaInput"
-                            type="text"
-                            value={form.captchaInput}
-                            onChange={(e) => setFormKey("captchaInput", e.target.value)}
-                            onBlur={() => handleBlur("captchaInput")}
-                            placeholder="Enter security code"
-                            className="w-full bg-transparent border-none outline-none text-sm font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400/90"
-                          />
-                        </div>
-                        {isFieldInvalid("captchaInput") && getFieldError("captchaInput") && (
-                          <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
-                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                            <span>{getFieldError("captchaInput")}</span>
-                          </p>
-                        )}
-                      </div>
 
-                      {/* Submit Action Button directly in 3rd column */}
-                      <div className="w-full">
-                        <button
-                          type="button"
-                          id="step0SubmitBtn"
-                          disabled={savingStep1}
-                          onClick={handleNextStep1}
-                          className={cn(
-                            "w-full h-11 sm:h-12 rounded-xl text-white font-semibold text-sm sm:text-base shadow-lg transition-all duration-200 flex items-center justify-center gap-2 border-none cursor-pointer",
-                            !valid
-                              ? "bg-slate-800/90 hover:bg-slate-800 text-slate-200 shadow-slate-900/20"
-                              : "bg-gradient-to-r from-[#3B66F5] via-[#4F46E5] to-[#7C3AED] shadow-indigo-500/25 hover:shadow-indigo-500/35 hover:brightness-105 active:scale-[0.99]"
+                        {/* Captcha Input */}
+                        <div className="w-full space-y-1.5 text-left">
+                          <div className="flex items-center justify-between min-h-[22px]">
+                            <label htmlFor="captchaInput" className="text-[12px] sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 flex items-center">
+                              Enter Security Code <span className="text-rose-500 ml-0.5 font-bold">*</span>
+                            </label>
+                            {form.captchaInput.length > 0 && (
+                              <span className={cn(
+                                "text-[10px] sm:text-[11px] font-semibold flex items-center gap-1",
+                                form.captchaInput.trim() === captchaCode ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500"
+                              )}>
+                                {form.captchaInput.trim() === captchaCode ? (
+                                  <>
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Verified
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" /> Incomplete
+                                  </>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            className={cn(
+                              "h-11 sm:h-12 w-full rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 px-3.5 flex items-center transition-all duration-200 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-600/10 focus-within:bg-white dark:focus-within:bg-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.02)]",
+                              isFieldInvalid("captchaInput") && "border-destructive/80 focus-within:border-destructive focus-within:ring-destructive/10"
+                            )}
+                          >
+                            <ShieldCheck className="h-4 w-4 text-slate-400 dark:text-slate-500 shrink-0 mr-2.5" />
+                            <input
+                              id="captchaInput"
+                              type="text"
+                              value={form.captchaInput}
+                              onChange={(e) => setFormKey("captchaInput", e.target.value)}
+                              onBlur={() => handleBlur("captchaInput")}
+                              placeholder="Enter security code"
+                              className="w-full bg-transparent border-none outline-none text-sm font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400/90"
+                            />
+                          </div>
+                          {isFieldInvalid("captchaInput") && getFieldError("captchaInput") && (
+                            <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>{getFieldError("captchaInput")}</span>
+                            </p>
                           )}
-                        >
-                          {savingStep1 ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span>Saving Profile...</span>
-                            </>
-                          ) : !valid ? (
-                            <>
-                              <ShieldAlert className="h-4 w-4 text-amber-400" />
-                              <span>Complete Step 1 to Continue</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Continue to Plan Builder</span>
-                              <ArrowRight className="h-4 w-4 ml-0.5" />
-                            </>
-                          )}
-                        </button>
+                        </div>
+
+                        {/* Submit Action Button directly in 3rd column */}
+                        <div className="w-full">
+                          <button
+                            type="button"
+                            id="step0SubmitBtn"
+                            disabled={savingStep1}
+                            onClick={handleNextStep1}
+                            className={cn(
+                              "w-full h-11 sm:h-12 rounded-xl text-white font-semibold text-sm sm:text-base shadow-lg transition-all duration-200 flex items-center justify-center gap-2 border-none cursor-pointer",
+                              !valid
+                                ? "bg-slate-800/90 hover:bg-slate-800 text-slate-200 shadow-slate-900/20"
+                                : "bg-gradient-to-r from-[#3B66F5] via-[#4F46E5] to-[#7C3AED] shadow-indigo-500/25 hover:shadow-indigo-500/35 hover:brightness-105 active:scale-[0.99]"
+                            )}
+                          >
+                            {savingStep1 ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Saving Profile...</span>
+                              </>
+                            ) : !valid ? (
+                              <>
+                                <ShieldAlert className="h-4 w-4 text-amber-400" />
+                                <span>Complete Step 1 to Continue</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Continue to Plan Builder</span>
+                                <ArrowRight className="h-4 w-4 ml-0.5" />
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Encryption Notice Footer */}
                     <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 pt-1">
@@ -2114,7 +2577,10 @@ function SignupPage() {
                               />
                             </div>
                             {invoiceErrors.billingName && (
-                              <p className="text-[11px] font-semibold text-rose-500 ml-1">{invoiceErrors.billingName}</p>
+                              <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span>{invoiceErrors.billingName}</span>
+                              </p>
                             )}
                           </div>
 
@@ -2125,7 +2591,7 @@ function SignupPage() {
                             </label>
                             <div className={cn(
                               "h-11 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 flex items-center transition-all focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600/10 shadow-2xs",
-                              invoiceErrors.billerEmail && "border-rose-500 focus-within:border-rose-500"
+                              invoiceErrors.billerEmail && "border-destructive focus-within:border-destructive"
                             )}>
                               <Mail className="h-4 w-4 text-slate-400 shrink-0 mr-2.5" />
                               <input
@@ -2141,7 +2607,10 @@ function SignupPage() {
                               />
                             </div>
                             {invoiceErrors.billerEmail && (
-                              <p className="text-[11px] font-semibold text-rose-500 ml-1">{invoiceErrors.billerEmail}</p>
+                              <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span>{invoiceErrors.billerEmail}</span>
+                              </p>
                             )}
                           </div>
 
@@ -2152,7 +2621,7 @@ function SignupPage() {
                             </label>
                             <div className={cn(
                               "h-11 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 flex items-center transition-all focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600/10 shadow-2xs",
-                              invoiceErrors.contactPerson && "border-rose-500 focus-within:border-rose-500"
+                              invoiceErrors.contactPerson && "border-destructive focus-within:border-destructive"
                             )}>
                               <User className="h-4 w-4 text-slate-400 shrink-0 mr-2.5" />
                               <input
@@ -2168,7 +2637,10 @@ function SignupPage() {
                               />
                             </div>
                             {invoiceErrors.contactPerson && (
-                              <p className="text-[11px] font-semibold text-rose-500 ml-1">{invoiceErrors.contactPerson}</p>
+                              <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span>{invoiceErrors.contactPerson}</span>
+                              </p>
                             )}
                           </div>
 
@@ -2179,7 +2651,7 @@ function SignupPage() {
                             </label>
                             <div className={cn(
                               "h-11 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 flex items-center transition-all focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600/10 shadow-2xs",
-                              invoiceErrors.contactPhone && "border-rose-500 focus-within:border-rose-500"
+                              invoiceErrors.contactPhone && "border-destructive focus-within:border-destructive"
                             )}>
                               <Phone className="h-4 w-4 text-slate-400 shrink-0 mr-2.5" />
                               <input
@@ -2195,7 +2667,10 @@ function SignupPage() {
                               />
                             </div>
                             {invoiceErrors.contactPhone && (
-                              <p className="text-[11px] font-semibold text-rose-500 ml-1">{invoiceErrors.contactPhone}</p>
+                              <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span>{invoiceErrors.contactPhone}</span>
+                              </p>
                             )}
                           </div>
 
@@ -2206,7 +2681,7 @@ function SignupPage() {
                             </label>
                             <div className={cn(
                               "h-11 w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 flex items-center transition-all focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600/10 shadow-2xs",
-                              invoiceErrors.billingAddress && "border-rose-500 focus-within:border-rose-500"
+                              invoiceErrors.billingAddress && "border-destructive focus-within:border-destructive"
                             )}>
                               <MapPin className="h-4 w-4 text-slate-400 shrink-0 mr-2.5" />
                               <input
@@ -2222,7 +2697,10 @@ function SignupPage() {
                               />
                             </div>
                             {invoiceErrors.billingAddress && (
-                              <p className="text-[11px] font-semibold text-rose-500 ml-1">{invoiceErrors.billingAddress}</p>
+                              <p className="text-xs font-semibold text-destructive mt-1 ml-1 text-left flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span>{invoiceErrors.billingAddress}</span>
+                              </p>
                             )}
                           </div>
 

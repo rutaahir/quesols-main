@@ -101,6 +101,7 @@ function KotScreen() {
   const services = state.services.filter((s) => String(s.branchId) === String(branchId) && s.isActive !== false);
 
   const [screen, setScreen] = useState<ScreenState>("locked");
+  const [kotUsername, setKotUsername] = useState("");
   const [pin, setPin] = useState(""); const [pinError, setPinError] = useState<string | null>(null); const [isUnlocking, setIsUnlocking] = useState(false);
   const [isStaffOpen, setIsStaffOpen] = useState(false); const [exitPin, setExitPin] = useState(""); const [exitPinError, setExitPinError] = useState<string | null>(null);
   const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [email, setEmail] = useState(""); const [note, setNote] = useState("");
@@ -191,6 +192,11 @@ function KotScreen() {
           .catch((err: any) => console.error("Failed to load KOT terminals list:", err));
       });
   }, [branch?.id]);
+
+  // Never autofill KOT terminal username on locked screen
+  useEffect(() => {
+    setKotUsername("");
+  }, [selectedKotTerminalId]);
 
   useEffect(() => { if (hasSms) setChannel("sms"); else if (hasWhatsapp) setChannel("whatsapp"); }, [hasSms, hasWhatsapp]);
   useEffect(() => { if (services.length > 0 && !selectedServiceId) setSelectedServiceId(services[0]?.id ?? ""); }, [services, selectedServiceId]);
@@ -328,13 +334,27 @@ function KotScreen() {
   );
 
   const handleUnlock = async () => {
-    setPinError(null); if (pin.length < 4) return; setIsUnlocking(true);
+    setPinError(null);
+    if (!kotUsername.trim()) {
+      setPinError("Terminal username is required.");
+      return;
+    }
+    if (pin.length < 4) {
+      setPinError("Please enter your 4-digit PIN.");
+      return;
+    }
+    setIsUnlocking(true);
     try {
       if (selectedKotTerminalId) {
         try {
           const res = await apiFetch(`/api/public/kot-terminals/login/`, {
             method: "POST",
-            body: JSON.stringify({ terminal_id: selectedKotTerminalId, pin })
+            body: JSON.stringify({
+              terminal_id: selectedKotTerminalId,
+              username: kotUsername.trim(),
+              pin: pin.trim(),
+              branch_id: branch.id,
+            })
           });
           if (res.session_token) {
             setScreen("form");
@@ -344,7 +364,7 @@ function KotScreen() {
           }
         } catch (loginErr: any) {
           console.warn("KOT terminal login failed:", loginErr);
-          setPinError(loginErr.message || "Invalid PIN. Please check the PIN code in your admin console.");
+          setPinError(loginErr.message || "Invalid Username or PIN.");
           setPin("");
           return;
         }
@@ -519,10 +539,10 @@ function KotScreen() {
                 <div className="space-y-1.5">
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/8 border border-primary/15 px-3 py-0.5 text-[10px] font-bold text-primary uppercase tracking-widest">KOT Check-In</div>
                   <h2 className="font-display text-3xl font-bold tracking-tight text-foreground">KOT Check-In Locked</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed">Enter PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">Enter Username & PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
                 </div>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} className="space-y-5">
+              <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} className="space-y-4">
                 {(() => {
                   const activeKotTerminal = kotTerminalsList.find((t) => String(t.id) === String(selectedKotTerminalId)) || (kotTerminalsList.length > 0 ? kotTerminalsList[0] : null);
                   return activeKotTerminal ? (
@@ -538,12 +558,35 @@ function KotScreen() {
                     </div>
                   ) : null;
                 })()}
-                <div className="space-y-4 flex flex-col items-center">
+
+                {/* Username Input */}
+                <div className="space-y-1.5 text-left">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Terminal Username</Label>
+                  <Input
+                    type="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
+                    value={kotUsername}
+                    onChange={(e) => {
+                      setPinError(null);
+                      setKotUsername(e.target.value.toLowerCase().trim());
+                    }}
+                    placeholder="e.g. kot-1"
+                    required
+                    className="h-11 rounded-xl text-xs font-mono font-bold bg-white/80 dark:bg-slate-900/80 border-border/60"
+                  />
+                </div>
+
+                <div className="space-y-3 flex flex-col items-center">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground self-start ml-1">Enter 4-Digit PIN</Label>
                   <SegmentedPin length={4} value={pin} onChange={(v) => { setPinError(null); setPin(v); }} error={!!pinError} />
                   {pinError && <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="text-xs text-destructive font-semibold text-center">{pinError}</motion.p>}
                 </div>
-                <Button type="submit" disabled={pin.length < 4 || isUnlocking} className="w-full h-13 text-base font-bold rounded-xl shadow-md active:scale-[0.98] bg-brand hover:opacity-90 text-white border-0 gap-2">
+                <Button type="submit" disabled={pin.length < 4 || !kotUsername.trim() || isUnlocking} className="w-full h-13 text-base font-bold rounded-xl shadow-md active:scale-[0.98] bg-brand hover:opacity-90 text-white border-0 gap-2">
                   <MessageSquare className="h-4 w-4 opacity-80" />
                   {isUnlocking ? "Verifying…" : "Unlock KOT Check-In"}
                   <ArrowRight className="h-4 w-4 opacity-70 ml-0.5" />

@@ -31,6 +31,7 @@ class DisplayTerminal(BaseModel):
     company = models.ForeignKey("companies.Company", on_delete=models.CASCADE, related_name="display_terminals")
     branch = models.ForeignKey("branches.Branch", on_delete=models.CASCADE, related_name="display_terminals")
     terminal_identifier = models.CharField(max_length=255)
+    username = models.CharField(max_length=150, null=True, blank=True)
     passcode = models.CharField(max_length=255)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
 

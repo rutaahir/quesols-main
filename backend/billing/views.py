@@ -323,11 +323,23 @@ class CompanyBranchesSummaryView(APIView):
         for br in branches:
             mode = br.mode or "NON_SERVICE_BASED"
             
-            branch_allocations = CompanyPlanAllocation.objects.filter(company=company, branch=br)
-            alloc_map = {a.plan_component.key: a for a in branch_allocations}
+            branch_allocations = CompanyPlanAllocation.objects.filter(company=company, branch=br).select_related("plan_component")
+            alloc_map = {}
+            for a in branch_allocations:
+                try:
+                    if a.plan_component:
+                        alloc_map[a.plan_component.key] = a
+                except Exception:
+                    continue
             
-            company_allocations = CompanyPlanAllocation.objects.filter(company=company, branch__isnull=True)
-            comp_alloc_map = {a.plan_component.key: a for a in company_allocations}
+            company_allocations = CompanyPlanAllocation.objects.filter(company=company, branch__isnull=True).select_related("plan_component")
+            comp_alloc_map = {}
+            for a in company_allocations:
+                try:
+                    if a.plan_component:
+                        comp_alloc_map[a.plan_component.key] = a
+                except Exception:
+                    continue
             
             nested_allocations = {}
             for key, pc in active_components.items():
@@ -1223,7 +1235,13 @@ class CheckoutUpgradeView(APIView):
             new_qr_qty += total_qr
 
         # Get current allocations (company-wide, for price-locking lookup and branches count)
-        allocations = {a.plan_component.key: a for a in CompanyPlanAllocation.objects.filter(company=company, branch__isnull=True)}
+        allocations = {}
+        for a in CompanyPlanAllocation.objects.filter(company=company, branch__isnull=True).select_related("plan_component"):
+            try:
+                if a.plan_component:
+                    allocations[a.plan_component.key] = a
+            except Exception:
+                continue
         
         from django.db.models import Sum
 

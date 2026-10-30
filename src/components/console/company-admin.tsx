@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { getApiUrl } from "@/lib/api-config";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Plus,
@@ -37,6 +38,8 @@ import {
   Link2,
   Calendar,
   Search,
+  Loader2,
+  AtSign,
 } from "lucide-react";
 import { AppointmentCustomerModal } from "@/components/console/appointment-customer-modal";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -51,6 +54,7 @@ import { StatCard } from "@/components/console/shell";
 import { StatusPill } from "@/components/console/super-admin";
 import {
   useQuesole,
+  apiFetch,
   branchesOf,
   branchStats,
   companyStats,
@@ -62,6 +66,7 @@ import { CountUp, Reveal } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
 import { BranchDesksServicesManager } from "@/components/console/branch-desks-services";
 import { OnlineBookingFormConfigurator } from "@/components/console/online-booking-form-configurator";
+import { BranchAttendanceLogsView } from "@/components/console/branch-attendance-logs";
 
 const METHOD_LABEL: Record<QueueMethod, string> = {
   1: "Single QR ticket",
@@ -94,13 +99,16 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
 
   const [addUser, setAddUser] = useState<{
     firstName: string; lastName: string;
+    username: string; usernameAvailable: boolean | null; usernameChecking?: boolean;
     email: string; emailAvailable: boolean | null;
     role: "branch_admin" | "operator";
     branchId: string; deskId: string;
     password: string; passwordConfirm: string;
     submitting: boolean;
   }>({
-    firstName: "", lastName: "", email: "", emailAvailable: null,
+    firstName: "", lastName: "",
+    username: "", usernameAvailable: null, usernameChecking: false,
+    email: "", emailAvailable: null,
     role: "branch_admin", branchId: branchId || "", deskId: "",
     password: "", passwordConfirm: "", submitting: false,
   });
@@ -139,13 +147,25 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
     );
   }
 
+  if (view === "attendance") {
+    return (
+      <div className="space-y-4">
+        <BranchAttendanceLogsView companyWide />
+      </div>
+    );
+  }
+
   if (view === "branch_desks") {
-    const targetBranchId = branchId || selectedBranchId || branchesOf(state, companyId)[0]?.id || "";
+    const companyBranches = branchesOf(state, companyId);
+    const activeBranchWithDesks = companyBranches.find((b) =>
+      state.desks.some((d) => String(d.branchId) === String(b.id))
+    ) || companyBranches[0];
+    const targetBranchId = branchId || selectedBranchId || activeBranchWithDesks?.id || "";
     return (
       <BranchDesksServicesManager
         branchId={targetBranchId}
         onBack={() => setView?.("branches")}
-        setView={setView}
+        {...(setView ? { setView } : {})}
         renderPlanUsageView={(companyId, company) => (
           <CompanyItemizedPlanUsageView companyId={companyId} company={company} />
         )}
@@ -187,13 +207,29 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
       }
       try {
         const res = await fetch(
-          `http://${window.location.hostname}:8000/api/users/check-email/?email=${encodeURIComponent(email)}`,
+          getApiUrl(`/api/users/check-email/?email=${encodeURIComponent(email)}`),
           { headers: { Authorization: `Bearer ${localStorage.getItem("quesole.access_token")}` } }
         );
         const data = await res.json();
         setAddUser((s) => ({ ...s, emailAvailable: data.available }));
       } catch {
         setAddUser((s) => ({ ...s, emailAvailable: null }));
+      }
+    };
+
+    const checkUsername = async (rawUsername: string) => {
+      const clean = rawUsername.trim().toLowerCase();
+      if (!clean || clean.length < 3) {
+        setAddUser((s) => ({ ...s, usernameAvailable: null, usernameChecking: false }));
+        return;
+      }
+      setAddUser((s) => ({ ...s, usernameChecking: true }));
+      try {
+        const res = await fetch(getApiUrl(`/api/users/check-username/?username=${encodeURIComponent(clean)}`));
+        const data = await res.json();
+        setAddUser((s) => ({ ...s, usernameAvailable: Boolean(data.available), usernameChecking: false }));
+      } catch {
+        setAddUser((s) => ({ ...s, usernameAvailable: null, usernameChecking: false }));
       }
     };
 
@@ -248,6 +284,33 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Last Name</label>
                 <Input value={addUser.lastName} onChange={(e) => setAddUser((s) => ({ ...s, lastName: e.target.value }))}
                   placeholder="Shah" className="h-10 rounded-xl" />
+              </div>
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Username</label>
+                  {addUser.usernameChecking && (
+                    <span className="text-[10px] text-brand flex items-center gap-1 font-semibold">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {addUser.usernameAvailable === true && (
+                    <span className="text-[10px] text-emerald-500 font-bold">✓ Available</span>
+                  )}
+                  {addUser.usernameAvailable === false && (
+                    <span className="text-[10px] text-destructive font-bold">✗ Taken</span>
+                  )}
+                </div>
+                <Input
+                  value={addUser.username}
+                  onChange={(e) => {
+                    const v = e.target.value.toLowerCase().replace(/\s+/g, "");
+                    setAddUser((s) => ({ ...s, username: v, usernameAvailable: null }));
+                    const t = setTimeout(() => checkUsername(v), 350);
+                    return () => clearTimeout(t);
+                  }}
+                  placeholder="priya_admin"
+                  className="h-10 rounded-xl font-mono text-xs"
+                />
               </div>
               <div className="grid gap-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</label>
@@ -334,7 +397,8 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
                   !addUser.firstName || !addUser.email.includes("@") ||
                   !(addUser.branchId || branchId) || !addUser.password || !addUser.passwordConfirm ||
                   addUser.password !== addUser.passwordConfirm ||
-                  addUser.emailAvailable === false
+                  addUser.emailAvailable === false ||
+                  addUser.usernameAvailable === false
                 }
                 onClick={async () => {
                   setAddUser((s) => ({ ...s, submitting: true }));
@@ -344,6 +408,7 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
                       branchId: addUser.branchId || branchId || "",
                       name: `${addUser.firstName} ${addUser.lastName}`.trim(),
                       email: addUser.email,
+                      username: addUser.username.trim() || undefined,
                       role: addUser.role,
                       password: addUser.password,
                       passwordConfirm: addUser.passwordConfirm,
@@ -352,7 +417,9 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
                     const branchName = branches.find((b) => b.id === (addUser.branchId || branchId))?.name ?? (addUser.branchId || branchId);
                     toast.success(`${addUser.firstName} can now log in as ${roleName} at ${branchName} using the email and password you set.`);
                     setAddUser({
-                      firstName: "", lastName: "", email: "", emailAvailable: null,
+                      firstName: "", lastName: "",
+                      username: "", usernameAvailable: null, usernameChecking: false,
+                      email: "", emailAvailable: null,
                       role: "branch_admin", branchId: branchId || "", deskId: "",
                       password: "", passwordConfirm: "", submitting: false,
                     });
@@ -387,7 +454,12 @@ export function CompanyAdminView({ view, companyId, setView, branchId, onManageD
                 return (
                   <tr key={s.id} className="border-b border-border/60 last:border-0">
                     <td className="px-5 py-3.5">
-                      <div className="font-medium">{s.name}</div>
+                      <div className="font-medium flex items-center gap-1.5">
+                        <span>{s.name}</span>
+                        {s.username && (
+                          <span className="text-[11px] font-mono text-muted-foreground/80 font-normal">@{s.username}</span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">{s.email}</div>
                     </td>
                     <td className="px-5 py-3.5 capitalize">{s.role.replace("_", " ")}</td>
@@ -827,8 +899,33 @@ function BranchesManager({ companyId, setView, onManageDesks, companySlug: propC
   const [lockedMethodModal, setLockedMethodModal] = useState<{ method: QueueMethod; name: string } | null>(null);
 
   const [inviteBranchId, setInviteBranchId] = useState<string | null>(null);
-  const [inviteForm, setInviteForm] = useState({ firstName: "", lastName: "", email: "", password: "", passwordConfirm: "" });
+  const [inviteForm, setInviteForm] = useState({
+    firstName: "",
+    lastName: "",
+    username: "",
+    usernameAvailable: null as boolean | null,
+    usernameChecking: false,
+    email: "",
+    password: "",
+    passwordConfirm: ""
+  });
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+
+  const checkInviteUsername = async (rawUsername: string) => {
+    const clean = rawUsername.trim().toLowerCase();
+    if (!clean || clean.length < 3) {
+      setInviteForm((f) => ({ ...f, usernameAvailable: null, usernameChecking: false }));
+      return;
+    }
+    setInviteForm((f) => ({ ...f, usernameChecking: true }));
+    try {
+      const res = await fetch(getApiUrl(`/api/users/check-username/?username=${encodeURIComponent(clean)}`));
+      const data = await res.json();
+      setInviteForm((f) => ({ ...f, usernameAvailable: Boolean(data.available), usernameChecking: false }));
+    } catch {
+      setInviteForm((f) => ({ ...f, usernameAvailable: null, usernameChecking: false }));
+    }
+  };
 
   const [kebabOpenId, setKebabOpenId] = useState<string | null>(null);
 
@@ -1846,12 +1943,18 @@ function BranchesManager({ companyId, setView, onManageDesks, companySlug: propC
                     branchId: inviteBranchId,
                     name: `${inviteForm.firstName} ${inviteForm.lastName}`.trim(),
                     email: inviteForm.email.trim(),
+                    username: inviteForm.username.trim() || undefined,
                     role: "branch_admin",
                     password: inviteForm.password,
                     passwordConfirm: inviteForm.passwordConfirm,
                   });
                   toast.success(`Branch Admin invited for ${branches.find((b) => b.id === inviteBranchId)?.name}`);
                   setInviteBranchId(null);
+                  setInviteForm({
+                    firstName: "", lastName: "",
+                    username: "", usernameAvailable: null, usernameChecking: false,
+                    email: "", password: "", passwordConfirm: ""
+                  });
                 } catch (err: any) {
                   toast.error(err.message || "Failed to invite Branch Admin");
                 } finally {
@@ -1879,6 +1982,34 @@ function BranchesManager({ companyId, setView, onManageDesks, companySlug: propC
                     required
                   />
                 </div>
+              </div>
+
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Username</label>
+                  {inviteForm.usernameChecking && (
+                    <span className="text-[10px] text-brand flex items-center gap-1 font-semibold">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                    </span>
+                  )}
+                  {inviteForm.usernameAvailable === true && (
+                    <span className="text-[10px] text-emerald-500 font-bold">✓ Available</span>
+                  )}
+                  {inviteForm.usernameAvailable === false && (
+                    <span className="text-[10px] text-destructive font-bold">✗ Taken</span>
+                  )}
+                </div>
+                <Input
+                  value={inviteForm.username}
+                  onChange={(e) => {
+                    const val = e.target.value.toLowerCase().replace(/\s+/g, "");
+                    setInviteForm((f) => ({ ...f, username: val, usernameAvailable: null }));
+                    const t = setTimeout(() => checkInviteUsername(val), 350);
+                    return () => clearTimeout(t);
+                  }}
+                  placeholder="branch_admin_username"
+                  className="h-10 rounded-xl font-mono text-xs"
+                />
               </div>
 
               <div className="grid gap-1.5">
@@ -1962,7 +2093,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
   const fetchBranchesSummary = async () => {
     try {
       const res = await fetch(
-        `http://${window.location.hostname}:8000/api/billing/company/branches-summary/`,
+        getApiUrl("/api/billing/company/branches-summary/"),
         { headers: { Authorization: `Bearer ${localStorage.getItem("quesole.access_token")}` } }
       );
       if (!res.ok) {
