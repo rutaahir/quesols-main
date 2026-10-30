@@ -105,15 +105,24 @@ class BuyAddOnView(APIView):
         try:
             component = PlanComponent.objects.get(key=component_key, is_active=True)
         except PlanComponent.DoesNotExist:
-            if component_key in ["kot_terminals", "paper_roll_screens", "operator_screens", "services"]:
+            if component_key in ["kot_terminals", "live_display_screens", "paper_roll_screens", "operator_screens", "services"]:
                 component, _ = PlanComponent.objects.get_or_create(
                     key=component_key,
                     defaults={
-                        "label": "Digital KOT Check-In Terminals" if component_key == "kot_terminals" else component_key.replace("_", " ").title(),
-                        "description": "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
-                        "unit_label": "terminal" if component_key == "kot_terminals" else "unit",
-                        "price_per_unit": 490.0,
+                        "label": (
+                            "Live Display Screens" if component_key == "live_display_screens"
+                            else "Digital KOT Check-In Terminals" if component_key == "kot_terminals"
+                            else component_key.replace("_", " ").title()
+                        ),
+                        "description": (
+                            "High-resolution TV screens to broadcast live queue calls, waiting tickets, and counter updates in waiting areas." if component_key == "live_display_screens"
+                            else "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance." if component_key == "kot_terminals"
+                            else f"Allocations for {component_key.replace('_', ' ')}."
+                        ),
+                        "unit_label": "screen" if component_key == "live_display_screens" else "terminal" if component_key == "kot_terminals" else "unit",
+                        "price_per_unit": 100.0 if component_key == "live_display_screens" else 490.0,
                         "default_included_qty": 1,
+                        "max_qty_per_branch": 10,
                         "is_active": True,
                         "category": "ADDON"
                     }
@@ -317,6 +326,19 @@ class CompanyBranchesSummaryView(APIView):
                 "category": "ADDON"
             }
         )
+        PlanComponent.objects.get_or_create(
+            key="live_display_screens",
+            defaults={
+                "label": "Live Display Screens",
+                "description": "High-resolution TV screens to broadcast live queue calls, waiting tickets, and counter updates in waiting areas.",
+                "unit_label": "screen",
+                "price_per_unit": 100.0,
+                "default_included_qty": 1,
+                "max_qty_per_branch": 10,
+                "is_active": True,
+                "category": "ADDON"
+            }
+        )
         active_components = {pc.key: pc for pc in PlanComponent.objects.filter(is_active=True)}
         
         result = []
@@ -372,6 +394,9 @@ class CompanyBranchesSummaryView(APIView):
                 elif key == "kot_terminals":
                     from kot.models import KotTerminal
                     used = KotTerminal.objects.filter(branch=br, status="active").count()
+                elif key == "live_display_screens":
+                    from display.models import DisplayTerminal
+                    used = DisplayTerminal.objects.filter(branch=br, status="active").count()
                 elif key == "printed_qr":
                     used = QrCode.objects.filter(branch=br).count()
                 elif key == "online_module":
@@ -1157,7 +1182,7 @@ class CheckoutUpgradeView(APIView):
                 "operator_qty": total_operators,
                 "kiosk_qty": total_kiosks,
                 "token_delivery_selections": token_delivery_selections,
-                "addons": {"printed_qr": total_qr, "kot_terminals": total_kots}
+                "addons": {"printed_qr": total_qr, "kot_terminals": total_kots, "live_display_screens": total_displays}
             })
 
         from billing.services.pricing_engine import PricingEngine
@@ -1215,7 +1240,7 @@ class CheckoutUpgradeView(APIView):
                 operator_qty=total_operators,
                 kiosk_qty=total_kiosks,
                 token_delivery_selections=token_delivery_selections,
-                addons={"printed_qr": total_qr, "kot_terminals": total_kots},
+                addons={"printed_qr": total_qr, "kot_terminals": total_kots, "live_display_screens": total_displays},
                 channel_type=channel_type
             )
 

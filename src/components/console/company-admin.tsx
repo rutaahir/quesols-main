@@ -40,6 +40,7 @@ import {
   Search,
   Loader2,
   AtSign,
+  Tv,
 } from "lucide-react";
 import { AppointmentCustomerModal } from "@/components/console/appointment-customer-modal";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -2386,6 +2387,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
             const descriptionOverrides: Record<string, string> = {
               paper_roll_screens: "Physical walk-in kiosk hardware terminals purchased for on-site customer registration.",
               kot_terminals: "Digital KOT Check-In Terminals for remote self-ticketing & mobile token issuance.",
+              live_display_screens: "High-resolution TV screens to broadcast live queue calls, waiting tickets, and counter updates in waiting areas.",
               printed_qr: "Countable physical display posters/standees purchased for QR self-ticketing at the branch.",
               operator_screens: "Operator desk seats for staff to manage queue calls and serve customers.",
               services: "Configurable service lines that customers can join when checking in at this branch.",
@@ -2405,7 +2407,19 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               unit_label: "terminal", default_included_qty: 1, price_per_unit: 490,
               is_toggle: false, pricing_type: "PER_UNIT", icon_key: "credit-card"
             };
-            const effectiveBase = hasKotComp ? baseComponents : [...baseComponents, kotFallbackComp];
+            const hasDisplayComp = baseComponents.some(c => c.key === "live_display_screens");
+            const displayFallbackComp = {
+              id: "virtual-display", key: "live_display_screens", label: "Live Display Screens",
+              description: descriptionOverrides["live_display_screens"],
+              unit_label: "screen", default_included_qty: 1, price_per_unit: 100,
+              max_qty_per_branch: 10,
+              is_toggle: false, pricing_type: "PER_UNIT", icon_key: "tv"
+            };
+            const effectiveBase = [
+              ...baseComponents,
+              ...(!hasKotComp ? [kotFallbackComp] : []),
+              ...(!hasDisplayComp ? [displayFallbackComp] : [])
+            ];
 
             const virtualComponents = [
               {
@@ -2437,7 +2451,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
             const allCards = activeTab === "legacy" ? effectiveBase : [...effectiveBase, ...virtualComponents];
 
             // Section definitions
-            const capacityKeys = ["operator_screens", "services", "paper_roll_screens", "kot_terminals", "printed_qr"];
+            const capacityKeys = ["paper_roll_screens", "operator_screens", "services", "printed_qr", "kot_terminals", "live_display_screens"];
             const queueKeys = ["queue_qr", "queue_kiosk", "queue_sms", "queue_whatsapp"];
             const addonKeys = ["online_module", "sms_integration", "sms_pack", "whatsapp_integration", "custom_domain", "advanced_analytics", "api_integration"];
 
@@ -2468,6 +2482,7 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
                 if (key === "operator_screens") used = state.desks.filter((d) => state.branches.some((b) => String(b.companyId) === String(companyId)) && d.isActive).length;
                 else if (key === "services") used = state.services.length;
                 else if (key === "paper_roll_screens") used = state.desks.filter((d) => state.branches.some((b) => String(b.companyId) === String(companyId)) && (d as any).layout === "kiosk").length;
+                else if (key === "live_display_screens") used = 1;
               } else if (activeBranch) {
                 const alloc = activeBranch.allocations[key];
                 if (alloc) { used = alloc.used; limit = alloc.limit; rate = alloc.rate; pricingType = alloc.pricing_type; }
@@ -2477,8 +2492,8 @@ export function CompanyItemizedPlanUsageView({ companyId, company }: { companyId
               const isToggle = c.is_toggle || pricingType === "FLAT" || pricingType === "TOGGLE_FREE" || pricingType === "TOGGLE_PAID";
               const isLimitReached = !isToggle && used >= limit && limit > 0;
               const pct = isToggle ? (limit > 0 ? 100 : 0) : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
-              const Icon = (({ operator_screens: Monitor, services: ListTree, paper_roll_screens: Printer, kot_terminals: CreditCard, printed_qr: QrCode, online_module: Sparkles, queue_qr: QrCode, queue_kiosk: Printer, queue_sms: MessageSquare, queue_whatsapp: Sparkles } as Record<string, any>)[key]) || Wallet;
-              const maxAllowed = c.max_qty_per_branch || 1;
+              const Icon = (({ operator_screens: Monitor, services: ListTree, paper_roll_screens: Printer, kot_terminals: CreditCard, printed_qr: QrCode, live_display_screens: Tv, online_module: Sparkles, queue_qr: QrCode, queue_kiosk: Printer, queue_sms: MessageSquare, queue_whatsapp: Sparkles } as Record<string, any>)[key]) || Wallet;
+              const maxAllowed = c.max_qty_per_branch || (key === "live_display_screens" ? 10 : 1);
               const kioskScreensLimit = activeBranch?.allocations?.paper_roll_screens?.limit || 0;
               const isEditingInline = inlineEditCardKey === key;
 
