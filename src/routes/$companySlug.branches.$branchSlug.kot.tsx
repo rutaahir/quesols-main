@@ -4,7 +4,7 @@ import {
   AlertCircle, ArrowLeft, ArrowRight, CheckCircle2,
   Headset, Lock, LogOut, Mail, MessageSquare, Phone,
   Settings, ShieldCheck, Sparkles, User, Wifi, Loader2,
-  ShieldAlert, HelpCircle,
+  ShieldAlert, HelpCircle, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuesole, apiFetch } from "@/lib/quesole/store";
@@ -471,6 +471,22 @@ function KotScreen() {
               <Settings className="h-4 w-4" />
             </button>
           )}
+          {/* Close Screen Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.opener) {
+                window.close();
+              } else {
+                window.history.back();
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass text-muted-foreground hover:text-foreground text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+            title="Close KOT Screen"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Close</span>
+          </button>
         </div>
       </header>
 

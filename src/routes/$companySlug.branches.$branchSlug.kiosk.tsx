@@ -1,6 +1,6 @@
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, ShieldAlert, HelpCircle, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Lock, LogOut, Printer, Settings, Sparkles, Ticket as TicketIcon, Touchpad, Sun, Moon, ShieldCheck, ShieldAlert, HelpCircle, Wifi, Headset, ArrowRight, User, Phone, Mail, MessageSquare, QrCode, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useQuesole, waitingOf, apiFetch } from "@/lib/quesole/store";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -638,6 +638,23 @@ function Kiosk() {
             title="Staff Kiosk Controls"
           >
             <Settings className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+          </button>
+
+          {/* Close Screen Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.opener) {
+                window.close();
+              } else {
+                window.history.back();
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-full bg-white dark:bg-slate-900 text-muted-foreground hover:text-foreground text-xs font-bold shadow-sm border border-border/50 transition-all cursor-pointer hover:scale-105 active:scale-95"
+            title="Close Kiosk Screen"
+          >
+            <X className="h-4 w-4" />
+            <span className="hidden sm:inline">Close</span>
           </button>
         </div>
       </header>

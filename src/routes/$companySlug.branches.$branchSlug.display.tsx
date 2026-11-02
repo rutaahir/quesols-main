@@ -3,7 +3,7 @@ import { getApiUrl } from "@/lib/api-config";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "@/components/quesole/motion";
 import { cn } from "@/lib/utils";
-import { Lock, Layers, Monitor, RefreshCw, AlertCircle, CheckCircle, Volume2, Users, Sun, Moon, LogOut } from "lucide-react";
+import { Lock, Layers, Monitor, RefreshCw, AlertCircle, CheckCircle, Volume2, Users, Sun, Moon, LogOut, X } from "lucide-react";
 import type { Desk, Ticket, Service } from "@/lib/quesole/types";
 
 export const Route = createFileRoute("/$companySlug/branches/$branchSlug/display")({
@@ -628,7 +628,25 @@ function DisplayBoardScreen() {
   /* ── UNLOCKED PASSPHRASE ENTRY / LOCKED SCREEN ── */
   if (!isUnlocked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-sans px-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-sans px-4 relative">
+        {/* Floating Close Screen Button */}
+        <div className="fixed top-5 right-5 z-50">
+          <button
+            type="button"
+            onClick={() => {
+              if (window.opener) {
+                window.close();
+              } else {
+                window.history.back();
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-white/80 hover:text-white text-xs font-semibold backdrop-blur-md transition-all shadow-lg hover:scale-105 active:scale-95 cursor-pointer"
+            title="Close Screen"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span>Close Screen</span>
+          </button>
+        </div>
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -874,6 +892,28 @@ function DisplayBoardScreen() {
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>Logout</span>
+          </button>
+
+          {/* Close Screen Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.opener) {
+                window.close();
+              } else {
+                window.history.back();
+              }
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs border transition-all duration-300 shadow-sm cursor-pointer",
+              isDark
+                ? "bg-slate-800/80 hover:bg-slate-700/80 border-white/15 text-slate-300 hover:text-white"
+                : "bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700"
+            )}
+            title="Close this screen tab"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span>Close Screen</span>
           </button>
 
           <div className="text-right shrink-0">

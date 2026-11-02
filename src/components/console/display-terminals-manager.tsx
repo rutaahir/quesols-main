@@ -33,7 +33,9 @@ import {
   Sliders,
   ChevronRight,
   ShieldCheck,
-  CheckCircle
+  CheckCircle,
+  Power,
+  PowerOff
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -107,6 +109,7 @@ export function DisplayTerminalsManager({
 
   // Regenerate Passcode loading indicator
   const [regeneratingPinId, setRegeneratingPinId] = useState<string | null>(null);
+  const [togglingStatusId, setTogglingStatusId] = useState<string | null>(null);
 
   const displayBaseUrl =
     companySlug && branchSlug
@@ -208,6 +211,27 @@ export function DisplayTerminalsManager({
       toast.error(err.message || "Failed to regenerate passcode.");
     } finally {
       setRegeneratingPinId(null);
+    }
+  };
+
+  const handleToggleTerminalStatus = async (terminal: DisplayTerminal) => {
+    setTogglingStatusId(terminal.id);
+    const nextStatus = terminal.status === "active" ? "inactive" : "active";
+    try {
+      const updated = await apiFetch(`/api/display-terminals/${terminal.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      toast.success(
+        nextStatus === "active"
+          ? `Screen "${terminal.terminal_identifier}" opened and activated!`
+          : `Screen "${terminal.terminal_identifier}" closed!`
+      );
+      setTerminals((prev) => prev.map((t) => (t.id === terminal.id ? updated : t)));
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update screen status.");
+    } finally {
+      setTogglingStatusId(null);
     }
   };
 
@@ -1016,6 +1040,35 @@ export function DisplayTerminalsManager({
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <RotateCw className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+
+                    {/* Close / Open Screen Toggle */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleToggleTerminalStatus(term)}
+                      disabled={togglingStatusId === term.id}
+                      className={cn(
+                        "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
+                        term.status === "active"
+                          ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
+                          : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
+                      )}
+                      title={term.status === "active" ? "Close screen terminal" : "Reopen screen terminal"}
+                    >
+                      {togglingStatusId === term.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : term.status === "active" ? (
+                        <>
+                          <PowerOff className="h-3.5 w-3.5" />
+                          <span>Close Screen</span>
+                        </>
+                      ) : (
+                        <>
+                          <Power className="h-3.5 w-3.5" />
+                          <span>Open Screen</span>
+                        </>
                       )}
                     </Button>
 

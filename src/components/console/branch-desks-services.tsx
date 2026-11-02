@@ -1,6 +1,7 @@
+import { createPortal } from "react-dom";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard, ShieldCheck, Loader2, CloudSun, MapPin, TrendingUp, TrendingDown, CheckCircle2, MoreHorizontal, Activity, FileText, BarChart3, PieChart as PieChartIcon, LayoutDashboard, Tv, AtSign, AlertCircle, KeyRound, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Eye, EyeOff, Layers, Monitor, Pencil, Plus, QrCode, Sparkles, UserPlus, Users, MoreVertical, Globe, AlertTriangle, X, Sunrise, Sun, Sunset, Calendar, Filter, Bell, Building2, Clock, Phone, Mail, Radio, Briefcase, User, Info, Settings, MessageSquare, MessageCircle, Printer, Star, CreditCard, ShieldCheck, Loader2, CloudSun, MapPin, TrendingUp, TrendingDown, CheckCircle2, MoreHorizontal, Activity, FileText, BarChart3, PieChart as PieChartIcon, LayoutDashboard, Tv, AtSign, AlertCircle, KeyRound, XCircle, Tablet, Power, PowerOff, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,6 +122,9 @@ export function BranchDesksServicesManager({
   const [addKioskUserStatus, setAddKioskUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
   const [addKioskUserMessage, setAddKioskUserMessage] = useState("");
   const [isCreatingKiosk, setIsCreatingKiosk] = useState(false);
+
+  const [showAddKioskPin, setShowAddKioskPin] = useState(false);
+  const [showEditKioskPin, setShowEditKioskPin] = useState(false);
 
   // Edit Kiosk Credentials State
   const [editingKiosk, setEditingKiosk] = useState<any | null>(null);
@@ -3118,195 +3122,373 @@ export function BranchDesksServicesManager({
             </div>
           </div>
 
-          {/* KPI Cards Row */}
+          {/* KPI Summary Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Kiosks</span>
-              <span className="text-base font-black text-foreground block mt-0.5">{branchKiosks.length}</span>
+            {/* Card 1: Total Kiosks */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Total Kiosks
+                </span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-foreground tracking-tight">
+                    {branchKiosks.length}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-semibold">
+                    / {purchasedKiosks} allowed
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {branchKiosks.filter(k => k.status === 'active').length} active kiosk terminal{branchKiosks.filter(k => k.status === 'active').length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <div className="h-11 w-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                <Tablet className="h-5 w-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Online</span>
-              <span className="text-base font-black text-emerald-500 block mt-0.5">{branchKiosks.filter(k => k.is_logged_in && k.status === 'active').length}</span>
+
+            {/* Card 2: Online Sessions */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Touch Online
+                </span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                    {branchKiosks.filter(k => k.is_logged_in && k.status === 'active').length}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-semibold">
+                    on-air now
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {branchKiosks.filter(k => k.is_logged_in && k.status === 'active').length > 0
+                    ? "Interactive kiosk active"
+                    : "No active touch sessions"}
+                </p>
+              </div>
+              <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <Radio className="h-5 w-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Offline / Closed</span>
-              <span className="text-base font-black text-muted-foreground block mt-0.5">{branchKiosks.filter(k => !k.is_logged_in || k.status !== 'active').length}</span>
+
+            {/* Card 3: Standby / Closed */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Standby / Closed
+                </span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-foreground tracking-tight">
+                    {branchKiosks.filter(k => !k.is_logged_in || k.status !== 'active').length}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-semibold">
+                    terminals
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Ready to connect with PIN code
+                </p>
+              </div>
+              <div className="h-11 w-11 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 flex items-center justify-center shrink-0">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-              <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Tickets Today</span>
-              <span className="text-base font-black text-primary block mt-0.5">
-                {state.tickets.filter(t => t.branchId === branch.id && t.channel === 'kiosk').length}
-              </span>
+
+            {/* Card 4: Tickets Issued */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Kiosk Tickets Today
+                </span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-[#5B50EB] tracking-tight">
+                    {state.tickets.filter(t => t.branchId === branch.id && t.channel === 'kiosk').length}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-semibold">
+                    issued
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Walk-in visitor check-ins
+                </p>
+              </div>
+              <div className="h-11 w-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+                <CreditCard className="h-5 w-5" />
+              </div>
             </div>
           </div>
 
-          {/* Kiosk Terminal Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {branchKiosks.map((kiosk, idx) => {
-              const isPinVisible = !!visiblePins[kiosk.id];
-              const isKioskOpen = Boolean(kiosk.is_logged_in && kiosk.status === "active");
-              return (
-                <div
-                  key={kiosk.id}
-                  className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 flex flex-col justify-between space-y-4"
-                >
-                  <div className="flex gap-4">
-                    {/* Device illustration */}
-                    <div className="h-24 w-16 bg-slate-50 dark:bg-slate-900/60 border border-border/40 rounded-xl flex items-center justify-center p-2 shrink-0">
-                      <svg className="w-full h-full text-slate-400" viewBox="0 0 30 50" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="3" y="2" width="24" height="46" rx="3" fill="#0F172A" stroke="#475569" strokeWidth="2"/>
-                        <rect x="5" y="4" width="20" height="32" rx="1" fill="#1E293B"/>
-                        <circle cx="15" cy="42" r="2.5" fill="#475569"/>
-                        <rect x="7" y="6" width="16" height="12" rx="0.5" fill="url(#screenGrad)" opacity="0.8"/>
-                        <rect x="9" y="20" width="12" height="1.5" rx="0.2" fill="#3B82F6"/>
-                        <rect x="9" y="23" width="12" height="1.5" rx="0.2" fill="#10B981"/>
-                      </svg>
-                    </div>
+          {/* Kiosk Terminal Cards */}
+          {branchKiosks.length === 0 ? (
+            <div className="border border-dashed border-border/80 rounded-3xl p-12 text-center space-y-4 bg-slate-50/50 dark:bg-slate-900/30">
+              <div className="h-16 w-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center mx-auto shadow-sm">
+                <Tablet className="h-8 w-8" />
+              </div>
+              <div className="space-y-1.5 max-w-md mx-auto">
+                <h3 className="text-base font-bold text-foreground">No Self-Service Kiosks Provisioned</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Touch screen kiosks allow walk-in visitors to select services and receive printed or digital queue tickets. Click below to add your first kiosk.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={openAddKioskModal}
+                className="gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-md shadow-[#5B50EB]/20 h-9 px-4 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" /> Add Kiosk Terminal
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {branchKiosks.map((kiosk, idx) => {
+                const isPinVisible = !!visiblePins[kiosk.id];
+                const isKioskOpen = Boolean(kiosk.is_logged_in && kiosk.status === "active");
+                const terminalSlug = kiosk.username || (kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id);
+                const singleKioskUrl = companySlug && branchSlug
+                  ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
+                  : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
 
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <div>
-                        <h3 className="font-black text-sm text-foreground truncate">{kiosk.kiosk_identifier}</h3>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KSK-0{idx + 1}</span>
-                          <span className="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded-md font-mono font-bold flex items-center gap-1">
-                            @{kiosk.username || `kiosk-${kiosk.id}`}
-                          </span>
+                return (
+                  <div
+                    key={kiosk.id}
+                    className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-4 shadow-xs hover:border-[#5B50EB]/40 transition-all duration-200"
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
+                      {/* Left: Device Avatar & Metadata */}
+                      <div className="flex items-start sm:items-center gap-4">
+                        <div className="relative">
+                          <div className="h-14 w-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center shrink-0 shadow-sm border border-indigo-100 dark:border-indigo-900/30">
+                            <Tablet className="h-7 w-7" />
+                          </div>
+                          {isKioskOpen && (
+                            <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900 animate-pulse" />
+                          )}
                         </div>
-                      </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
-                        <div>
-                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Status</span>
-                          <span className={cn(
-                            "inline-flex items-center gap-1 font-bold mt-0.5",
-                            isKioskOpen ? "text-emerald-500" : "text-muted-foreground"
-                          )}>
-                            <span className={cn("h-1.5 w-1.5 rounded-full", isKioskOpen ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
-                            {isKioskOpen ? "Active" : "Closed"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">PIN Code</span>
-                          <div className="flex items-center gap-1.5 mt-0.5 font-mono">
-                            <span>{isPinVisible ? kiosk.pin : "••••"}</span>
-                            <button
-                              onClick={() => setVisiblePins(prev => ({ ...prev, [kiosk.id]: !prev[kiosk.id] }))}
-                              className="text-muted-foreground hover:text-foreground"
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <h3 className="font-black text-base sm:text-lg text-foreground tracking-tight">
+                              {kiosk.kiosk_identifier}
+                            </h3>
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                kiosk.status === "active"
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                                  : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
+                              )}
                             >
-                              {isPinVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                            </button>
+                              <span
+                                className={cn(
+                                  "h-1.5 w-1.5 rounded-full",
+                                  kiosk.status === "active" ? "bg-emerald-500" : "bg-muted-foreground"
+                                )}
+                              />
+                              {kiosk.status === "active" ? "Active" : "Closed"}
+                            </span>
+
+                            {isKioskOpen ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                <Radio className="h-3 w-3 animate-pulse" />
+                                Touch Screen Online
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground font-medium bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
+                                Standby (Ready to connect)
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-wrap text-xs">
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              Terminal ID: KSK-0{idx + 1}
+                            </span>
+
+                            <span className="text-border/80">•</span>
+
+                            {/* Username Pill with 1-click Copy */}
+                            <div className="flex items-center gap-1 bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-bold">
+                              <span>@{kiosk.username || `kiosk-${kiosk.id}`}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(kiosk.username || `kiosk-${kiosk.id}`);
+                                  toast.success(`Copied username @${kiosk.username || `kiosk-${kiosk.id}`}`);
+                                }}
+                                className="text-indigo-400 hover:text-indigo-700 dark:hover:text-white p-0.5 cursor-pointer"
+                                title="Copy Username"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </div>
+
+                            <span className="text-border/80">•</span>
+
+                            <span className="text-[11px] text-muted-foreground">
+                              Location: <span className="font-semibold text-foreground">Reception</span>
+                            </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
-                        <div>
-                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Location</span>
-                          <span className="font-bold text-foreground block mt-0.5">Reception</span>
+                      {/* Right: Actions, PIN Display & Controls */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* 4-Digit Access PIN Box */}
+                        <div className="flex items-center gap-2 bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-border/60">
+                          <div className="text-left">
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block leading-none">
+                              Access PIN
+                            </span>
+                            <span className="font-mono text-xs font-black text-foreground mt-0.5 block leading-none">
+                              {isPinVisible ? kiosk.pin : "••••"}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisiblePins(prev => ({ ...prev, [kiosk.id]: !prev[kiosk.id] }))}
+                            className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                            title={isPinVisible ? "Hide PIN" : "Show PIN"}
+                          >
+                            {isPinVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
                         </div>
-                        <div>
-                          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Username</span>
-                          <span className="font-mono text-muted-foreground font-bold block mt-0.5 truncate">{kiosk.username || `kiosk-${kiosk.id}`}</span>
-                        </div>
-                      </div>
 
-                      <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
-                        <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Kiosk Link</span>
-                        <div className="flex items-center gap-2">
-                          {(() => {
-                            const terminalSlug = kiosk.username || (kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id);
-                            const singleKioskUrl = companySlug && branchSlug
-                              ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
-                              : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
-                            return (
-                              <>
-                                <a
-                                  href={singleKioskUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-primary hover:underline font-bold flex items-center gap-1"
-                                >
-                                  <ExternalLink className="h-3 w-3" />
-                                  <span>Open</span>
-                                </a>
-                                <button
-                                  onClick={() => {
-                                    const url = `${window.location.origin}${singleKioskUrl}`;
-                                    navigator.clipboard.writeText(url);
-                                    toast.success(`Copied unique URL for ${kiosk.kiosk_identifier}!`);
-                                  }}
-                                  className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
-                                >
-                                  <Copy className="h-3 w-3" />
-                                  <span>Copy</span>
-                                </button>
-                              </>
-                            );
-                          })()}
-                        </div>
+                        {/* Launch Direct Kiosk Button */}
+                        <a
+                          href={singleKioskUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="h-8 px-3 rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all shadow-[#5B50EB]/20 cursor-pointer"
+                          title="Open dedicated Kiosk touch screen"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Open Kiosk</span>
+                        </a>
+
+                        {/* Copy Link Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const url = `${window.location.origin}${singleKioskUrl}`;
+                            navigator.clipboard.writeText(url);
+                            toast.success(`Copied direct URL for ${kiosk.kiosk_identifier}!`);
+                          }}
+                          className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                          title="Copy direct kiosk link"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Copy Link</span>
+                        </Button>
+
+                        {/* Edit Credentials */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingKiosk(kiosk);
+                            setEditKioskName(kiosk.kiosk_identifier || "");
+                            setEditKioskUsername(kiosk.username || `kiosk-${kiosk.id}`);
+                            setEditKioskPin(kiosk.pin || "");
+                            setEditKioskUserStatus("idle");
+                            setEditKioskUserMessage("");
+                          }}
+                          className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                          title="Edit kiosk name, username, and PIN"
+                        >
+                          <KeyRound className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>Edit</span>
+                        </Button>
+
+                        {/* Regenerate PIN */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              await actions.regenerateKioskPin(kiosk.id);
+                              toast.success("Kiosk PIN regenerated successfully!");
+                              await refresh();
+                            } catch (err: any) {
+                              toast.error(err.message || "Failed to regenerate PIN.");
+                            }
+                          }}
+                          className="h-8 px-2 text-xs font-semibold border-border/70"
+                          title="Generate new 4-digit PIN"
+                        >
+                          <RotateCw className="h-3.5 w-3.5" />
+                        </Button>
+
+                        {/* Close / Open Kiosk Toggle */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            const nextStatus = kiosk.status === "active" ? "inactive" : "active";
+                            try {
+                              await apiFetch(`/api/kot/kiosks/${kiosk.id}/`, {
+                                method: "PATCH",
+                                body: JSON.stringify({ status: nextStatus }),
+                              });
+                              toast.success(
+                                nextStatus === "active"
+                                  ? `Kiosk "${kiosk.kiosk_identifier}" opened and activated!`
+                                  : `Kiosk "${kiosk.kiosk_identifier}" closed!`
+                              );
+                              await refresh();
+                            } catch (err: any) {
+                              toast.error(err.message || "Failed to update kiosk status.");
+                            }
+                          }}
+                          className={cn(
+                            "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
+                            kiosk.status === "active"
+                              ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
+                              : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
+                          )}
+                          title={kiosk.status === "active" ? "Close kiosk terminal" : "Reopen kiosk terminal"}
+                        >
+                          {kiosk.status === "active" ? (
+                            <>
+                              <PowerOff className="h-3.5 w-3.5" />
+                              <span>Close Kiosk</span>
+                            </>
+                          ) : (
+                            <>
+                              <Power className="h-3.5 w-3.5" />
+                              <span>Open Kiosk</span>
+                            </>
+                          )}
+                        </Button>
+
+                        {/* Delete Kiosk */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/50"
+                          onClick={async () => {
+                            if (confirm(`Are you sure you want to completely delete kiosk "${kiosk.kiosk_identifier}"?`)) {
+                              try {
+                                await apiFetch(`/api/kot/kiosks/${kiosk.id}/`, { method: "DELETE" });
+                                toast.success("Kiosk deleted successfully!");
+                                await refresh();
+                              } catch (err: any) {
+                                toast.error(err.message || "Failed to delete kiosk.");
+                              }
+                            }
+                          }}
+                          title="Delete kiosk terminal"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     </div>
                   </div>
-
-                  <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1 flex-wrap">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setEditingKiosk(kiosk);
-                        setEditKioskName(kiosk.kiosk_identifier || "");
-                        setEditKioskUsername(kiosk.username || `kiosk-${kiosk.id}`);
-                        setEditKioskPin(kiosk.pin || "");
-                        setEditKioskUserStatus("idle");
-                        setEditKioskUserMessage("");
-                      }}
-                      className="h-8 text-xs font-bold gap-1"
-                    >
-                      <KeyRound className="h-3 w-3 text-brand" /> Edit Credentials
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        try {
-                          await actions.regenerateKioskPin(kiosk.id);
-                          toast.success("Kiosk PIN regenerated successfully!");
-                        } catch (err: any) {
-                          toast.error(err.message || "Failed to regenerate PIN.");
-                        }
-                      }}
-                      className="h-8 text-xs font-bold"
-                    >
-                      Regenerate PIN
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs font-bold text-red-500 hover:bg-red-500/10 hover:text-red-500 border-border/60"
-                      onClick={async () => {
-                        if (confirm(`Are you sure you want to completely delete kiosk "${kiosk.kiosk_identifier}"?`)) {
-                          try {
-                            await apiFetch(`/api/kot/kiosks/${kiosk.id}/`, { method: "DELETE" });
-                            toast.success("Kiosk deleted successfully!");
-                            await refresh();
-                          } catch (err: any) {
-                            toast.error(err.message || "Failed to delete kiosk.");
-                          }
-                        }
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-            {branchKiosks.length === 0 && (
-              <div className="col-span-full py-12 text-center text-xs text-muted-foreground font-semibold bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl">
-                No kiosk slots provisioned. Make sure kiosks are allocated in your company plan.
-              </div>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -5043,250 +5225,322 @@ export function BranchDesksServicesManager({
       )}
 
       {/* Modal: Add Kiosk Terminal */}
-      {isAddKioskModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <Monitor className="h-5 w-5 text-brand" />
-                <div>
-                  <h3 className="text-base font-bold">Add Kiosk Terminal</h3>
-                  <p className="text-[11px] text-muted-foreground">{branch.name}</p>
+      {/* Modal: Add Kiosk Terminal */}
+      {isAddKioskModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-[#5B50EB]/10 text-[#5B50EB] flex items-center justify-center shrink-0">
+                    <Tablet className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">Add Kiosk Terminal</h3>
+                    <p className="text-[11px] text-muted-foreground">{branch?.name}</p>
+                  </div>
                 </div>
-              </div>
-              <button onClick={() => setIsAddKioskModalOpen(false)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateKiosk} className="space-y-4">
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Kiosk Identifier Name *</Label>
-                <Input
-                  type="text"
-                  value={newKioskName}
-                  onChange={(e) => {
-                    setNewKioskName(e.target.value);
-                  }}
-                  placeholder="e.g. Kiosk 1 or Reception Lobby Kiosk"
-                  required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
-                  {addKioskUserStatus === "checking" && (
-                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
-                    </span>
-                  )}
-                  {addKioskUserStatus === "available" && (
-                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Available
-                    </span>
-                  )}
-                  {addKioskUserStatus === "taken" && (
-                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                      <XCircle className="h-3 w-3" /> Already taken
-                    </span>
-                  )}
-                  {addKioskUserStatus === "invalid" && addKioskUserMessage && (
-                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> {addKioskUserMessage}
-                    </span>
-                  )}
-                </div>
-                <Input
-                  type="text"
-                  value={newKioskUsername}
-                  onChange={(e) => {
-                    setIsKioskUserManuallyEdited(true);
-                    setNewKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
-                  }}
-                  placeholder="e.g. kiosk-1 or reception-kiosk"
-                  required
-                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
-                    addKioskUserStatus === "available"
-                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
-                      : addKioskUserStatus === "taken"
-                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
-                      : "text-brand"
-                  }`}
-                />
-                {addKioskUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {addKioskUserMessage}
-                  </p>
-                ) : addKioskUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {addKioskUserMessage}
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Required for terminal login. Staff or operators enter this username along with PIN to unlock the kiosk.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{4}"
-                  maxLength={4}
-                  value={newKioskPin}
-                  onChange={(e) => setNewKioskPin(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="e.g. 1234"
-                  required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Generated automatically. You can change this to any 4-digit code.
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
+                <button
                   type="button"
-                  variant="outline"
                   onClick={() => setIsAddKioskModalOpen(false)}
-                  className="text-xs h-9"
+                  className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isCreatingKiosk || newKioskPin.length !== 4 || !newKioskUsername.trim() || addKioskUserStatus === "taken" || addKioskUserStatus === "checking" || addKioskUserStatus === "invalid"}
-                  className="text-xs h-9 bg-brand hover:bg-brand/90 text-white"
-                >
-                  {isCreatingKiosk ? "Creating..." : "Create Kiosk"}
-                </Button>
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleCreateKiosk} className="space-y-4" autoComplete="off">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Kiosk Identifier Name *
+                  </Label>
+                  <Input
+                    type="text"
+                    value={newKioskName}
+                    onChange={(e) => setNewKioskName(e.target.value)}
+                    placeholder="e.g. Kiosk 1 or Reception Lobby Kiosk"
+                    required
+                    autoComplete="off"
+                    className="mt-1 text-xs rounded-xl h-10 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Terminal Username *
+                    </Label>
+                    {addKioskUserStatus === "checking" && (
+                      <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                      </span>
+                    )}
+                    {addKioskUserStatus === "available" && (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Available
+                      </span>
+                    )}
+                    {addKioskUserStatus === "taken" && (
+                      <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" /> Already taken
+                      </span>
+                    )}
+                    {addKioskUserStatus === "invalid" && addKioskUserMessage && (
+                      <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" /> {addKioskUserMessage}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    type="text"
+                    value={newKioskUsername}
+                    onChange={(e) => {
+                      setIsKioskUserManuallyEdited(true);
+                      setNewKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
+                    }}
+                    placeholder="e.g. kiosk-1 or reception-kiosk"
+                    required
+                    autoComplete="off"
+                    className={`mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors ${
+                      addKioskUserStatus === "available"
+                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                        : addKioskUserStatus === "taken"
+                        ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                        : "text-[#5B50EB]"
+                    }`}
+                  />
+                  {addKioskUserStatus === "taken" ? (
+                    <p className="text-[10px] text-rose-500 font-medium mt-1">
+                      {addKioskUserMessage}
+                    </p>
+                  ) : addKioskUserStatus === "available" ? (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                      ✓ {addKioskUserMessage}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Required for terminal login. Staff enter this username along with PIN to unlock the kiosk.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      4-Digit Access PIN *
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddKioskPin(!showAddKioskPin)}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {showAddKioskPin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      <span>{showAddKioskPin ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showAddKioskPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    value={newKioskPin}
+                    onChange={(e) => setNewKioskPin(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="e.g. 1234"
+                    required
+                    autoComplete="new-password"
+                    className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Generated automatically. You can change this to any 4-digit code.
+                  </p>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddKioskModalOpen(false)}
+                    className="text-xs h-9 cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isCreatingKiosk ||
+                      newKioskPin.length !== 4 ||
+                      !newKioskUsername.trim() ||
+                      addKioskUserStatus === "taken" ||
+                      addKioskUserStatus === "checking" ||
+                      addKioskUserStatus === "invalid"
+                    }
+                    className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-md shadow-[#5B50EB]/20 cursor-pointer"
+                  >
+                    {isCreatingKiosk ? "Creating..." : "Create Kiosk"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Modal: Edit Kiosk Credentials */}
-      {editingKiosk && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-5 w-5 text-brand" />
-                <div>
-                  <h3 className="text-base font-bold">Edit Kiosk Credentials</h3>
-                  <p className="text-[11px] text-muted-foreground">{editingKiosk.kiosk_identifier}</p>
+      {editingKiosk &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-[#5B50EB]/10 text-[#5B50EB] flex items-center justify-center shrink-0">
+                    <KeyRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">Edit Kiosk Credentials</h3>
+                    <p className="text-[11px] text-muted-foreground">{editingKiosk.kiosk_identifier}</p>
+                  </div>
                 </div>
-              </div>
-              <button onClick={() => setEditingKiosk(null)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateKioskCredentials} className="space-y-4">
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Kiosk Identifier Name *</Label>
-                <Input
-                  type="text"
-                  value={editKioskName}
-                  onChange={(e) => setEditKioskName(e.target.value)}
-                  required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
-                  {editKioskUserStatus === "checking" && (
-                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
-                    </span>
-                  )}
-                  {editKioskUserStatus === "available" && (
-                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Available
-                    </span>
-                  )}
-                  {editKioskUserStatus === "taken" && (
-                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                      <XCircle className="h-3 w-3" /> Already taken
-                    </span>
-                  )}
-                  {editKioskUserStatus === "invalid" && editKioskUserMessage && (
-                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> {editKioskUserMessage}
-                    </span>
-                  )}
-                </div>
-                <Input
-                  type="text"
-                  value={editKioskUsername}
-                  onChange={(e) => setEditKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
-                  placeholder="e.g. kiosk-1"
-                  required
-                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
-                    editKioskUserStatus === "available"
-                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
-                      : editKioskUserStatus === "taken"
-                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
-                      : "text-brand"
-                  }`}
-                />
-                {editKioskUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {editKioskUserMessage}
-                  </p>
-                ) : editKioskUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {editKioskUserMessage}
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Unique login username for this kiosk terminal.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{4}"
-                  maxLength={4}
-                  value={editKioskPin}
-                  onChange={(e) => setEditKioskPin(e.target.value.replace(/[^0-9]/g, ''))}
-                  required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
+                <button
                   type="button"
-                  variant="outline"
                   onClick={() => setEditingKiosk(null)}
-                  className="text-xs h-9"
+                  className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSavingKioskEdit || editKioskPin.length !== 4 || !editKioskUsername.trim() || editKioskUserStatus === "taken" || editKioskUserStatus === "checking" || editKioskUserStatus === "invalid"}
-                  className="text-xs h-9 bg-brand hover:bg-brand/90 text-white"
-                >
-                  {isSavingKioskEdit ? "Saving..." : "Save Credentials"}
-                </Button>
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleUpdateKioskCredentials} className="space-y-4" autoComplete="off">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Kiosk Identifier Name *
+                  </Label>
+                  <Input
+                    type="text"
+                    value={editKioskName}
+                    onChange={(e) => setEditKioskName(e.target.value)}
+                    required
+                    autoComplete="off"
+                    className="mt-1 text-xs rounded-xl h-10 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Terminal Username *
+                    </Label>
+                    {editKioskUserStatus === "checking" && (
+                      <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                      </span>
+                    )}
+                    {editKioskUserStatus === "available" && (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Available
+                      </span>
+                    )}
+                    {editKioskUserStatus === "taken" && (
+                      <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" /> Already taken
+                      </span>
+                    )}
+                    {editKioskUserStatus === "invalid" && editKioskUserMessage && (
+                      <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" /> {editKioskUserMessage}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    type="text"
+                    value={editKioskUsername}
+                    onChange={(e) => setEditKioskUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                    placeholder="e.g. kiosk-1"
+                    required
+                    autoComplete="off"
+                    className={`mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors ${
+                      editKioskUserStatus === "available"
+                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                        : editKioskUserStatus === "taken"
+                        ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                        : "text-[#5B50EB]"
+                    }`}
+                  />
+                  {editKioskUserStatus === "taken" ? (
+                    <p className="text-[10px] text-rose-500 font-medium mt-1">
+                      {editKioskUserMessage}
+                    </p>
+                  ) : editKioskUserStatus === "available" ? (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                      ✓ {editKioskUserMessage}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Unique login username for this kiosk terminal.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      4-Digit Access PIN *
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowEditKioskPin(!showEditKioskPin)}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {showEditKioskPin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      <span>{showEditKioskPin ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showEditKioskPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    value={editKioskPin}
+                    onChange={(e) => setEditKioskPin(e.target.value.replace(/[^0-9]/g, ""))}
+                    required
+                    autoComplete="new-password"
+                    className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Passcode used by kiosk staff to lock and unlock this terminal.
+                  </p>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditingKiosk(null)}
+                    className="text-xs h-9 cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isSavingKioskEdit ||
+                      editKioskPin.length !== 4 ||
+                      !editKioskUsername.trim() ||
+                      editKioskUserStatus === "taken" ||
+                      editKioskUserStatus === "checking" ||
+                      editKioskUserStatus === "invalid"
+                    }
+                    className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-md shadow-[#5B50EB]/20 cursor-pointer"
+                  >
+                    {isSavingKioskEdit ? "Saving..." : "Save Credentials"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -6306,6 +6560,9 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
   const [addKotUserStatus, setAddKotUserStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
   const [addKotUserMessage, setAddKotUserMessage] = useState("");
 
+  const [showAddKotPin, setShowAddKotPin] = useState(false);
+  const [showEditKotPin, setShowEditKotPin] = useState(false);
+
   const [editingKot, setEditingKot] = useState<any | null>(null);
   const [editKotIdentifier, setEditKotIdentifier] = useState("");
   const [editKotUsername, setEditKotUsername] = useState("");
@@ -6717,646 +6974,681 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">KOT Terminals</span>
-          <span className="text-base font-black text-foreground block mt-0.5">{kotTerminals.length}</span>
+        {/* Card 1: Total Terminals */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              KOT Terminals
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-foreground tracking-tight">
+                {kotTerminals.length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                / {purchasedKotTerminals} allowed
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {kotTerminals.filter(t => t.status === "active").length} active terminal{kotTerminals.filter(t => t.status === "active").length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <MessageSquare className="h-5 w-5" />
+          </div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Online</span>
-          <span className="text-base font-black text-emerald-500 block mt-0.5">{kotTerminals.filter(t => t.is_logged_in).length}</span>
+
+        {/* Card 2: Online Check-Ins */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Check-In Online
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                {kotTerminals.filter(t => t.is_logged_in && t.status === "active").length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                on-air now
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {kotTerminals.filter(t => t.is_logged_in && t.status === "active").length > 0
+                ? "Active check-in sessions"
+                : "No active check-in sessions"}
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <Radio className="h-5 w-5" />
+          </div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Offline</span>
-          <span className="text-base font-black text-muted-foreground block mt-0.5">{kotTerminals.filter(t => !t.is_logged_in).length}</span>
+
+        {/* Card 3: Standby / Closed */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Standby / Closed
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-foreground tracking-tight">
+                {kotTerminals.filter(t => !t.is_logged_in || t.status !== "active").length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                terminals
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Ready to unlock with PIN code
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 flex items-center justify-center shrink-0">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">Digital Tokens Today</span>
-          <span className="text-base font-black text-primary block mt-0.5">
-            {state.tickets.filter(t => String(t.branchId) === String(branch.id) && (t.channel === "sms" || t.channel === "whatsapp")).length}
-          </span>
+
+        {/* Card 4: Tokens Issued Today */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-xs">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Digital Tokens Today
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-[#5B50EB] tracking-tight">
+                {state.tickets.filter(t => String(t.branchId) === String(branch.id) && (t.channel === "sms" || t.channel === "whatsapp" || t.channel === "kot")).length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                issued
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              SMS & WhatsApp remote tickets
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+            <CheckCircle2 className="h-5 w-5" />
+          </div>
         </div>
       </div>
 
       {/* KOT Terminals Grid Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {kotTerminals.map((terminal, idx) => {
-          const isPinVisible = !!visiblePins[terminal.id];
-          return (
-            <div
-              key={terminal.id}
-              className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-5 hover:border-primary hover:shadow-soft transition-all duration-200 flex flex-col justify-between space-y-4"
-            >
-              <div className="flex gap-4">
-                {/* Device Icon / Visual */}
-                <div className="h-24 w-16 bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 rounded-xl flex items-center justify-center p-2 shrink-0 text-emerald-600">
-                  <MessageSquare className="h-8 w-8" />
-                </div>
+      {kotTerminals.length === 0 ? (
+        <div className="border border-dashed border-border/80 rounded-3xl p-12 text-center space-y-4 bg-slate-50/50 dark:bg-slate-900/30">
+          <div className="h-16 w-16 rounded-3xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+            <MessageSquare className="h-8 w-8" />
+          </div>
+          <div className="space-y-1.5 max-w-md mx-auto">
+            <h3 className="text-base font-bold text-foreground">No Digital KOT Terminals Provisioned</h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              KOT terminals enable touchless check-in where customers receive digital tokens via SMS or WhatsApp. Click below to add your first KOT terminal.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={openAddKotModal}
+            className="gap-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 h-9 px-4 cursor-pointer"
+          >
+            <Plus className="h-4 w-4" /> Add KOT Terminal
+          </Button>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {kotTerminals.map((terminal, idx) => {
+            const isPinVisible = !!visiblePins[terminal.id];
+            const isKotActive = terminal.status === "active";
+            const isKotOnline = Boolean(terminal.is_logged_in && isKotActive);
+            const terminalSlug = terminal.username || (terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, '-') : terminal.id);
+            const terminalKotUrl = companySlug && branchSlug
+              ? `/${companySlug}/branches/${branchSlug}/kot?terminal=${encodeURIComponent(terminalSlug)}`
+              : `/kot/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
 
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div>
-                    <h3 className="font-black text-sm text-foreground truncate">{terminal.terminal_identifier}</h3>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground font-mono">Terminal ID: KOT-0{idx + 1}</span>
-                      <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-md font-mono font-bold">
-                        @{terminal.username || `kot-${terminal.id}`}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[10px]">
-                    <div>
-                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Status</span>
-                      <span className={cn(
-                        "inline-flex items-center gap-1 font-bold mt-0.5",
-                        terminal.is_logged_in ? "text-emerald-500" : "text-muted-foreground"
-                      )}>
-                        <span className={cn("h-1.5 w-1.5 rounded-full", terminal.is_logged_in ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
-                        {terminal.is_logged_in ? "Online" : "Offline"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">PIN Code</span>
-                      <div className="flex items-center gap-1.5 mt-0.5 font-mono">
-                        <span>{isPinVisible ? terminal.pin : "••••"}</span>
-                        <button
-                          onClick={() => setVisiblePins(prev => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          {isPinVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                        </button>
+            return (
+              <div
+                key={terminal.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-4 shadow-xs hover:border-emerald-500/40 transition-all duration-200"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
+                  {/* Left: Device Avatar & Metadata */}
+                  <div className="flex items-start sm:items-center gap-4">
+                    <div className="relative">
+                      <div className="h-14 w-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center shrink-0 shadow-sm border border-emerald-100 dark:border-emerald-900/30">
+                        <MessageSquare className="h-7 w-7" />
                       </div>
+                      {isKotOnline && (
+                        <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900 animate-pulse" />
+                      )}
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-[10px]">
-                    <div>
-                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Username</span>
-                      <span className="font-mono text-muted-foreground font-bold block mt-0.5 truncate">{terminal.username || `kot-${terminal.id}`}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider block">Channel</span>
-                      <span className="font-semibold text-foreground block mt-0.5">SMS / WhatsApp</span>
-                    </div>
-                  </div>
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="font-black text-base sm:text-lg text-foreground tracking-tight">
+                          {terminal.terminal_identifier}
+                        </h3>
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                            isKotActive
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                              : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              isKotActive ? "bg-emerald-500" : "bg-muted-foreground"
+                            )}
+                          />
+                          {isKotActive ? "Active" : "Closed"}
+                        </span>
 
-                  {(() => {
-                    const terminalSlug = terminal.username || (terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, "-") : `kot-${terminal.id}`);
-                    const terminalKotUrl = `${kotUrl}?terminal=${terminalSlug}`;
-                    return (
-                      <div className="pt-2 border-t border-border/20 mt-1 flex items-center justify-between text-[10px]">
-                        <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">Check-In Link</span>
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={terminalKotUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline font-bold flex items-center gap-1"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            <span>Open</span>
-                          </a>
+                        {isKotOnline ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <Radio className="h-3 w-3 animate-pulse" />
+                            Check-In Online
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground font-medium bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
+                            Standby (Ready to connect)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 flex-wrap text-xs">
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          Terminal ID: KOT-0{idx + 1}
+                        </span>
+
+                        <span className="text-border/80">•</span>
+
+                        {/* Username Pill with 1-click Copy */}
+                        <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-bold">
+                          <span>@{terminal.username || `kot-${terminal.id}`}</span>
                           <button
+                            type="button"
                             onClick={() => {
-                              const url = `${window.location.origin}${terminalKotUrl}`;
-                              navigator.clipboard.writeText(url);
-                              toast.success(`KOT Check-In URL for ${terminal.terminal_identifier} copied!`);
+                              navigator.clipboard.writeText(terminal.username || `kot-${terminal.id}`);
+                              toast.success(`Copied username @${terminal.username || `kot-${terminal.id}`}`);
                             }}
-                            className="text-muted-foreground hover:text-foreground font-semibold flex items-center gap-0.5"
+                            className="text-emerald-600 hover:text-emerald-800 dark:hover:text-white p-0.5 cursor-pointer"
+                            title="Copy Username"
                           >
                             <Copy className="h-3 w-3" />
-                            <span>Copy</span>
                           </button>
                         </div>
+
+                        <span className="text-border/80">•</span>
+
+                        <span className="text-[11px] text-muted-foreground">
+                          Delivery: <span className="font-semibold text-foreground">SMS & WhatsApp</span>
+                        </span>
                       </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-border/30 pt-3 mt-1 flex-wrap">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingKot(terminal);
-                    setEditKotIdentifier(terminal.terminal_identifier || "");
-                    setEditKotUsername(terminal.username || `kot-${terminal.id}`);
-                    setEditKotPin(terminal.pin || "");
-                    setEditKotUserStatus("idle");
-                    setEditKotUserMessage("");
-                  }}
-                  className="h-8 text-xs font-bold gap-1"
-                >
-                  <KeyRound className="h-3 w-3 text-emerald-600" /> Edit Credentials
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleRegeneratePin(terminal.id)}
-                  className="h-8 text-xs font-bold"
-                >
-                  Regenerate PIN
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-
-        {kotTerminals.length === 0 && (
-          <div className="col-span-full py-12 text-center text-xs text-muted-foreground font-semibold bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl">
-            No KOT terminals provisioned. Ensure KOT Digital Tokens are allocated in your company plan.
-          </div>
-        )}
-      </div>
-
-      {/* Template Editors & Logs Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Template Editors */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* SMS Section */}
-          <div className={cn(
-            "panel p-5 space-y-4 border border-border/80 rounded-3xl",
-            isSmsActive ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-900/30 opacity-70"
-          )}>
-            <div className="flex items-center justify-between border-b border-border/20 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="h-8 w-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
-                  <MessageSquare className="h-4.5 w-4.5" />
-                </span>
-                <div>
-                  <span className="text-xs font-bold text-foreground block">SMS Alerts & Reminders</span>
-                  <span className="text-[10px] text-muted-foreground">Standard SMS delivery gateway</span>
-                </div>
-              </div>
-              <span className={cn(
-                "text-[8px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
-                isSmsActive ? "bg-emerald-500/10 text-emerald-500" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground/60"
-              )}>
-                {isSmsActive ? "Active" : "Inactive"}
-              </span>
-            </div>
-
-            {isSmsActive ? (
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                    SMS Template Message
-                  </Label>
-                  <textarea
-                    value={smsText}
-                    onChange={(e) => setSmsText(e.target.value)}
-                    className="w-full h-24 rounded-xl border border-border bg-accent/20 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="Enter SMS template..."
-                  />
-                  <div className="text-[9px] text-muted-foreground mt-2 space-y-1 bg-accent/5 p-2 rounded-xl">
-                    <p className="font-bold uppercase tracking-wider text-[8px]">Supported Template Variables:</p>
-                    <div className="grid grid-cols-2 gap-1 font-mono text-[8px] text-primary/80">
-                      <div>{`{customer_name}`}</div>
-                      <div>{`{token_number}`}</div>
-                      <div>{`{service_name}`}</div>
-                      <div>{`{desk_name}`}</div>
-                      <div>{`{position}`}</div>
-                      <div>{`{eta}`}</div>
-                      <div>{`{branch_name}`}</div>
-                      <div>{`{tracking_link}`}</div>
                     </div>
+                  </div>
+
+                  {/* Right: Actions, PIN Display & Controls */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* 4-Digit Access PIN Box */}
+                    <div className="flex items-center gap-2 bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-border/60">
+                      <div className="text-left">
+                        <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block leading-none">
+                          Access PIN
+                        </span>
+                        <span className="font-mono text-xs font-black text-foreground mt-0.5 block leading-none">
+                          {isPinVisible ? terminal.pin : "••••"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisiblePins(prev => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
+                        className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                        title={isPinVisible ? "Hide PIN" : "Show PIN"}
+                      >
+                        {isPinVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+
+                    {/* Launch Direct KOT Button */}
+                    <a
+                      href={terminalKotUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all shadow-emerald-600/20 cursor-pointer"
+                      title="Open dedicated KOT Check-In screen"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span>Open KOT</span>
+                    </a>
+
+                    {/* Copy Link Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const url = `${window.location.origin}${terminalKotUrl}`;
+                        navigator.clipboard.writeText(url);
+                        toast.success(`Copied direct URL for ${terminal.terminal_identifier}!`);
+                      }}
+                      className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                      title="Copy direct KOT link"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Copy Link</span>
+                    </Button>
+
+                    {/* Edit Credentials */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditingKot(terminal);
+                        setEditKotIdentifier(terminal.terminal_identifier || "");
+                        setEditKotUsername(terminal.username || `kot-${terminal.id}`);
+                        setEditKotPin(terminal.pin || "");
+                        setEditKotUserStatus("idle");
+                        setEditKotUserMessage("");
+                      }}
+                      className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                      title="Edit terminal name, username, and PIN"
+                    >
+                      <KeyRound className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Edit</span>
+                    </Button>
+
+                    {/* Regenerate PIN */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRegeneratePin(terminal.id)}
+                      className="h-8 px-2 text-xs font-semibold border-border/70"
+                      title="Generate new 4-digit PIN"
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                    </Button>
+
+                    {/* Close / Open KOT Toggle */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const nextStatus = isKotActive ? "inactive" : "active";
+                        try {
+                          await apiFetch(`/api/kot/terminals/${terminal.id}/`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ status: nextStatus }),
+                          });
+                          toast.success(
+                            nextStatus === "active"
+                              ? `KOT Terminal "${terminal.terminal_identifier}" opened and activated!`
+                              : `KOT Terminal "${terminal.terminal_identifier}" closed!`
+                          );
+                          fetchKotTerminals();
+                        } catch (err: any) {
+                          toast.error(err.message || "Failed to update terminal status.");
+                        }
+                      }}
+                      className={cn(
+                        "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
+                        isKotActive
+                          ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
+                          : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
+                      )}
+                      title={isKotActive ? "Close KOT terminal" : "Reopen KOT terminal"}
+                    >
+                      {isKotActive ? (
+                        <>
+                          <PowerOff className="h-3.5 w-3.5" />
+                          <span>Close KOT</span>
+                        </>
+                      ) : (
+                        <>
+                          <Power className="h-3.5 w-3.5" />
+                          <span>Open KOT</span>
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Delete KOT Terminal */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/50"
+                      onClick={async () => {
+                        if (confirm(`Are you sure you want to completely delete KOT terminal "${terminal.terminal_identifier}"?`)) {
+                          try {
+                            await apiFetch(`/api/kot/terminals/${terminal.id}/`, { method: "DELETE" });
+                            toast.success("KOT Terminal deleted successfully!");
+                            fetchKotTerminals();
+                          } catch (err: any) {
+                            toast.error(err.message || "Failed to delete KOT terminal.");
+                          }
+                        }
+                      }}
+                      title="Delete KOT terminal"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="text-xs text-muted-foreground py-4 text-center">
-                SMS delivery is not active. Enable it in the Plan & Usage settings.
-              </div>
-            )}
-          </div>
-
-          {/* WhatsApp Section */}
-          <div className={cn(
-            "panel p-5 space-y-4 border border-border/80 rounded-3xl",
-            isWhatsappActive ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-900/30 opacity-70"
-          )}>
-            <div className="flex items-center justify-between border-b border-border/20 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
-                  <MessageCircle className="h-4.5 w-4.5" />
-                </span>
-                <div>
-                  <span className="text-xs font-bold text-foreground block">WhatsApp Digital Tickets</span>
-                  <span className="text-[10px] text-muted-foreground">Official business notification channel</span>
-                </div>
-              </div>
-              <span className={cn(
-                "text-[8px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
-                isWhatsappActive ? "bg-emerald-500/10 text-emerald-500" : "bg-slate-200 dark:bg-slate-800 text-muted-foreground/60"
-              )}>
-                {isWhatsappActive ? "Active" : "Inactive"}
-              </span>
-            </div>
-
-            {isWhatsappActive ? (
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                    WhatsApp Message Template
-                  </Label>
-                  <textarea
-                    value={whatsappText}
-                    onChange={(e) => setWhatsappText(e.target.value)}
-                    className="w-full h-24 rounded-xl border border-border bg-accent/20 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="Enter WhatsApp template..."
-                  />
-                  <div className="text-[9px] text-muted-foreground mt-2 space-y-1 bg-accent/5 p-2 rounded-xl">
-                    <p className="font-bold uppercase tracking-wider text-[8px]">Supported Template Variables:</p>
-                    <div className="grid grid-cols-2 gap-1 font-mono text-[8px] text-primary/80">
-                      <div>{`{customer_name}`}</div>
-                      <div>{`{token_number}`}</div>
-                      <div>{`{service_name}`}</div>
-                      <div>{`{desk_name}`}</div>
-                      <div>{`{position}`}</div>
-                      <div>{`{eta}`}</div>
-                      <div>{`{branch_name}`}</div>
-                      <div>{`{tracking_link}`}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground py-4 text-center">
-                WhatsApp delivery is not active. Enable it in the Plan & Usage settings.
-              </div>
-            )}
-          </div>
+            );
+          })}
         </div>
+      )}
 
-        {/* Right Column: Previews & Logs */}
-        <div className="lg:col-span-5 space-y-6">
-          {/* Simulated Previews */}
-          <div className="panel p-5 space-y-4 border border-border/80 bg-accent/5 rounded-3xl">
-            <h5 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Live Mock Previews
-            </h5>
-            
-            {isSmsActive && (
-              <div className="space-y-1.5">
-                <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block">
-                  Simulated SMS Alert
-                </span>
-                <div className="bg-slate-100 dark:bg-slate-950 border border-border/40 p-3.5 rounded-2xl relative">
-                  <div className="flex items-center gap-1.5 text-[8px] text-muted-foreground font-black mb-1.5 uppercase tracking-wider border-b border-border/20 pb-1">
-                    <MessageSquare className="h-3 w-3" /> SMS Gateway Preview
+      {/* Modal: Add KOT Terminal */}
+      {isAddKotModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center shrink-0">
+                    <MessageSquare className="h-5 w-5" />
                   </div>
-                  <p className="text-[10px] text-foreground leading-normal font-mono select-none whitespace-pre-wrap">
-                    {smsText
-                      .replace("{customer_name}", "Harshil")
-                      .replace("{token_number}", "A304")
-                      .replace("{service_name}", "General Banking")
-                      .replace("{desk_name}", "Counter 01")
-                      .replace("{position}", "3")
-                      .replace("{eta}", "45")
-                      .replace("{branch_name}", branch.name)
-                      .replace("{tracking_link}", `${window.location.protocol}//${window.location.host}/track/mock-code`)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {isWhatsappActive && (
-              <div className="space-y-1.5 mt-4">
-                <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block">
-                  Simulated WhatsApp Bubble
-                </span>
-                <div className="bg-[#E5DDD5] dark:bg-[#0b141a] p-3.5 rounded-2xl relative border border-border/40">
-                  <div className="flex items-center gap-1.5 text-[8px] text-[#075e54] dark:text-[#00a884] font-black mb-1.5 uppercase tracking-wider border-b border-black/5 pb-1">
-                    <MessageCircle className="h-3 w-3" /> WhatsApp Business API
-                  </div>
-                  <div className="bg-white dark:bg-[#1f2c34] p-3 rounded-xl max-w-[85%] shadow-sm relative ml-1">
-                    <p className="text-[10px] text-foreground leading-normal font-mono select-none whitespace-pre-wrap">
-                      {whatsappText
-                        .replace("{customer_name}", "Harshil")
-                        .replace("{token_number}", "A304")
-                        .replace("{service_name}", "General Banking")
-                        .replace("{desk_name}", "Counter 01")
-                        .replace("{position}", "3")
-                        .replace("{eta}", "45")
-                        .replace("{branch_name}", branch.name)
-                        .replace("{tracking_link}", `${window.location.protocol}//${window.location.host}/track/mock-code`)}
-                    </p>
-                    <span className="text-[8px] text-muted-foreground/60 dark:text-muted-foreground/40 block mt-1 text-right">
-                      12:45 PM ✓✓
-                    </span>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">Add Digital KOT Terminal</h3>
+                    <p className="text-[11px] text-muted-foreground">{branch?.name}</p>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddKotModalOpen(false)}
+                  className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            )}
-          </div>
 
-          {/* Logs */}
-          <div className="panel p-5 space-y-4 border border-border/80 bg-background rounded-3xl">
-            <div className="flex items-center justify-between border-b border-border/20 pb-3">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                KOT Message Logs
-              </span>
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
-                Live Gateway
-              </span>
-            </div>
+              <form onSubmit={handleCreateKotTerminal} className="space-y-4" autoComplete="off">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Terminal Identifier Name *
+                  </Label>
+                  <Input
+                    type="text"
+                    value={newKotIdentifier}
+                    onChange={(e) => setNewKotIdentifier(e.target.value)}
+                    placeholder="e.g. KOT 1 or Lobby KOT Check-In"
+                    required
+                    autoComplete="off"
+                    className="mt-1 text-xs rounded-xl h-10 font-medium"
+                  />
+                </div>
 
-            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
-              {logs.map((log) => {
-                const isWaLog = log.channel === "whatsapp";
-                const isMock = log.status === "sent_mock";
-                const icon = isWaLog ? (
-                  <MessageCircle className="h-3.5 w-3.5 text-emerald-500" />
-                ) : (
-                  <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
-                );
-
-                return (
-                  <div key={log.id} className="p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-border/30 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {icon}
-                        <div>
-                          <span className="text-xs font-bold text-foreground block leading-none">
-                            {log.customer_name || "Visitor"}
-                          </span>
-                          <span className="text-[8px] text-muted-foreground block mt-1">
-                            Token: <strong className="text-foreground">{log.ticket_number}</strong> · Recipient: {log.recipient}
-                          </span>
-                        </div>
-                      </div>
-                      <span className={cn(
-                        "text-[8px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0",
-                        isMock
-                          ? "bg-blue-500/10 text-blue-500"
-                          : log.status === "delivered" || log.status === "sent"
-                          ? "bg-emerald-500/10 text-emerald-500"
-                          : "bg-red-500/10 text-red-500"
-                      )}>
-                        {isMock ? "Simulated ✓" : log.status}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Terminal Username *
+                    </Label>
+                    {addKotUserStatus === "checking" && (
+                      <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Checking...
                       </span>
-                    </div>
-                    <div className="bg-background/80 p-2 rounded-lg border border-border/20 text-[9px] text-muted-foreground font-mono leading-relaxed select-all">
-                      {log.message_body}
-                    </div>
-                    {log.error_message && (
-                      <p className="text-[8px] font-bold text-red-500">Error: {log.error_message}</p>
+                    )}
+                    {addKotUserStatus === "available" && (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Available
+                      </span>
+                    )}
+                    {addKotUserStatus === "taken" && (
+                      <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" /> Already taken
+                      </span>
+                    )}
+                    {addKotUserStatus === "invalid" && addKotUserMessage && (
+                      <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" /> {addKotUserMessage}
+                      </span>
                     )}
                   </div>
-                );
-              })}
-
-              {logs.length === 0 && (
-                <div className="text-center py-8 text-xs text-muted-foreground">
-                  No notifications have been dispatched for this branch yet.
+                  <Input
+                    type="text"
+                    value={newKotUsername}
+                    onChange={(e) => {
+                      setIsKotUserManuallyEdited(true);
+                      setNewKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
+                    }}
+                    placeholder="e.g. kot-1 or checkin-1"
+                    required
+                    autoComplete="off"
+                    className={`mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors ${
+                      addKotUserStatus === "available"
+                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                        : addKotUserStatus === "taken"
+                        ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                        : "text-emerald-600"
+                    }`}
+                  />
+                  {addKotUserStatus === "taken" ? (
+                    <p className="text-[10px] text-rose-500 font-medium mt-1">
+                      {addKotUserMessage}
+                    </p>
+                  ) : addKotUserStatus === "available" ? (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                      ✓ {addKotUserMessage}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Staff or operators enter this username along with PIN to unlock the KOT check-in screen.
+                    </p>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-      {/* Modal: Add KOT Terminal */}
-      {isAddKotModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-emerald-600" />
+
                 <div>
-                  <h3 className="text-base font-bold">Add Digital KOT Terminal</h3>
-                  <p className="text-[11px] text-muted-foreground">{branch.name}</p>
-                </div>
-              </div>
-              <button onClick={() => setIsAddKotModalOpen(false)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateKotTerminal} className="space-y-4">
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Identifier Name *</Label>
-                <Input
-                  type="text"
-                  value={newKotIdentifier}
-                  onChange={(e) => {
-                    setNewKotIdentifier(e.target.value);
-                  }}
-                  placeholder="e.g. KOT 1 or Lobby KOT"
-                  required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
-                  {addKotUserStatus === "checking" && (
-                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
-                    </span>
-                  )}
-                  {addKotUserStatus === "available" && (
-                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Available
-                    </span>
-                  )}
-                  {addKotUserStatus === "taken" && (
-                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                      <XCircle className="h-3 w-3" /> Already taken
-                    </span>
-                  )}
-                  {addKotUserStatus === "invalid" && addKotUserMessage && (
-                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> {addKotUserMessage}
-                    </span>
-                  )}
-                </div>
-                <Input
-                  type="text"
-                  value={newKotUsername}
-                  onChange={(e) => {
-                    setIsKotUserManuallyEdited(true);
-                    setNewKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
-                  }}
-                  placeholder="e.g. kot-1"
-                  required
-                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
-                    addKotUserStatus === "available"
-                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
-                      : addKotUserStatus === "taken"
-                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
-                      : "text-emerald-600"
-                  }`}
-                />
-                {addKotUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {addKotUserMessage}
-                  </p>
-                ) : addKotUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {addKotUserMessage}
-                  </p>
-                ) : (
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      4-Digit Access PIN *
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddKotPin(!showAddKotPin)}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {showAddKotPin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      <span>{showAddKotPin ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showAddKotPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    value={newKotPin}
+                    onChange={(e) => setNewKotPin(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="e.g. 1234"
+                    required
+                    autoComplete="new-password"
+                    className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest"
+                  />
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Unique login username for this KOT terminal screen.
+                    Generated automatically. You can change this to any 4-digit code.
                   </p>
-                )}
-              </div>
+                </div>
 
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{4}"
-                  maxLength={4}
-                  value={newKotPin}
-                  onChange={(e) => setNewKotPin(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="e.g. 1234"
-                  required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsAddKotModalOpen(false)}
-                  className="text-xs h-9"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isAddingTerminal || newKotPin.length !== 4 || !newKotUsername.trim() || addKotUserStatus === "taken" || addKotUserStatus === "checking" || addKotUserStatus === "invalid"}
-                  className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  {isAddingTerminal ? "Creating..." : "Create KOT Terminal"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddKotModalOpen(false)}
+                    className="text-xs h-9 cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isAddingTerminal ||
+                      newKotPin.length !== 4 ||
+                      !newKotUsername.trim() ||
+                      addKotUserStatus === "taken" ||
+                      addKotUserStatus === "checking" ||
+                      addKotUserStatus === "invalid"
+                    }
+                    className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    {isAddingTerminal ? "Creating..." : "Create Terminal"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Modal: Edit KOT Terminal Credentials */}
-      {editingKot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-5 w-5 text-emerald-600" />
-                <div>
-                  <h3 className="text-base font-bold">Edit KOT Credentials</h3>
-                  <p className="text-[11px] text-muted-foreground">{editingKot.terminal_identifier}</p>
+      {editingKot &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center shrink-0">
+                    <KeyRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">Edit KOT Credentials</h3>
+                    <p className="text-[11px] text-muted-foreground">{editingKot.terminal_identifier}</p>
+                  </div>
                 </div>
-              </div>
-              <button onClick={() => setEditingKot(null)} className="text-muted-foreground hover:text-foreground font-bold">
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateKotCredentials} className="space-y-4">
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Identifier Name *</Label>
-                <Input
-                  type="text"
-                  value={editKotIdentifier}
-                  onChange={(e) => setEditKotIdentifier(e.target.value)}
-                  required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terminal Username *</Label>
-                  {editKotUserStatus === "checking" && (
-                    <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Checking...
-                    </span>
-                  )}
-                  {editKotUserStatus === "available" && (
-                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Available
-                    </span>
-                  )}
-                  {editKotUserStatus === "taken" && (
-                    <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
-                      <XCircle className="h-3 w-3" /> Already taken
-                    </span>
-                  )}
-                  {editKotUserStatus === "invalid" && editKotUserMessage && (
-                    <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> {editKotUserMessage}
-                    </span>
-                  )}
-                </div>
-                <Input
-                  type="text"
-                  value={editKotUsername}
-                  onChange={(e) => setEditKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
-                  placeholder="e.g. kot-1"
-                  required
-                  className={`mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors ${
-                    editKotUserStatus === "available"
-                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
-                      : editKotUserStatus === "taken"
-                      ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
-                      : "text-emerald-600"
-                  }`}
-                />
-                {editKotUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {editKotUserMessage}
-                  </p>
-                ) : editKotUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {editKotUserMessage}
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Staff or operators enter this username along with PIN to unlock the KOT check-in screen.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4-Digit Access PIN *</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{4}"
-                  maxLength={4}
-                  value={editKotPin}
-                  onChange={(e) => setEditKotPin(e.target.value.replace(/[^0-9]/g, ''))}
-                  required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
+                <button
                   type="button"
-                  variant="outline"
                   onClick={() => setEditingKot(null)}
-                  className="text-xs h-9"
+                  className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSavingKotEdit || editKotPin.length !== 4 || !editKotUsername.trim() || editKotUserStatus === "taken" || editKotUserStatus === "checking" || editKotUserStatus === "invalid"}
-                  className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  {isSavingKotEdit ? "Saving..." : "Save Credentials"}
-                </Button>
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <form onSubmit={handleUpdateKotCredentials} className="space-y-4" autoComplete="off">
+                <div>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Terminal Identifier Name *
+                  </Label>
+                  <Input
+                    type="text"
+                    value={editKotIdentifier}
+                    onChange={(e) => setEditKotIdentifier(e.target.value)}
+                    required
+                    autoComplete="off"
+                    className="mt-1 text-xs rounded-xl h-10 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Terminal Username *
+                    </Label>
+                    {editKotUserStatus === "checking" && (
+                      <span className="text-[11px] font-medium text-amber-500 flex items-center gap-1 animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                      </span>
+                    )}
+                    {editKotUserStatus === "available" && (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Available
+                      </span>
+                    )}
+                    {editKotUserStatus === "taken" && (
+                      <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" /> Already taken
+                      </span>
+                    )}
+                    {editKotUserStatus === "invalid" && editKotUserMessage && (
+                      <span className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" /> {editKotUserMessage}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    type="text"
+                    value={editKotUsername}
+                    onChange={(e) => setEditKotUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                    placeholder="e.g. kot-1"
+                    required
+                    autoComplete="off"
+                    className={`mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors ${
+                      editKotUserStatus === "available"
+                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 focus-visible:ring-emerald-400"
+                        : editKotUserStatus === "taken"
+                        ? "border-rose-500 text-rose-600 dark:text-rose-400 focus-visible:ring-rose-400"
+                        : "text-emerald-600"
+                    }`}
+                  />
+                  {editKotUserStatus === "taken" ? (
+                    <p className="text-[10px] text-rose-500 font-medium mt-1">
+                      {editKotUserMessage}
+                    </p>
+                  ) : editKotUserStatus === "available" ? (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                      ✓ {editKotUserMessage}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Staff or operators enter this username along with PIN to unlock the KOT check-in screen.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      4-Digit Access PIN *
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowEditKotPin(!showEditKotPin)}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {showEditKotPin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      <span>{showEditKotPin ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showEditKotPin ? "text" : "password"}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    value={editKotPin}
+                    onChange={(e) => setEditKotPin(e.target.value.replace(/[^0-9]/g, ""))}
+                    required
+                    autoComplete="new-password"
+                    className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Passcode used by branch operators to unlock the KOT screen.
+                  </p>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditingKot(null)}
+                    className="text-xs h-9 cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isSavingKotEdit ||
+                      editKotPin.length !== 4 ||
+                      !editKotUsername.trim() ||
+                      editKotUserStatus === "taken" ||
+                      editKotUserStatus === "checking" ||
+                      editKotUserStatus === "invalid"
+                    }
+                    className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    {isSavingKotEdit ? "Saving..." : "Save Credentials"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
