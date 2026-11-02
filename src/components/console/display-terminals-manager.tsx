@@ -26,7 +26,13 @@ import {
   Tv,
   ArrowRight,
   Radio,
-  Play
+  Play,
+  RotateCw,
+  Info,
+  Sliders,
+  ChevronRight,
+  ShieldCheck,
+  CheckCircle
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -96,6 +102,9 @@ export function DisplayTerminalsManager({
   >("idle");
   const [editTerminalUserMessage, setEditTerminalUserMessage] = useState("");
   const [isSavingTerminalEdit, setIsSavingTerminalEdit] = useState(false);
+
+  // Regenerate Passcode loading indicator
+  const [regeneratingPinId, setRegeneratingPinId] = useState<string | null>(null);
 
   const displayBaseUrl =
     companySlug && branchSlug
@@ -183,6 +192,7 @@ export function DisplayTerminalsManager({
   };
 
   const handleRegeneratePasscode = async (terminalId: string) => {
+    setRegeneratingPinId(terminalId);
     try {
       const updated = await apiFetch(
         `/api/display-terminals/${terminalId}/regenerate-passcode/`,
@@ -190,10 +200,12 @@ export function DisplayTerminalsManager({
           method: "POST",
         }
       );
-      toast.success("Passcode regenerated successfully! Active sessions have been evicted.");
+      toast.success("New 4-digit PIN generated! Active TV sessions disconnected.");
       setTerminals((prev) => prev.map((t) => (t.id === terminalId ? updated : t)));
     } catch (err: any) {
       toast.error(err.message || "Failed to regenerate passcode.");
+    } finally {
+      setRegeneratingPinId(null);
     }
   };
 
@@ -214,7 +226,7 @@ export function DisplayTerminalsManager({
         ...prev,
         [terminalId]: { ...current, rotation_seconds: seconds },
       }));
-      toast.success(`Slide duration updated to ${seconds}s!`);
+      toast.success(`Slide duration updated to ${seconds}s.`);
       setTerminals((prev) => prev.map((t) => (t.id === terminalId ? updated : t)));
     } catch (err: any) {
       toast.error(err.message || "Failed to save timing settings.");
@@ -254,7 +266,7 @@ export function DisplayTerminalsManager({
           desk_ids: [],
         }),
       });
-      toast.success(`Slot #${nextOrder} created!`);
+      toast.success(`Slide #${nextOrder} created! Click desks below to assign.`);
       setSlots((prev) => [...prev, newSlot]);
     } catch (err: any) {
       toast.error(err.message || "Failed to add rotation slot.");
@@ -265,7 +277,7 @@ export function DisplayTerminalsManager({
     try {
       await apiFetch(`/api/display-slots/${slotId}/`, { method: "DELETE" });
       setSlots((prev) => prev.filter((s) => s.id !== slotId));
-      toast.success("Rotation slot deleted.");
+      toast.success("Rotation slide deleted.");
     } catch (err: any) {
       toast.error(err.message || "Failed to delete slot.");
     }
@@ -298,7 +310,7 @@ export function DisplayTerminalsManager({
         body: JSON.stringify({ desk_ids: allDeskIds }),
       });
       setSlots((prev) => prev.map((s) => (s.id === slot.id ? updated : s)));
-      toast.success(`Assigned all ${allDeskIds.length} desks to Slot #${slot.order}.`);
+      toast.success(`Assigned all ${allDeskIds.length} desks to Slide #${slot.order}.`);
     } catch (err: any) {
       toast.error(err.message || "Failed to assign all desks.");
     }
@@ -311,7 +323,7 @@ export function DisplayTerminalsManager({
         body: JSON.stringify({ desk_ids: [] }),
       });
       setSlots((prev) => prev.map((s) => (s.id === slot.id ? updated : s)));
-      toast.success(`Cleared all desks from Slot #${slot.order}.`);
+      toast.success(`Cleared all desks from Slide #${slot.order}.`);
     } catch (err: any) {
       toast.error(err.message || "Failed to clear slot.");
     }
@@ -407,7 +419,7 @@ export function DisplayTerminalsManager({
     }
 
     setAddTerminalUserStatus("checking");
-    setAddTerminalUserMessage("Checking availability in database...");
+    setAddTerminalUserMessage("Verifying availability...");
     const timer = setTimeout(async () => {
       try {
         const res = await apiFetch(
@@ -418,7 +430,7 @@ export function DisplayTerminalsManager({
           setAddTerminalUserMessage(res.message || "Username is available!");
         } else {
           setAddTerminalUserStatus("taken");
-          setAddTerminalUserMessage(res.message || "Username already taken.");
+          setAddTerminalUserMessage(res.message || "Username already in use.");
         }
       } catch (err: any) {
         setAddTerminalUserStatus("invalid");
@@ -454,7 +466,7 @@ export function DisplayTerminalsManager({
     }
 
     setEditTerminalUserStatus("checking");
-    setEditTerminalUserMessage("Checking availability in database...");
+    setEditTerminalUserMessage("Verifying availability...");
     const timer = setTimeout(async () => {
       try {
         const res = await apiFetch(
@@ -602,160 +614,212 @@ export function DisplayTerminalsManager({
 
   if (loading) {
     return (
-      <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#5B50EB] border-t-transparent" />
-        <p className="text-xs text-muted-foreground font-semibold">Loading display terminals & desks...</p>
+      <div className="p-16 text-center flex flex-col items-center justify-center gap-3">
+        <div className="animate-spin rounded-full h-9 w-9 border-2 border-[#5B50EB] border-t-transparent" />
+        <p className="text-xs text-muted-foreground font-semibold">Loading display terminals & configuration...</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Top Header Row with Quota & Action Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/40 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-black text-foreground">
-              Live Display Screens ({terminals.length})
+      {/* ── Top Header Row with Clear Actions & Plan Quota ── */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border/40 pb-5">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className="text-lg font-black text-foreground tracking-tight flex items-center gap-2">
+              <Tv className="h-5 w-5 text-[#5B50EB]" />
+              Live Display Screens
             </h2>
+            <span className="text-xs font-bold bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-2.5 py-0.5 rounded-full border border-[#5B50EB]/20">
+              {terminals.length} {terminals.length === 1 ? "Screen" : "Screens"}
+            </span>
             {isQuotaReached && (
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-900/50">
+              <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-0.5 rounded-full border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
                 Plan Limit Reached
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Configure multi-desk rotation slots, slide duration, and secure PIN credentials for TV displays.
+          <p className="text-xs text-muted-foreground">
+            Configure TV boards for waiting areas, multi-counter rotation slides, cycle intervals, and secure PIN passcodes.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
           {/* Plan Quota Pill */}
-          <span className="text-xs text-muted-foreground bg-accent/20 px-3 py-1.5 rounded-xl border border-border/40 font-bold shrink-0 flex items-center gap-1.5">
-            <Monitor className="h-3.5 w-3.5 text-primary" />
-            <span>
-              Screens Allocated: <strong className="text-foreground">{activeTerminalsCount}</strong> / {effectivePurchasedDisplays}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 border border-border/60 text-xs font-semibold">
+            <span className="text-muted-foreground">Screens Quota:</span>
+            <span className="font-bold text-foreground">
+              {activeTerminalsCount} / {effectivePurchasedDisplays}
             </span>
-          </span>
+            {isQuotaReached && setView && (
+              <button
+                type="button"
+                onClick={() => setView("billing")}
+                className="text-[11px] text-[#5B50EB] hover:text-[#4d42db] font-bold underline underline-offset-2 ml-1"
+              >
+                Get More
+              </button>
+            )}
+          </div>
 
-          {/* Upsell button if quota reached */}
-          {isQuotaReached && setView && (
+          {/* Primary Action Button */}
+          {isQuotaReached ? (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setView("billing")}
-              className="h-8 gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 shadow-xs shrink-0"
+              onClick={() => {
+                if (setView) setView("billing");
+                else handleOpenAddTerminal();
+              }}
+              className="h-9 gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 shadow-xs"
             >
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Upgrade Plan
+              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+              Upgrade Plan
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleOpenAddTerminal}
+              className="h-9 gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-sm shadow-[#5B50EB]/25"
+            >
+              <Plus className="h-4 w-4" />
+              Add Display Screen
             </Button>
           )}
 
-          {/* Add Screen Button as per plan */}
-          <Button
-            variant={isQuotaReached ? "outline" : "brand"}
-            size="sm"
-            onClick={handleOpenAddTerminal}
-            className={cn(
-              "h-8 gap-1.5 text-xs font-bold shrink-0",
-              !isQuotaReached && "shadow-md shadow-brand/10 bg-[#5B50EB] hover:bg-[#4d42db] text-white"
-            )}
-          >
-            {isQuotaReached ? (
-              <>
-                <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Buy More Screens
-              </>
-            ) : (
-              <>
-                <Plus className="h-3.5 w-3.5" /> Add Display Screen
-              </>
-            )}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsAddDeskOpen(true)}
-            className="h-8 gap-1.5 text-xs font-bold border-border/70 shrink-0"
-          >
-            <PlusCircle className="h-3.5 w-3.5 text-slate-500" /> Add Counter Desk
-          </Button>
-
+          {/* Direct Launch TV Board */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => window.open(displayBaseUrl, "_blank")}
-            className="h-8 gap-1.5 text-xs font-bold border-border/70 shrink-0 text-foreground hover:bg-accent/30"
+            className="h-9 gap-1.5 text-xs font-bold border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850"
+            title="Open the general waiting area display board in a new tab"
           >
-            <ExternalLink className="h-3.5 w-3.5 text-indigo-500" /> Launch Display
+            <ExternalLink className="h-3.5 w-3.5 text-[#5B50EB]" />
+            Launch TV Board
           </Button>
         </div>
       </div>
 
-      {/* Top 4 KPI Metrics Cards Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── High-End SaaS Metric Cards ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Screens */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">
-            Screens
-          </span>
-          <span className="text-base font-black text-foreground block mt-0.5">
-            {terminals.length}
-          </span>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Total Screens
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-foreground tracking-tight">
+                {terminals.length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                / {effectivePurchasedDisplays} allowed
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {activeTerminalsCount} active display terminal{activeTerminalsCount === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+            <Tv className="h-5 w-5" />
+          </div>
         </div>
 
-        {/* Card 2: Connected Live */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">
-            Online / Broadcasting
-          </span>
-          <div className="flex items-center justify-center gap-1.5 mt-0.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-base font-black text-emerald-500 leading-none">
-              {liveCount}
+        {/* Card 2: Live Broadcasting */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Live Broadcasting
             </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                {liveCount}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                on-air now
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{liveCount > 0 ? "Real-time TV sessions active" : "No active TV sessions"}</span>
+            </div>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <Radio className="h-5 w-5" />
           </div>
         </div>
 
         {/* Card 3: Standby / Locked */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">
-            Standby / Locked
-          </span>
-          <span className="text-base font-black text-muted-foreground block mt-0.5">
-            {standbyCount}
-          </span>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Standby / Ready
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-foreground tracking-tight">
+                {standbyCount}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                screens
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Ready to unlock with PIN code
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 flex items-center justify-center shrink-0">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
         </div>
 
         {/* Card 4: Desks In Rotation */}
-        <div className="bg-white dark:bg-slate-900 border border-border/50 shadow-soft rounded-3xl p-4 text-center">
-          <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-widest block">
-            Desks In Rotation
-          </span>
-          <span className="text-base font-black text-[#5B50EB] block mt-0.5">
-            {uniqueDesksInRotation.length} / {activeDesksList.length}
-          </span>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-2xs hover:shadow-soft transition-all">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+              Desks Coverage
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-[#5B50EB] tracking-tight">
+                {uniqueDesksInRotation.length}
+              </span>
+              <span className="text-xs text-muted-foreground font-semibold">
+                / {activeDesksList.length} desks
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {uniqueDesksInRotation.length === activeDesksList.length && activeDesksList.length > 0
+                ? "100% of branch desks covered"
+                : `${activeDesksList.length - uniqueDesksInRotation.length} unassigned desks`}
+            </p>
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-[#5B50EB] flex items-center justify-center shrink-0">
+            <Layers className="h-5 w-5" />
+          </div>
         </div>
       </div>
 
-      {/* Main Terminal List */}
+      {/* ── Main Display Screens List ── */}
       {terminals.length === 0 ? (
         <div className="border border-dashed border-border/80 rounded-3xl p-12 text-center space-y-4 bg-slate-50/50 dark:bg-slate-900/30">
-          <div className="h-14 w-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-sm">
-            <Tv className="h-7 w-7" />
+          <div className="h-16 w-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center mx-auto shadow-sm">
+            <Tv className="h-8 w-8" />
           </div>
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-foreground">No Live Display Screens Provisioned</h3>
-            <p className="text-xs text-muted-foreground max-w-md mx-auto">
-              Live display terminals rotate through assigned counter desks on TV screens in your customer waiting area. Click below to provision your screen.
+          <div className="space-y-1.5 max-w-md mx-auto">
+            <h3 className="text-base font-bold text-foreground">No Live Display Screens Provisioned</h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Live display terminals rotate through assigned counter desks on TV screens in your customer waiting area. Click below to provision your first screen.
             </p>
           </div>
           <Button
             size="sm"
             onClick={handleOpenAddTerminal}
             disabled={isProvisioning}
-            className="gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-md shadow-brand/10"
+            className="gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-md shadow-[#5B50EB]/20 h-9 px-4"
           >
-            <Plus className="h-3.5 w-3.5" /> Provision Live Display Screen
+            <Plus className="h-4 w-4" /> Provision Live Display Screen
           </Button>
         </div>
       ) : (
@@ -781,27 +845,34 @@ export function DisplayTerminalsManager({
                 ? `/${companySlug}/branches/${branchSlug}/display?terminal=${encodeURIComponent(terminalSlug)}`
                 : `/display?terminal=${encodeURIComponent(terminalSlug)}`;
 
+            const totalCycleSeconds = termSlots.length * timing.rotation_seconds;
+
             return (
               <div
                 key={term.id}
-                className="bg-white dark:bg-slate-900 border border-border/60 shadow-soft rounded-3xl p-5 sm:p-6 space-y-6 hover:border-border transition-all"
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-sm hover:shadow-md transition-all"
               >
-                {/* Terminal Header Row */}
+                {/* ── Screen Header: Identity & Top Controls ── */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
-                  <div className="flex items-start sm:items-center gap-3.5">
-                    {/* TV / Monitor Illustration Avatar */}
-                    <div className="h-12 w-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200/50 dark:border-indigo-900/50">
-                      <Tv className="h-6 w-6" />
+                  {/* Left: Device Avatar & Metadata */}
+                  <div className="flex items-start sm:items-center gap-4">
+                    <div className="relative">
+                      <div className="h-14 w-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center shrink-0 border border-indigo-200/60 dark:border-indigo-900/50 shadow-2xs">
+                        <Tv className="h-7 w-7" />
+                      </div>
+                      {term.is_logged_in && (
+                        <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900 animate-pulse" />
+                      )}
                     </div>
 
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-black text-base text-foreground truncate">
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="font-black text-base sm:text-lg text-foreground tracking-tight">
                           {term.terminal_identifier}
                         </h3>
                         <span
                           className={cn(
-                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider",
+                            "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                             term.status === "active"
                               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
                               : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
@@ -815,96 +886,96 @@ export function DisplayTerminalsManager({
                           />
                           {term.status}
                         </span>
+
+                        {term.is_logged_in ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40">
+                            <Radio className="h-3 w-3 animate-pulse" />
+                            Broadcasting Live on TV
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground font-medium bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
+                            Standby (Ready to connect)
+                          </span>
+                        )}
                       </div>
 
-                      <div className="flex items-center gap-2 flex-wrap text-xs">
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          Terminal: DSP-0{idx + 1}
+                      <div className="flex items-center gap-3 flex-wrap text-xs">
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          ID: DSP-0{idx + 1}
                         </span>
-                        <span className="text-[10px] bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-2 py-0.5 rounded-md font-mono font-bold flex items-center gap-1">
-                          @{term.username || `display-${term.id}`}
+
+                        <span className="text-border/80">•</span>
+
+                        {/* Username Pill with 1-click Copy */}
+                        <div className="flex items-center gap-1 bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-bold">
+                          <span>@{term.username || `display-${term.id}`}</span>
                           <button
                             type="button"
                             onClick={() => {
                               navigator.clipboard.writeText(term.username || `display-${term.id}`);
                               toast.success(`Copied username @${term.username || `display-${term.id}`}`);
                             }}
-                            className="text-indigo-400 hover:text-indigo-600 dark:hover:text-white ml-0.5"
+                            className="text-indigo-400 hover:text-indigo-700 dark:hover:text-white p-0.5"
                             title="Copy Username"
                           >
-                            <Copy className="h-2.5 w-2.5" />
+                            <Copy className="h-3 w-3" />
                           </button>
-                        </span>
-
-                        <span className="text-border/80">•</span>
-
-                        {/* Session State Badge */}
-                        <div className="flex items-center gap-1.5">
-                          {term.is_logged_in ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Broadcasting Live
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground font-medium">
-                              Standby (Locked)
-                            </span>
-                          )}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Right Header Actions: Passcode Pill & Button Group */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Passcode Box */}
-                    <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-850 px-3 py-1.5 rounded-2xl border border-border/50">
-                      <div className="text-left pr-1">
-                        <span className="text-[8px] font-extrabold uppercase tracking-widest text-muted-foreground block">
-                          4-Digit PIN
+                  {/* Right: Actions, PIN Display & Edit Options */}
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    {/* 4-Digit PIN Box */}
+                    <div className="flex items-center gap-2 bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-border/60">
+                      <div className="text-left">
+                        <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block leading-none">
+                          Access PIN
                         </span>
-                        <span className="font-mono text-xs font-black text-foreground">
+                        <span className="font-mono text-xs font-black text-foreground mt-0.5 block leading-none">
                           {isPasscodeVisible ? term.passcode : "••••"}
                         </span>
                       </div>
                       <button
                         type="button"
                         onClick={() => togglePasscode(term.id)}
-                        className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                        className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ml-1"
                         title={isPasscodeVisible ? "Hide PIN" : "Show PIN"}
                       >
                         {isPasscodeVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                       </button>
                     </div>
 
-                    {/* Direct Link Open & Copy */}
-                    <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-850 px-2 py-1 rounded-2xl border border-border/50">
-                      <a
-                        href={singleDisplayUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-[#5B50EB] hover:text-[#4d42db] font-bold px-2 py-1 flex items-center gap-1 hover:underline"
-                        title="Open direct display screen in new window"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        <span>Open Screen</span>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const url = `${window.location.origin}${singleDisplayUrl}`;
-                          navigator.clipboard.writeText(url);
-                          toast.success(`Copied direct URL for ${term.terminal_identifier}!`);
-                        }}
-                        className="text-xs text-muted-foreground hover:text-foreground font-semibold px-2 py-1 flex items-center gap-1"
-                        title="Copy direct display link"
-                      >
-                        <Copy className="h-3 w-3" />
-                        <span>Copy</span>
-                      </button>
-                    </div>
+                    {/* Launch Direct Screen Button */}
+                    <a
+                      href={singleDisplayUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-8 px-3 rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors"
+                      title="Open dedicated TV screen view"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span>Open Screen</span>
+                    </a>
 
-                    {/* Edit Credentials Button */}
+                    {/* Copy Link Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const url = `${window.location.origin}${singleDisplayUrl}`;
+                        navigator.clipboard.writeText(url);
+                        toast.success(`Copied direct URL for ${term.terminal_identifier}!`);
+                      }}
+                      className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                      title="Copy direct display link"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Copy Link</span>
+                    </Button>
+
+                    {/* Edit Credentials */}
                     <Button
                       variant="outline"
                       size="sm"
@@ -916,218 +987,169 @@ export function DisplayTerminalsManager({
                         setEditTerminalUserStatus("idle");
                         setEditTerminalUserMessage("");
                       }}
-                      className="h-8 gap-1.5 text-xs font-bold border-border/70"
+                      className="h-8 px-2.5 text-xs font-semibold border-border/70"
+                      title="Edit screen name, username, and PIN"
                     >
-                      <KeyRound className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
+                      <KeyRound className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
                       <span>Edit</span>
                     </Button>
 
-                    {/* Regenerate PIN Button */}
+                    {/* Regenerate PIN */}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleRegeneratePasscode(term.id)}
-                      className="h-8 gap-1 text-xs font-bold border-border/70"
+                      disabled={regeneratingPinId === term.id}
+                      className="h-8 px-2 text-xs font-semibold border-border/70"
                       title="Generate new 4-digit PIN and disconnect previous sessions"
                     >
-                      <RefreshCw className="h-3 w-3" />
-                      <span>Regen PIN</span>
+                      {regeneratingPinId === term.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCw className="h-3.5 w-3.5" />
+                      )}
                     </Button>
 
-                    {/* Delete Screen Button */}
+                    {/* Delete Screen */}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setTerminalToDelete(term)}
-                      className="h-8 gap-1 text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/50"
-                      title="Permanently remove this live display screen"
+                      className="h-8 px-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-rose-200 dark:border-rose-900/50"
+                      title="Delete this screen"
                     >
-                      <Trash2 className="h-3 w-3" />
-                      <span>Delete</span>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
 
-                {/* Timing Controls & Live Stepper Preview */}
-                <div className="grid gap-4 lg:grid-cols-12 items-stretch">
-                  {/* Left: Timing Duration Picker (5 cols) */}
-                  <div className="lg:col-span-5 bg-slate-50/70 dark:bg-slate-850 p-4 rounded-2xl border border-border/40 space-y-3 flex flex-col justify-between">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5 text-[#5B50EB]" /> Slide Display Duration
-                        </Label>
-                        <span className="text-[11px] font-mono font-bold text-foreground bg-white dark:bg-slate-800 px-2 py-0.5 rounded-md border border-border/50">
-                          {timing.rotation_seconds}s
-                        </span>
-                      </div>
+                {/* ── Unified Slide Show Presentation & Rotation Schedule ── */}
+                <div className="space-y-4">
+                  {/* Rotation Controls Bar */}
+                  <div className="bg-slate-50/80 dark:bg-slate-850/80 p-4 rounded-2xl border border-border/50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    {/* Slide Duration Picker */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Label className="text-xs font-bold text-foreground flex items-center gap-1.5 shrink-0">
+                        <Clock className="h-4 w-4 text-[#5B50EB]" /> Slide Interval:
+                      </Label>
 
-                      {/* Quick Preset Pills */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                        {[5, 10, 15, 20, 30, 45, 60].map((preset) => (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {[5, 10, 15, 20, 30].map((preset) => (
                           <button
                             key={preset}
                             type="button"
                             onClick={() => handleSaveTiming(term.id, preset)}
+                            disabled={savingTiming[term.id]}
                             className={cn(
-                              "px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all border",
+                              "px-3 py-1 rounded-xl text-xs font-bold transition-all border",
                               timing.rotation_seconds === preset
                                 ? "bg-[#5B50EB] text-white border-[#5B50EB] shadow-xs"
-                                : "bg-white dark:bg-slate-800 text-muted-foreground border-border/60 hover:text-foreground hover:border-primary/40"
+                                : "bg-white dark:bg-slate-800 text-muted-foreground border-border/60 hover:text-foreground hover:border-[#5B50EB]/40"
                             )}
                           >
-                            {preset}s
+                            {preset}s {preset === 10 && <span className="text-[10px] opacity-80">(Standard)</span>}
                           </button>
                         ))}
                       </div>
+
+                      {/* Custom Seconds Input */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative w-20">
+                          <Input
+                            type="number"
+                            min={3}
+                            max={180}
+                            value={timing.rotation_seconds}
+                            onChange={(e) =>
+                              setTimingSettings((prev) => ({
+                                ...prev,
+                                [term.id]: {
+                                  ...timing,
+                                  rotation_seconds: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="h-8 text-xs font-bold pr-7 rounded-xl"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground font-bold pointer-events-none">
+                            s
+                          </span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSaveTiming(term.id)}
+                          disabled={savingTiming[term.id]}
+                          className="h-8 text-xs font-bold rounded-xl"
+                        >
+                          {savingTiming[term.id] ? "Saving..." : "Save"}
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="pt-2 border-t border-border/30 flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <Input
-                          type="number"
-                          min={3}
-                          max={180}
-                          value={timing.rotation_seconds}
-                          onChange={(e) =>
-                            setTimingSettings((prev) => ({
-                              ...prev,
-                              [term.id]: {
-                                ...timing,
-                                rotation_seconds: Number(e.target.value),
-                              },
-                            }))
-                          }
-                          className="h-8 text-xs font-bold pr-8"
-                        />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground font-bold pointer-events-none">
-                          sec
-                        </span>
-                      </div>
+                    {/* Summary Loop Indicator & Add Slide CTA */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      {termSlots.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground bg-white dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-border/50">
+                          <RotateCw className="h-3.5 w-3.5 text-[#5B50EB] animate-spin-slow" />
+                          <span>
+                            {termSlots.length} Slide{termSlots.length === 1 ? "" : "s"} • {totalCycleSeconds}s Loop
+                          </span>
+                        </div>
+                      )}
+
                       <Button
                         size="sm"
-                        onClick={() => handleSaveTiming(term.id)}
-                        disabled={savingTiming[term.id]}
-                        className="h-8 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shrink-0"
+                        onClick={() => handleAddSlot(term.id)}
+                        className="h-8 gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white rounded-xl shadow-xs"
                       >
-                        {savingTiming[term.id] ? "Saving..." : "Save Timing"}
+                        <Plus className="h-3.5 w-3.5" /> Add Slide
                       </Button>
                     </div>
                   </div>
 
-                  {/* Right: Live Rotation Stepper / Flow Visualizer (7 cols) */}
-                  <div className="lg:col-span-7 bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/50 dark:border-indigo-900/40 p-4 rounded-2xl flex flex-col justify-between space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5">
-                        <Radio className="h-3 w-3 animate-pulse" /> Live Rotation Flow
-                      </span>
-                      <span className="text-[10px] text-muted-foreground font-medium">
-                        Rotates every {timing.rotation_seconds}s per slot in infinite loop
-                      </span>
-                    </div>
-
-                    {termSlots.length === 0 ? (
-                      <div className="py-4 text-center">
-                        <p className="text-xs font-semibold text-muted-foreground">
-                          No rotation slots configured yet. Display board will broadcast all active branch desks together.
+                  {/* ── Slide Cards or Default Continuous Mode ── */}
+                  {termSlots.length === 0 ? (
+                    <div className="p-6 rounded-2xl border border-dashed border-border/80 bg-slate-50/40 dark:bg-slate-900/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1 max-w-xl">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <h4 className="text-xs font-bold text-foreground">
+                            Standard Continuous Mode (No slide rotation)
+                          </h4>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          This display screen is currently showing all <strong>{activeDesksList.length} active counter desks</strong> simultaneously in real time. If your branch has multiple desks that don't fit on one screen, click <strong>"+ Add Slide"</strong> to split desks across rotating slides.
                         </p>
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none">
-                        {termSlots.map((s, idx) => {
-                          const deskIds = (s.desk_ids || (s.desks || [])).map(String);
-                          const assignedDesks = activeDesksList.filter((d) =>
-                            deskIds.includes(String(d.id))
-                          );
 
-                          return (
-                            <div key={s.id} className="flex items-center gap-2 shrink-0">
-                              <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 rounded-xl p-2.5 shadow-2xs min-w-[130px] space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black text-[#5B50EB]">
-                                    Slot #{idx + 1}
-                                  </span>
-                                  <span className="text-[9px] font-bold text-muted-foreground bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded">
-                                    {timing.rotation_seconds}s
-                                  </span>
-                                </div>
-                                <div className="text-[11px] font-semibold text-foreground truncate">
-                                  {assignedDesks.length > 0
-                                    ? assignedDesks.map((d) => d.label || d.name).join(", ")
-                                    : "No desks"}
-                                </div>
-                              </div>
-                              {idx < termSlots.length - 1 && (
-                                <ArrowRight className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                              )}
-                            </div>
-                          );
-                        })}
-                        {/* Loop Indicator */}
-                        <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 pl-1 shrink-0">
-                          <RefreshCw className="h-3 w-3" />
-                          <span>Loop</span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="text-[10px] text-muted-foreground flex items-center justify-between pt-1 border-t border-indigo-200/40 dark:border-indigo-900/30">
-                      <span>Total cycle time: <strong>{termSlots.length * timing.rotation_seconds}s</strong></span>
-                      <span>{termSlots.length} slot{termSlots.length === 1 ? "" : "s"} configured</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Configured Rotation Slots Section */}
-                <div className="space-y-4 pt-1">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <Layers className="h-3.5 w-3.5 text-[#5B50EB]" /> Configured Rotation Slots ({termSlots.length})
-                      </h4>
-                      <p className="text-[11px] text-muted-foreground">
-                        Assign counter desks to display together during each rotation step.
-                      </p>
-                    </div>
-
-                    <Button
-                      size="sm"
-                      onClick={() => handleAddSlot(term.id)}
-                      className="h-8 gap-1.5 text-xs font-bold bg-[#5B50EB] hover:bg-[#4d42db] text-white shadow-xs"
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Add Rotation Slot
-                    </Button>
-                  </div>
-
-                  {termSlots.length === 0 ? (
-                    <div className="text-center py-8 border border-dashed border-border/70 rounded-2xl text-xs text-muted-foreground space-y-2 bg-slate-50/30 dark:bg-slate-900/20">
-                      <p>No custom rotation slots configured for {term.terminal_identifier}.</p>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handleAddSlot(term.id)}
-                        className="h-8 text-xs font-bold gap-1"
+                        className="h-8 text-xs font-bold gap-1.5 border-[#5B50EB]/30 text-[#5B50EB] hover:bg-[#5B50EB]/10 shrink-0 rounded-xl"
                       >
-                        <Plus className="h-3.5 w-3.5" /> Create First Slot
+                        <Plus className="h-3.5 w-3.5" /> Enable Multi-Slide Rotation
                       </Button>
                     </div>
                   ) : (
-                    <div className="grid gap-3.5">
+                    <div className="space-y-3">
                       {termSlots.map((slot, slotIdx) => {
                         const assignedDeskIds = (slot.desk_ids || (slot.desks || [])).map(String);
 
                         return (
                           <div
                             key={slot.id}
-                            className="p-4 sm:p-5 border border-border/70 rounded-2xl bg-slate-50/50 dark:bg-slate-900/40 space-y-3.5 shadow-2xs"
+                            className="p-4 sm:p-5 border border-border/70 rounded-2xl bg-white dark:bg-slate-850 space-y-3.5 shadow-2xs hover:border-[#5B50EB]/40 transition-colors"
                           >
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/40 pb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-black bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-2.5 py-1 rounded-xl">
-                                  Slot #{slotIdx + 1}
+                            {/* Slide Bar Header */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-border/40 pb-3">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xs font-black bg-[#5B50EB]/10 text-[#5B50EB] dark:text-indigo-400 px-3 py-1 rounded-xl">
+                                  Slide #{slotIdx + 1}
                                 </span>
                                 <span className="text-xs text-muted-foreground font-medium">
-                                  {assignedDeskIds.length} desk{assignedDeskIds.length === 1 ? "" : "s"} assigned
+                                  Showing {assignedDeskIds.length} of {activeDesksList.length} desks ({timing.rotation_seconds}s)
                                 </span>
                               </div>
 
@@ -1136,17 +1158,17 @@ export function DisplayTerminalsManager({
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleSelectAllDesksForSlot(slot)}
-                                  className="h-7 text-[11px] font-bold text-[#5B50EB] hover:text-[#4d42db] hover:bg-[#5B50EB]/10 gap-1 px-2"
+                                  className="h-7 text-[11px] font-bold text-[#5B50EB] hover:text-[#4d42db] hover:bg-[#5B50EB]/10 gap-1 px-2.5 rounded-lg"
                                 >
-                                  <CheckSquare className="h-3 w-3" /> Select All
+                                  <CheckSquare className="h-3.5 w-3.5" /> Select All
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleClearDesksForSlot(slot)}
-                                  className="h-7 text-[11px] font-bold text-muted-foreground hover:text-foreground gap-1 px-2"
+                                  className="h-7 text-[11px] font-bold text-muted-foreground hover:text-foreground gap-1 px-2.5 rounded-lg"
                                 >
-                                  <Square className="h-3 w-3" /> Clear
+                                  <Square className="h-3.5 w-3.5" /> Clear
                                 </Button>
 
                                 <div className="h-3.5 w-px bg-border/60 mx-1" />
@@ -1154,48 +1176,48 @@ export function DisplayTerminalsManager({
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground rounded-lg"
                                   disabled={slotIdx === 0}
                                   onClick={() => handleReorderSlot(slot, "up", termSlots)}
-                                  title="Move slot up"
+                                  title="Move slide up"
                                 >
                                   <ArrowUp className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground rounded-lg"
                                   disabled={slotIdx === termSlots.length - 1}
                                   onClick={() => handleReorderSlot(slot, "down", termSlots)}
-                                  title="Move slot down"
+                                  title="Move slide down"
                                 >
                                   <ArrowDown className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                                  className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg"
                                   onClick={() => handleDeleteSlot(slot.id)}
-                                  title="Delete slot"
+                                  title="Delete this slide"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
                             </div>
 
-                            {/* Desk Chips Selection */}
+                            {/* Desks Selection Chips */}
                             <div className="space-y-2">
-                              <Label className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
-                                Click Desks to Assign to Slot #{slotIdx + 1}:
-                              </Label>
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                                Assign Counter Desks to Display on Slide #{slotIdx + 1}:
+                              </span>
 
                               {activeDesksList.length === 0 ? (
                                 <div className="p-3.5 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs flex items-center justify-between gap-3">
-                                  <span>No counter desks found. Create desks to assign them to rotation slots.</span>
+                                  <span>No counter desks found in this branch. Create a desk to assign it to this slide.</span>
                                   <Button
                                     size="sm"
                                     onClick={() => setIsAddDeskOpen(true)}
-                                    className="h-7 text-xs font-bold gap-1 bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+                                    className="h-7 text-xs font-bold gap-1 bg-amber-600 hover:bg-amber-700 text-white shrink-0 rounded-lg"
                                   >
                                     <Plus className="h-3 w-3" /> Create Desk
                                   </Button>
@@ -1211,21 +1233,21 @@ export function DisplayTerminalsManager({
                                         type="button"
                                         onClick={() => handleToggleDeskInSlot(slot, String(d.id))}
                                         className={cn(
-                                          "px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 shadow-2xs select-none",
+                                          "px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 select-none shadow-2xs",
                                           isAssigned
-                                            ? "bg-[#5B50EB] border-[#5B50EB] text-white shadow-[#5B50EB]/20 scale-[1.01]"
-                                            : "bg-white dark:bg-slate-800 border-border/80 text-muted-foreground hover:text-foreground hover:border-[#5B50EB]/50"
+                                            ? "bg-[#5B50EB] border-[#5B50EB] text-white shadow-xs scale-[1.01]"
+                                            : "bg-slate-50 dark:bg-slate-800 border-border/80 text-muted-foreground hover:text-foreground hover:border-[#5B50EB]/50"
                                         )}
                                       >
                                         <span
                                           className={cn(
-                                            "h-3.5 w-3.5 rounded-md flex items-center justify-center border text-[9px] shrink-0 transition-all",
+                                            "h-4 w-4 rounded-md flex items-center justify-center border text-[10px] shrink-0 transition-all",
                                             isAssigned
                                               ? "bg-white text-[#5B50EB] border-white font-black"
-                                              : "border-border/80 bg-slate-100 dark:bg-slate-700 text-transparent"
+                                              : "border-border/80 bg-white dark:bg-slate-700 text-transparent"
                                           )}
                                         >
-                                          {isAssigned ? <Check className="h-2.5 w-2.5 stroke-[3]" /> : null}
+                                          {isAssigned && <Check className="h-2.5 w-2.5 stroke-[3]" />}
                                         </span>
                                         <span>{deskName}</span>
                                       </button>
@@ -1246,7 +1268,7 @@ export function DisplayTerminalsManager({
         </div>
       )}
 
-      {/* Modal: Delete Screen Confirmation */}
+      {/* ── Modal: Delete Screen Confirmation ── */}
       {terminalToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
@@ -1265,7 +1287,7 @@ export function DisplayTerminalsManager({
               <strong className="text-foreground font-bold">
                 "{terminalToDelete.terminal_identifier}"
               </strong>{" "}
-              (@{terminalToDelete.username || `display-${terminalToDelete.id}`})? All rotation slots and timing configurations will be removed, and active TV connections will be disconnected.
+              (@{terminalToDelete.username || `display-${terminalToDelete.id}`})? All slide rotation schedules and PIN credentials will be removed, and connected TV sessions will be immediately disconnected.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-border/40">
@@ -1275,7 +1297,7 @@ export function DisplayTerminalsManager({
                 size="sm"
                 onClick={() => setTerminalToDelete(null)}
                 disabled={isDeletingTerminal}
-                className="h-9 text-xs font-bold"
+                className="h-9 text-xs font-bold rounded-xl"
               >
                 Cancel
               </Button>
@@ -1285,7 +1307,7 @@ export function DisplayTerminalsManager({
                 size="sm"
                 onClick={handleDeleteTerminal}
                 disabled={isDeletingTerminal}
-                className="h-9 text-xs font-bold gap-1.5 bg-rose-600 hover:bg-rose-700 text-white"
+                className="h-9 text-xs font-bold gap-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl"
               >
                 {isDeletingTerminal ? (
                   <>
@@ -1302,13 +1324,13 @@ export function DisplayTerminalsManager({
         </div>
       )}
 
-      {/* Modal: Quick Add Desk */}
+      {/* ── Modal: Quick Add Desk ── */}
       {isAddDeskOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <h3 className="text-base font-black text-foreground">Create New Counter Desk</h3>
             <p className="text-xs text-muted-foreground">
-              Add a new operator counter desk for this branch to assign to live display rotation slots.
+              Add a new operator counter desk for this branch to assign to live display rotation slides.
             </p>
 
             <form onSubmit={handleCreateQuickDesk} className="space-y-4">
@@ -1321,7 +1343,7 @@ export function DisplayTerminalsManager({
                   placeholder="e.g. Counter 01 or Cash Desk"
                   value={newDeskName}
                   onChange={(e) => setNewDeskName(e.target.value)}
-                  className="h-10 text-xs font-bold"
+                  className="h-10 text-xs font-bold rounded-xl"
                   required
                 />
               </div>
@@ -1332,7 +1354,7 @@ export function DisplayTerminalsManager({
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsAddDeskOpen(false)}
-                  className="h-9 text-xs font-bold"
+                  className="h-9 text-xs font-bold rounded-xl"
                 >
                   Cancel
                 </Button>
@@ -1340,7 +1362,7 @@ export function DisplayTerminalsManager({
                   type="submit"
                   size="sm"
                   disabled={isCreatingDesk || !newDeskName.trim()}
-                  className="h-9 text-xs font-bold gap-1.5 bg-[#5B50EB] hover:bg-[#4d42db] text-white"
+                  className="h-9 text-xs font-bold gap-1.5 bg-[#5B50EB] hover:bg-[#4d42db] text-white rounded-xl"
                 >
                   {isCreatingDesk ? "Creating..." : "Create Desk"}
                 </Button>
@@ -1350,13 +1372,15 @@ export function DisplayTerminalsManager({
         </div>
       )}
 
-      {/* Modal: Add Live Display Screen */}
+      {/* ── Modal: Add Live Display Screen ── */}
       {isAddTerminalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <Tv className="h-5 w-5 text-[#5B50EB]" />
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center">
+                  <Tv className="h-5 w-5" />
+                </div>
                 <div>
                   <h3 className="text-base font-black text-foreground">Add Live Display Screen</h3>
                   <p className="text-[11px] text-muted-foreground">Provision a new waiting area TV screen</p>
@@ -1373,7 +1397,7 @@ export function DisplayTerminalsManager({
 
             <form onSubmit={handleCreateTerminal} className="space-y-4">
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label className="text-xs font-bold text-foreground">
                   Display Screen Name *
                 </Label>
                 <Input
@@ -1382,13 +1406,13 @@ export function DisplayTerminalsManager({
                   onChange={(e) => setNewTerminalIdentifier(e.target.value)}
                   placeholder="e.g. Main Lobby Screen"
                   required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
+                  className="mt-1 text-xs rounded-xl h-10 font-medium"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Label className="text-xs font-bold text-foreground">
                     Terminal Username *
                   </Label>
                   {addTerminalUserStatus === "checking" && (
@@ -1426,29 +1450,19 @@ export function DisplayTerminalsManager({
                   placeholder="e.g. lobby-tv"
                   required
                   className={cn(
-                    "mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors",
+                    "mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors",
                     addTerminalUserStatus === "available" && "border-emerald-500 text-emerald-600 dark:text-emerald-400",
                     addTerminalUserStatus === "taken" && "border-rose-500 text-rose-600 dark:text-rose-400",
                     addTerminalUserStatus !== "available" && addTerminalUserStatus !== "taken" && "text-[#5B50EB]"
                   )}
                 />
-                {addTerminalUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {addTerminalUserMessage}
-                  </p>
-                ) : addTerminalUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {addTerminalUserMessage}
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Unique username required to unlock and display on this TV screen.
-                  </p>
-                )}
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Unique username required for TV login and screen identification.
+                </p>
               </div>
 
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label className="text-xs font-bold text-foreground">
                   4-Digit Access Passcode / PIN *
                 </Label>
                 <Input
@@ -1460,7 +1474,7 @@ export function DisplayTerminalsManager({
                   onChange={(e) => setNewTerminalPasscode(e.target.value.replace(/[^0-9]/g, ""))}
                   placeholder="e.g. 1234"
                   required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
+                  className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest font-black"
                 />
               </div>
 
@@ -1469,7 +1483,7 @@ export function DisplayTerminalsManager({
                   type="button"
                   variant="outline"
                   onClick={() => setIsAddTerminalOpen(false)}
-                  className="text-xs h-9"
+                  className="text-xs h-9 rounded-xl"
                 >
                   Cancel
                 </Button>
@@ -1483,7 +1497,7 @@ export function DisplayTerminalsManager({
                     addTerminalUserStatus === "checking" ||
                     addTerminalUserStatus === "invalid"
                   }
-                  className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white"
+                  className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white rounded-xl shadow-xs"
                 >
                   {isProvisioning ? "Creating..." : "Create Display Screen"}
                 </Button>
@@ -1493,13 +1507,15 @@ export function DisplayTerminalsManager({
         </div>
       )}
 
-      {/* Modal: Edit Display Terminal Credentials */}
+      {/* ── Modal: Edit Display Terminal Credentials ── */}
       {editingTerminal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-5 w-5 text-[#5B50EB]" />
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-[#5B50EB] flex items-center justify-center">
+                  <KeyRound className="h-5 w-5" />
+                </div>
                 <div>
                   <h3 className="text-base font-black text-foreground">Edit Screen Credentials</h3>
                   <p className="text-[11px] text-muted-foreground">{editingTerminal.terminal_identifier}</p>
@@ -1516,7 +1532,7 @@ export function DisplayTerminalsManager({
 
             <form onSubmit={handleUpdateTerminalCredentials} className="space-y-4">
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label className="text-xs font-bold text-foreground">
                   Display Screen Name *
                 </Label>
                 <Input
@@ -1524,13 +1540,13 @@ export function DisplayTerminalsManager({
                   value={editTerminalIdentifier}
                   onChange={(e) => setEditTerminalIdentifier(e.target.value)}
                   required
-                  className="mt-1 text-xs rounded-xl h-9 font-medium"
+                  className="mt-1 text-xs rounded-xl h-10 font-medium"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Label className="text-xs font-bold text-foreground">
                     Terminal Username *
                   </Label>
                   {editTerminalUserStatus === "checking" && (
@@ -1568,29 +1584,19 @@ export function DisplayTerminalsManager({
                   placeholder="e.g. lobby-tv"
                   required
                   className={cn(
-                    "mt-1 font-mono text-xs rounded-xl h-9 font-bold transition-colors",
+                    "mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors",
                     editTerminalUserStatus === "available" && "border-emerald-500 text-emerald-600 dark:text-emerald-400",
                     editTerminalUserStatus === "taken" && "border-rose-500 text-rose-600 dark:text-rose-400",
                     editTerminalUserStatus !== "available" && editTerminalUserStatus !== "taken" && "text-[#5B50EB]"
                   )}
                 />
-                {editTerminalUserStatus === "taken" ? (
-                  <p className="text-[10px] text-rose-500 font-medium mt-1">
-                    {editTerminalUserMessage}
-                  </p>
-                ) : editTerminalUserStatus === "available" ? (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ {editTerminalUserMessage}
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Unique username required to unlock and display on this TV screen.
-                  </p>
-                )}
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Unique username for TV login.
+                </p>
               </div>
 
               <div>
-                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Label className="text-xs font-bold text-foreground">
                   4-Digit Access Passcode / PIN *
                 </Label>
                 <Input
@@ -1601,7 +1607,7 @@ export function DisplayTerminalsManager({
                   value={editTerminalPasscode}
                   onChange={(e) => setEditTerminalPasscode(e.target.value.replace(/[^0-9]/g, ""))}
                   required
-                  className="mt-1 font-mono text-xs rounded-xl h-9"
+                  className="mt-1 font-mono text-xs rounded-xl h-10 tracking-widest font-black"
                 />
               </div>
 
@@ -1610,7 +1616,7 @@ export function DisplayTerminalsManager({
                   type="button"
                   variant="outline"
                   onClick={() => setEditingTerminal(null)}
-                  className="text-xs h-9"
+                  className="text-xs h-9 rounded-xl"
                 >
                   Cancel
                 </Button>
@@ -1624,7 +1630,7 @@ export function DisplayTerminalsManager({
                     editTerminalUserStatus === "checking" ||
                     editTerminalUserStatus === "invalid"
                   }
-                  className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white"
+                  className="text-xs h-9 bg-[#5B50EB] hover:bg-[#4d42db] text-white rounded-xl shadow-xs"
                 >
                   {isSavingTerminalEdit ? "Saving..." : "Save Credentials"}
                 </Button>
