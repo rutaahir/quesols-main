@@ -1587,7 +1587,7 @@ export function BranchDesksServicesManager({
 
       {/* Live Displays Tab Content */}
       {activeTab === "displays" && (
-        <div className="z-10 relative">
+        <div>
           <DisplayTerminalsManager
             branchId={branch?.id || branchId}
             branchDesks={branchDesks}

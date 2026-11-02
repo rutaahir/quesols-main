@@ -30,6 +30,7 @@ class DisplayTerminalSerializer(serializers.ModelSerializer):
             "session_token", "connected_at", "last_seen", "desks_per_slot",
             "rotation_seconds", "slots", "is_logged_in", "created_at", "updated_at"
         ]
+        read_only_fields = ["id", "company", "session_token", "connected_at", "last_seen", "created_at", "updated_at"]
 
     def validate(self, attrs):
         branch = attrs.get("branch") or getattr(self.instance, "branch", None)
@@ -44,10 +45,13 @@ class DisplayTerminalSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         import re, random
+        branch = validated_data.get("branch")
+        if not validated_data.get("company") and branch:
+            validated_data["company"] = getattr(branch, "company", None)
+
         if not validated_data.get("username"):
             ident = validated_data.get("terminal_identifier", "display")
             clean_user = re.sub(r'[^a-zA-Z0-9_-]', '', ident.lower().replace(' ', '-')) or "display"
-            branch = validated_data.get("branch")
             candidate = clean_user
             idx = 1
             while DisplayTerminal.objects.filter(branch=branch, username__iexact=candidate).exists():

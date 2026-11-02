@@ -162,8 +162,24 @@ function DisplayBoardScreen() {
         if (Array.isArray(data)) {
           setTerminalsList(data);
           if (data.length > 0) {
+            const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+            const param = (searchParams.get("terminal") || searchParams.get("display") || searchParams.get("id") || "").trim().toLowerCase();
+
+            let matched: any = null;
+            if (param) {
+              const pNorm = param.replace(/\s+/g, "-");
+              matched = data.find((t: any) => {
+                const tId = String(t.id);
+                const tIdent = (t.terminal_identifier || "").trim().toLowerCase().replace(/\s+/g, "-");
+                const tUser = (t.username || "").trim().toLowerCase();
+                return tId === param || tIdent === pNorm || tUser === pNorm;
+              });
+            }
+
             const savedTermId = localStorage.getItem(`display_selected_id_${branchId}`);
-            const initialTermId = savedTermId && data.some((t: any) => String(t.id) === savedTermId)
+            const initialTermId = matched
+              ? String(matched.id)
+              : savedTermId && data.some((t: any) => String(t.id) === savedTermId)
               ? savedTermId
               : String(data[0].id);
 
@@ -203,14 +219,40 @@ function DisplayBoardScreen() {
       .catch((err) => console.error("Failed to fetch display terminals:", err));
   }, [branchId]);
 
-  // Never autofill display screen username on locked screen
+  // Aggressively prevent browser password managers from autofilling credentials on locked screen
   useEffect(() => {
     setDisplayUsername("");
+    setPasscode("");
+    const t1 = setTimeout(() => {
+      setDisplayUsername("");
+      setPasscode("");
+    }, 80);
+    const t2 = setTimeout(() => {
+      setDisplayUsername("");
+      setPasscode("");
+    }, 250);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [selectedTerminalId]);
 
   // When selected terminal changes, update terminal-scoped storage
   const handleSelectTerminal = (termId: string) => {
     setSelectedTerminalId(termId);
+    setDisplayUsername("");
+    setPasscode("");
+    setPasscodeError(null);
+
+    // Keep human-readable ?terminal= in URL
+    const matched = terminalsList.find((t) => String(t.id) === String(termId));
+    if (matched && typeof window !== "undefined") {
+      const slug = matched.username || matched.terminal_identifier.toLowerCase().replace(/\s+/g, "-");
+      const currentSearch = new URLSearchParams(window.location.search);
+      currentSearch.set("terminal", slug);
+      const newUrl = window.location.pathname + `?${currentSearch.toString()}`;
+      window.history.replaceState(null, "", newUrl);
+    }
     if (branchId) {
       localStorage.setItem(`display_selected_id_${branchId}`, termId);
       const savedToken = localStorage.getItem(`display_session_token_${branchId}_${termId}`);
@@ -597,7 +639,11 @@ function DisplayBoardScreen() {
             </div>
           )}
 
-          <form onSubmit={handleUnlockSubmit} className="space-y-4">
+          <form onSubmit={handleUnlockSubmit} className="space-y-4" autoComplete="off">
+            {/* Hidden dummy trap inputs to absorb any browser auto-filling */}
+            <input type="text" name="display_prevent_user" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
+            <input type="password" name="display_prevent_pass" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
+
             {terminalsList.length > 0 && (
               <div className="space-y-1.5">
                 <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
@@ -623,11 +669,13 @@ function DisplayBoardScreen() {
               </label>
               <input
                 type="text"
-                autoComplete="off"
+                name="terminal_screen_username_field"
+                autoComplete="new-password"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
                 data-lpignore="true"
+                data-1p-ignore="true"
                 data-form-type="other"
                 value={displayUsername}
                 onChange={(e) => {
@@ -645,11 +693,25 @@ function DisplayBoardScreen() {
                 4-Digit Passcode / PIN
               </label>
               <input
-                type="password"
-                maxLength={8}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                name="terminal_screen_pin_code_field"
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+                maxLength={4}
                 value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                placeholder="Enter passcode"
+                onChange={(e) => {
+                  setPasscodeError(null);
+                  setPasscode(e.target.value.replace(/[^0-9]/g, ""));
+                }}
+                placeholder="Enter 4-digit PIN"
+                style={{ WebkitTextSecurity: "disc" }}
                 className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 text-center font-mono text-lg font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 tracking-widest"
               />
             </div>

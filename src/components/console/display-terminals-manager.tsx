@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -504,10 +505,9 @@ export function DisplayTerminalsManager({
       return;
     }
 
-    const nextIdx = terminals.length + 1;
-    setNewTerminalIdentifier(`Display Screen ${nextIdx}`);
+    setNewTerminalIdentifier("");
     setNewTerminalUsername("");
-    setNewTerminalPasscode(Math.floor(1000 + Math.random() * 9000).toString());
+    setNewTerminalPasscode("");
     setAddTerminalUserStatus("idle");
     setAddTerminalUserMessage("");
     setIsAddTerminalOpen(true);
@@ -557,8 +557,15 @@ export function DisplayTerminalsManager({
       setNewTerminalUsername("");
       setNewTerminalPasscode("");
       await loadData();
+      await refresh();
     } catch (err: any) {
-      toast.error(err.message || "Failed to create display screen. Check your plan allocations.");
+      const msg =
+        err?.message ||
+        err?.error ||
+        (err?.detail ? String(err.detail) : "") ||
+        (err?.non_field_errors ? String(err.non_field_errors[0]) : "") ||
+        "Failed to create display screen. Check your plan allocations.";
+      toast.error(msg);
     } finally {
       setIsProvisioning(false);
     }
@@ -1269,8 +1276,8 @@ export function DisplayTerminalsManager({
       )}
 
       {/* ── Modal: Delete Screen Confirmation ── */}
-      {terminalToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+      {terminalToDelete && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center gap-3 text-rose-600">
               <div className="h-10 w-10 rounded-2xl bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center shrink-0">
@@ -1321,12 +1328,13 @@ export function DisplayTerminalsManager({
               </Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── Modal: Quick Add Desk ── */}
-      {isAddDeskOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+      {isAddDeskOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <h3 className="text-base font-black text-foreground">Create New Counter Desk</h3>
             <p className="text-xs text-muted-foreground">
@@ -1369,12 +1377,13 @@ export function DisplayTerminalsManager({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── Modal: Add Live Display Screen ── */}
-      {isAddTerminalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+      {isAddTerminalOpen && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2.5">
@@ -1395,13 +1404,24 @@ export function DisplayTerminalsManager({
               </button>
             </div>
 
-            <form onSubmit={handleCreateTerminal} className="space-y-4">
+            <form onSubmit={handleCreateTerminal} className="space-y-4" autoComplete="off">
+              {/* Dummy trap inputs to stop browser password manager autofill */}
+              <input type="text" name="prevent_autofill_user" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
+              <input type="password" name="prevent_autofill_pass" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
+
               <div>
                 <Label className="text-xs font-bold text-foreground">
                   Display Screen Name *
                 </Label>
                 <Input
                   type="text"
+                  name="custom_screen_name"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   value={newTerminalIdentifier}
                   onChange={(e) => setNewTerminalIdentifier(e.target.value)}
                   placeholder="e.g. Main Lobby Screen"
@@ -1438,11 +1458,13 @@ export function DisplayTerminalsManager({
                 </div>
                 <Input
                   type="text"
-                  autoComplete="off"
+                  name="custom_screen_username"
+                  autoComplete="new-password"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
                   value={newTerminalUsername}
                   onChange={(e) => {
                     setNewTerminalUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
@@ -1462,14 +1484,30 @@ export function DisplayTerminalsManager({
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-foreground">
-                  4-Digit Access Passcode / PIN *
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-foreground">
+                    4-Digit Access Passcode / PIN *
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setNewTerminalPasscode(Math.floor(1000 + Math.random() * 9000).toString())}
+                    className="text-[11px] text-[#5B50EB] hover:underline font-bold"
+                  >
+                    Auto-generate PIN
+                  </button>
+                </div>
                 <Input
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]{4}"
                   maxLength={4}
+                  name="custom_screen_passcode"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   value={newTerminalPasscode}
                   onChange={(e) => setNewTerminalPasscode(e.target.value.replace(/[^0-9]/g, ""))}
                   placeholder="e.g. 1234"
@@ -1504,12 +1542,13 @@ export function DisplayTerminalsManager({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── Modal: Edit Display Terminal Credentials ── */}
-      {editingTerminal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
+      {editingTerminal && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in">
           <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-border rounded-3xl p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2.5">
@@ -1637,7 +1676,8 @@ export function DisplayTerminalsManager({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
