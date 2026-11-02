@@ -1182,12 +1182,14 @@ function KioskLockScreen({
         <div className="space-y-1.5">
           <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Terminal Username</Label>
           <Input
-            type="text"
-            autoComplete="off"
+            type="search"
+            name="kiosk_terminal_handle_search"
+            autoComplete="one-time-code"
             autoCorrect="off"
             autoCapitalize="none"
             spellCheck={false}
             data-lpignore="true"
+            data-1p-ignore="true"
             data-form-type="other"
             value={initUsername}
             onChange={(e) => {
@@ -1196,7 +1198,7 @@ function KioskLockScreen({
             }}
             placeholder="e.g. kiosk-1"
             required
-            className="h-11 rounded-xl text-xs font-mono font-bold bg-background/80"
+            className="h-11 rounded-xl text-xs font-mono font-bold bg-background/80 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
           />
         </div>
 

@@ -88,6 +88,7 @@ export function DisplayTerminalsManager({
   const [newTerminalUsername, setNewTerminalUsername] = useState("");
   const [newTerminalPasscode, setNewTerminalPasscode] = useState("");
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [isModalInputReadOnly, setIsModalInputReadOnly] = useState(true);
   const [addTerminalUserStatus, setAddTerminalUserStatus] = useState<
     "idle" | "checking" | "available" | "taken" | "invalid"
   >("idle");
@@ -508,6 +509,7 @@ export function DisplayTerminalsManager({
     setNewTerminalIdentifier("");
     setNewTerminalUsername("");
     setNewTerminalPasscode("");
+    setIsModalInputReadOnly(true);
     setAddTerminalUserStatus("idle");
     setAddTerminalUserMessage("");
     setIsAddTerminalOpen(true);
@@ -1457,14 +1459,18 @@ export function DisplayTerminalsManager({
                   )}
                 </div>
                 <Input
-                  type="text"
-                  name="custom_screen_username"
-                  autoComplete="new-password"
+                  type="search"
+                  readOnly={isModalInputReadOnly}
+                  onFocus={() => setIsModalInputReadOnly(false)}
+                  onClick={() => setIsModalInputReadOnly(false)}
+                  name="custom_screen_username_search"
+                  autoComplete="one-time-code"
                   autoCorrect="off"
                   autoCapitalize="none"
                   spellCheck={false}
                   data-lpignore="true"
                   data-1p-ignore="true"
+                  data-form-type="other"
                   value={newTerminalUsername}
                   onChange={(e) => {
                     setNewTerminalUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
@@ -1472,7 +1478,7 @@ export function DisplayTerminalsManager({
                   placeholder="e.g. lobby-tv"
                   required
                   className={cn(
-                    "mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors",
+                    "mt-1 font-mono text-xs rounded-xl h-10 font-bold transition-colors [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden",
                     addTerminalUserStatus === "available" && "border-emerald-500 text-emerald-600 dark:text-emerald-400",
                     addTerminalUserStatus === "taken" && "border-rose-500 text-rose-600 dark:text-rose-400",
                     addTerminalUserStatus !== "available" && addTerminalUserStatus !== "taken" && "text-[#5B50EB]"

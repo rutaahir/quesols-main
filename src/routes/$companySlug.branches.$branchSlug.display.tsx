@@ -108,6 +108,8 @@ function DisplayBoardScreen() {
   const [selectedTerminalId, setSelectedTerminalId] = useState<string>("");
   const [displayUsername, setDisplayUsername] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [isUsernameReadOnly, setIsUsernameReadOnly] = useState(true);
+  const userHasTypedUsernameRef = useRef(false);
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
   const [isSubmittingPasscode, setIsSubmittingPasscode] = useState(false);
   const [evictionReason, setEvictionReason] = useState<string | null>(null);
@@ -221,19 +223,29 @@ function DisplayBoardScreen() {
 
   // Aggressively prevent browser password managers from autofilling credentials on locked screen
   useEffect(() => {
+    userHasTypedUsernameRef.current = false;
     setDisplayUsername("");
     setPasscode("");
-    const t1 = setTimeout(() => {
-      setDisplayUsername("");
-      setPasscode("");
-    }, 80);
-    const t2 = setTimeout(() => {
-      setDisplayUsername("");
-      setPasscode("");
-    }, 250);
+    setIsUsernameReadOnly(true);
+
+    const checkInterval = setInterval(() => {
+      if (!userHasTypedUsernameRef.current) {
+        setDisplayUsername("");
+        setPasscode("");
+      }
+    }, 50);
+
+    const timer = setTimeout(() => {
+      clearInterval(checkInterval);
+      if (!userHasTypedUsernameRef.current) {
+        setDisplayUsername("");
+        setPasscode("");
+      }
+    }, 1200);
+
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      clearInterval(checkInterval);
+      clearTimeout(timer);
     };
   }, [selectedTerminalId]);
 
@@ -639,11 +651,15 @@ function DisplayBoardScreen() {
             </div>
           )}
 
-          <form onSubmit={handleUnlockSubmit} className="space-y-4" autoComplete="off">
-            {/* Hidden dummy trap inputs to absorb any browser auto-filling */}
-            <input type="text" name="display_prevent_user" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
-            <input type="password" name="display_prevent_pass" style={{ display: "none" }} tabIndex={-1} autoComplete="off" />
-
+          <div
+            className="space-y-4"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleUnlockSubmit();
+              }
+            }}
+          >
             {terminalsList.length > 0 && (
               <div className="space-y-1.5">
                 <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
@@ -668,9 +684,14 @@ function DisplayBoardScreen() {
                 Terminal Username
               </label>
               <input
-                type="text"
-                name="terminal_screen_username_field"
-                autoComplete="new-password"
+                type="search"
+                readOnly={isUsernameReadOnly}
+                onFocus={() => setIsUsernameReadOnly(false)}
+                onClick={() => setIsUsernameReadOnly(false)}
+                onTouchStart={() => setIsUsernameReadOnly(false)}
+                name="term_auth_handle"
+                id="term_auth_handle"
+                autoComplete="one-time-code"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -679,12 +700,12 @@ function DisplayBoardScreen() {
                 data-form-type="other"
                 value={displayUsername}
                 onChange={(e) => {
+                  userHasTypedUsernameRef.current = true;
                   setPasscodeError(null);
                   setDisplayUsername(e.target.value.toLowerCase().trim());
                 }}
                 placeholder="e.g. display-1"
-                required
-                className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 px-3 font-mono text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 px-3 font-mono text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
               />
             </div>
 
@@ -693,11 +714,12 @@ function DisplayBoardScreen() {
                 4-Digit Passcode / PIN
               </label>
               <input
-                type="text"
+                type="search"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                name="terminal_screen_pin_code_field"
-                autoComplete="new-password"
+                name="term_auth_secret_pin"
+                id="term_auth_secret_pin"
+                autoComplete="one-time-code"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -712,7 +734,7 @@ function DisplayBoardScreen() {
                 }}
                 placeholder="Enter 4-digit PIN"
                 style={{ WebkitTextSecurity: "disc" }}
-                className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 text-center font-mono text-lg font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 tracking-widest"
+                className="w-full h-11 rounded-xl bg-slate-800 border border-white/10 text-center font-mono text-lg font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 tracking-widest [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
               />
             </div>
 
@@ -721,13 +743,14 @@ function DisplayBoardScreen() {
             )}
 
             <button
-              type="submit"
+              type="button"
+              onClick={handleUnlockSubmit}
               disabled={isSubmittingPasscode}
-              className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
             >
               {isSubmittingPasscode ? "Authenticating..." : "Unlock Display Board"}
             </button>
-          </form>
+          </div>
         </motion.div>
       </div>
     );
