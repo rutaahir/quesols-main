@@ -2112,7 +2112,7 @@ export function AlertIntelligence() {
   return (
     <section
       id="alert-intelligence-section"
-      className="relative overflow-hidden py-16 sm:py-20 lg:py-28 bg-[#FBFCFF] dark:bg-slate-950/80 transition-colors"
+      className="relative overflow-hidden py-12 sm:py-16 lg:py-20 bg-[#FBFCFF] dark:bg-slate-950/80 transition-colors"
     >
       {/* Soft Ambient Background Blobs & Glowing Auras */}
       <div
@@ -2361,99 +2361,7 @@ export function AlertIntelligence() {
         {/* ============================================================== */}
         {/* 2. HORIZONTAL PROCESS TIMELINE: 4 Connected Cards              */}
         {/* ============================================================== */}
-        <div className="mt-14 sm:mt-16 lg:mt-20">
-          
-          {/* Connected Step Markers and Continuous Line (Desktop) */}
-          <div className="hidden lg:block relative mb-5">
-            {/* Horizontal Line with animated gradient */}
-            <div className="absolute top-4 left-6 right-6 h-[2.5px] bg-gradient-to-r from-[#FF7A3C] via-[#FF5A5F] via-[#6C4CF8] to-[#1ED6D2] opacity-40 z-0" />
-            <m.div
-              className="absolute top-4 left-6 right-6 h-[2.5px] bg-gradient-to-r from-[#FF7A3C] via-[#FF5A5F] via-[#6C4CF8] to-[#1ED6D2] z-0"
-              initial={{ scaleX: 0, originX: 0 }}
-              whileInView={{ scaleX: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 1.4, ease: "easeOut" }}
-            />
-
-            {/* 4 Step Nodes Header Bar */}
-            <div className="grid grid-cols-4 gap-6 relative z-10">
-              
-              {/* Step Node 01 */}
-              <div className="flex items-center justify-between pr-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF7A3C] text-white text-xs font-bold shadow-md shadow-orange-500/30">
-                    01
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="flex gap-0.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#FF7A3C]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#FF7A3C]/40" />
-                    </span>
-                    <span className="font-mono text-[11px] font-semibold text-[#69738A]">01 / 04</span>
-                  </div>
-                </div>
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 text-[#6C4CF8] text-xs shadow-2xs">
-                  <ArrowRight className="h-3 w-3 stroke-[2.5]" />
-                </div>
-              </div>
-
-              {/* Step Node 02 */}
-              <div className="flex items-center justify-between pr-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FF5A5F] text-white text-xs font-bold shadow-md shadow-rose-500/30">
-                    02
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="flex gap-0.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A5F]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A5F]/40" />
-                    </span>
-                    <span className="font-mono text-[11px] font-semibold text-[#69738A]">02 / 04</span>
-                  </div>
-                </div>
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 text-[#6C4CF8] text-xs shadow-2xs">
-                  <ArrowRight className="h-3 w-3 stroke-[2.5]" />
-                </div>
-              </div>
-
-              {/* Step Node 03 */}
-              <div className="flex items-center justify-between pr-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#6C4CF8] text-white text-xs font-bold shadow-md shadow-purple-500/30">
-                    03
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="flex gap-0.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#6C4CF8]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#6C4CF8]/40" />
-                    </span>
-                    <span className="font-mono text-[11px] font-semibold text-[#69738A]">03 / 04</span>
-                  </div>
-                </div>
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 text-[#1ED6D2] text-xs shadow-2xs">
-                  <ArrowRight className="h-3 w-3 stroke-[2.5]" />
-                </div>
-              </div>
-
-              {/* Step Node 04 */}
-              <div className="flex items-center justify-between pr-2">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1ED6D2] text-white text-xs font-bold shadow-md shadow-cyan-500/30">
-                    04
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="flex gap-0.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#1ED6D2]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#1ED6D2]/40" />
-                    </span>
-                    <span className="font-mono text-[11px] font-semibold text-[#69738A]">04 / 04</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
+        <div className="mt-8 sm:mt-10 lg:mt-12">
           {/* The 4 Timeline Process Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-6">
             
@@ -2467,10 +2375,18 @@ export function AlertIntelligence() {
               className="rounded-[26px] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 p-5 sm:p-6 shadow-[0_16px_40px_rgba(15,23,42,0.06)] hover:shadow-[0_24px_50px_rgba(255,122,60,0.12)] hover:border-orange-200 dark:hover:border-orange-800/60 transition-all duration-300 flex flex-col justify-between"
             >
               <div>
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#FF7A3C] text-white text-xs font-black shadow-sm shadow-orange-500/30">
+                    01
+                  </span>
+                  <span className="font-mono text-[11px] font-bold text-[#FF7A3C] uppercase tracking-wider">
+                    Step 1
+                  </span>
+                </div>
                 <h3 className="font-display text-lg font-bold text-[#08132C] dark:text-white">
                   Threshold slips
                 </h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
+                <p className="mt-1.5 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
                   Wait time crosses 15 min at Counter 03.
                 </p>
               </div>
@@ -2503,10 +2419,18 @@ export function AlertIntelligence() {
               className="rounded-[26px] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 p-5 sm:p-6 shadow-[0_16px_40px_rgba(15,23,42,0.06)] hover:shadow-[0_24px_50px_rgba(255,90,95,0.12)] hover:border-rose-200 dark:hover:border-rose-800/60 transition-all duration-300 flex flex-col justify-between"
             >
               <div>
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#FF5A5F] text-white text-xs font-black shadow-sm shadow-rose-500/30">
+                    02
+                  </span>
+                  <span className="font-mono text-[11px] font-bold text-[#FF5A5F] uppercase tracking-wider">
+                    Step 2
+                  </span>
+                </div>
                 <h3 className="font-display text-lg font-bold text-[#08132C] dark:text-white">
                   Alert raised
                 </h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
+                <p className="mt-1.5 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
                   Branch admin is pinged in-app and by email.
                 </p>
               </div>
@@ -2545,10 +2469,18 @@ export function AlertIntelligence() {
               className="rounded-[26px] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 p-5 sm:p-6 shadow-[0_16px_40px_rgba(15,23,42,0.06)] hover:shadow-[0_24px_50px_rgba(108,76,248,0.12)] hover:border-purple-200 dark:hover:border-purple-800/60 transition-all duration-300 flex flex-col justify-between"
             >
               <div>
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#6C4CF8] text-white text-xs font-black shadow-sm shadow-purple-500/30">
+                    03
+                  </span>
+                  <span className="font-mono text-[11px] font-bold text-[#6C4CF8] uppercase tracking-wider">
+                    Step 3
+                  </span>
+                </div>
                 <h3 className="font-display text-lg font-bold text-[#08132C] dark:text-white">
                   Action taken
                 </h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
+                <p className="mt-1.5 text-sm leading-relaxed text-[#69738A] dark:text-slate-400">
                   Counter 04 opened, queue re-balanced instantly.
                 </p>
               </div>
@@ -2584,10 +2516,18 @@ export function AlertIntelligence() {
               className="rounded-[26px] bg-gradient-to-br from-[#4D8DFF] via-[#2563EB] to-[#1ED6D2] p-5 sm:p-6 text-white shadow-[0_20px_50px_rgba(37,99,235,0.25)] hover:shadow-[0_28px_60px_rgba(6,182,212,0.35)] transition-all duration-300 flex flex-col justify-between"
             >
               <div>
+                <div className="flex items-center justify-between mb-3.5">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#2563EB] text-xs font-black shadow-sm">
+                    04
+                  </span>
+                  <span className="font-mono text-[11px] font-bold text-white/90 uppercase tracking-wider">
+                    Step 4
+                  </span>
+                </div>
                 <h3 className="font-display text-lg font-bold text-white">
                   Resolved
                 </h3>
-                <p className="mt-2 text-sm leading-relaxed text-white/90">
+                <p className="mt-1.5 text-sm leading-relaxed text-white/90">
                   Wait back to 6m 10s, breach logged for SLA.
                 </p>
               </div>
@@ -2618,7 +2558,7 @@ export function AlertIntelligence() {
         {/* ============================================================== */}
         {/* 3. BOTTOM FEATURES: 3 Clean Columns with Separators             */}
         {/* ============================================================== */}
-        <div className="mt-14 sm:mt-16 lg:mt-20 pt-8 sm:pt-10 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12">
+        <div className="mt-10 sm:mt-12 lg:mt-14 pt-8 sm:pt-10 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12">
           
           {/* Feature 1 */}
           <m.div
