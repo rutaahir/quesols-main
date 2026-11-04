@@ -680,7 +680,6 @@ export function BranchDesksServicesManager({
 
   const [expandedServiceId, setExpandedServiceId] = useState<string | null>(null);
   const [expandedKiosks, setExpandedKiosks] = useState<Record<string, boolean>>({});
-  const [expandedKot, setExpandedKot] = useState<Record<string, boolean>>({});
 
   if (!branch || !company) {
     return (
@@ -6646,10 +6645,12 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
   const { state, actions, refresh } = useQuesole();
   const companySlug = company?.slug || "";
   const branchSlug = branch?.slug || "";
+  const branchId = branch?.id || "";
   const kotUrl = companySlug && branchSlug ? `/${companySlug}/branches/${branchSlug}/kot` : `/kot/${branch?.id}`;
   
   const [kotTerminals, setKotTerminals] = useState<any[]>([]);
   const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
+  const [expandedKot, setExpandedKot] = useState<Record<string, boolean>>({});
   const [isAddingTerminal, setIsAddingTerminal] = useState(false);
   const [isAddKotModalOpen, setIsAddKotModalOpen] = useState(false);
   const [newKotIdentifier, setNewKotIdentifier] = useState("");
@@ -7394,7 +7395,7 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setExpandedKot(prev => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
+                      onClick={() => setExpandedKot((prev: Record<string, boolean>) => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
                       className={cn(
                         "h-8 w-8 p-0 text-muted-foreground hover:text-foreground transition-all duration-200 border-border/70",
                         isKotExpanded && "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-400"
