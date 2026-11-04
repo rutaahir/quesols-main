@@ -32,6 +32,7 @@ import {
   Info,
   Sliders,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   CheckCircle,
   Power,
@@ -110,6 +111,14 @@ export function DisplayTerminalsManager({
   // Regenerate Passcode loading indicator
   const [regeneratingPinId, setRegeneratingPinId] = useState<string | null>(null);
   const [togglingStatusId, setTogglingStatusId] = useState<string | null>(null);
+  const [expandedTerminals, setExpandedTerminals] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (id: string) => {
+    setExpandedTerminals((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
 
   const displayBaseUrl =
     companySlug && branchSlug
@@ -879,14 +888,21 @@ export function DisplayTerminalsManager({
                 : `/display?terminal=${encodeURIComponent(terminalSlug)}`;
 
             const totalCycleSeconds = termSlots.length * timing.rotation_seconds;
+            const isExpanded = !!expandedTerminals[term.id];
 
             return (
               <div
                 key={term.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-sm hover:shadow-md transition-all"
+                className={cn(
+                  "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm hover:shadow-md transition-all",
+                  isExpanded ? "space-y-6" : "space-y-0"
+                )}
               >
                 {/* ── Screen Header: Identity & Top Controls ── */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
+                <div className={cn(
+                  "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
+                  isExpanded && "border-b border-border/40 pb-5"
+                )}>
                   {/* Left: Device Avatar & Metadata */}
                   <div className="flex items-start sm:items-center gap-4">
                     <div className="relative">
@@ -954,6 +970,13 @@ export function DisplayTerminalsManager({
                             <Copy className="h-3 w-3" />
                           </button>
                         </div>
+
+                        <span className="text-border/80">•</span>
+
+                        {/* Slide Summary Badge */}
+                        <span className="text-[11px] font-medium text-muted-foreground bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
+                          {termSlots.length > 0 ? `${termSlots.length} Slides (${totalCycleSeconds}s Loop)` : "Continuous Mode"}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1043,35 +1066,6 @@ export function DisplayTerminalsManager({
                       )}
                     </Button>
 
-                    {/* Close / Open Screen Toggle */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleToggleTerminalStatus(term)}
-                      disabled={togglingStatusId === term.id}
-                      className={cn(
-                        "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
-                        term.status === "active"
-                          ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
-                          : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
-                      )}
-                      title={term.status === "active" ? "Close screen terminal" : "Reopen screen terminal"}
-                    >
-                      {togglingStatusId === term.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : term.status === "active" ? (
-                        <>
-                          <PowerOff className="h-3.5 w-3.5" />
-                          <span>Close Screen</span>
-                        </>
-                      ) : (
-                        <>
-                          <Power className="h-3.5 w-3.5" />
-                          <span>Open Screen</span>
-                        </>
-                      )}
-                    </Button>
-
                     {/* Delete Screen */}
                     <Button
                       variant="outline"
@@ -1082,11 +1076,32 @@ export function DisplayTerminalsManager({
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
+
+                    {/* Expand / Collapse Details Toggle */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleExpand(term.id)}
+                      className={cn(
+                        "h-8 w-8 p-0 text-muted-foreground hover:text-foreground transition-all duration-200 border-border/70",
+                        isExpanded && "bg-[#5B50EB]/10 text-[#5B50EB] border-[#5B50EB]/30 dark:bg-[#5B50EB]/20 dark:text-indigo-400"
+                      )}
+                      title={isExpanded ? "Collapse screen details" : "Expand screen details & slides"}
+                      aria-label={isExpanded ? "Collapse screen details" : "Expand screen details & slides"}
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-200",
+                          isExpanded && "rotate-180"
+                        )}
+                      />
+                    </Button>
                   </div>
                 </div>
 
                 {/* ── Unified Slide Show Presentation & Rotation Schedule ── */}
-                <div className="space-y-4">
+                {isExpanded && (
+                  <div className="space-y-4 pt-4 animate-in fade-in-50 duration-200">
                   {/* Rotation Controls Bar */}
                   <div className="bg-slate-50/80 dark:bg-slate-850/80 p-4 rounded-2xl border border-border/50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     {/* Slide Duration Picker */}
@@ -1323,10 +1338,64 @@ export function DisplayTerminalsManager({
                       })}
                     </div>
                   )}
+
+                  {/* Terminal Power / Active Status inside Expanded Details */}
+                  <div className="pt-3 border-t border-border/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">Screen Power Status:</span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                          term.status === "active"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            : "bg-slate-200 dark:bg-slate-800 text-muted-foreground"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            term.status === "active" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
+                          )}
+                        />
+                        {term.status === "active" ? "Active (Broadcasting)" : "Closed / Inactive"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleToggleTerminalStatus(term)}
+                        disabled={togglingStatusId === term.id}
+                        className={cn(
+                          "h-7 px-2.5 text-xs font-semibold gap-1.5",
+                          term.status === "active"
+                            ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200"
+                            : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200"
+                        )}
+                        title={term.status === "active" ? "Close screen terminal" : "Activate screen terminal"}
+                      >
+                        {togglingStatusId === term.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : term.status === "active" ? (
+                          <>
+                            <PowerOff className="h-3 w-3" />
+                            <span>Close Screen</span>
+                          </>
+                        ) : (
+                          <>
+                            <Power className="h-3 w-3" />
+                            <span>Activate Screen</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              )}
+            </div>
+          );
+        })}
         </div>
       )}
 

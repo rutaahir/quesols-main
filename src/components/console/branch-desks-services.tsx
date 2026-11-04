@@ -679,6 +679,8 @@ export function BranchDesksServicesManager({
   const [upsellModalCompKey, setUpsellModalCompKey] = useState<string | null>(null);
 
   const [expandedServiceId, setExpandedServiceId] = useState<string | null>(null);
+  const [expandedKiosks, setExpandedKiosks] = useState<Record<string, boolean>>({});
+  const [expandedKot, setExpandedKot] = useState<Record<string, boolean>>({});
 
   if (!branch || !company) {
     return (
@@ -3248,13 +3250,20 @@ export function BranchDesksServicesManager({
                 const singleKioskUrl = companySlug && branchSlug
                   ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
                   : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
+                const isKioskExpanded = !!expandedKiosks[kiosk.id];
 
                 return (
                   <div
                     key={kiosk.id}
-                    className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-4 shadow-xs hover:border-[#5B50EB]/40 transition-all duration-200"
+                    className={cn(
+                      "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xs hover:border-[#5B50EB]/40 transition-all duration-200",
+                      isKioskExpanded ? "space-y-4" : "space-y-0"
+                    )}
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
+                    <div className={cn(
+                      "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
+                      isKioskExpanded && "border-b border-border/40 pb-5"
+                    )}>
                       {/* Left: Device Avatar & Metadata */}
                       <div className="flex items-start sm:items-center gap-4">
                         <div className="relative">
@@ -3420,48 +3429,6 @@ export function BranchDesksServicesManager({
                           <RotateCw className="h-3.5 w-3.5" />
                         </Button>
 
-                        {/* Close / Open Kiosk Toggle */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            const nextStatus = kiosk.status === "active" ? "inactive" : "active";
-                            try {
-                              await apiFetch(`/api/kot/kiosks/${kiosk.id}/`, {
-                                method: "PATCH",
-                                body: JSON.stringify({ status: nextStatus }),
-                              });
-                              toast.success(
-                                nextStatus === "active"
-                                  ? `Kiosk "${kiosk.kiosk_identifier}" opened and activated!`
-                                  : `Kiosk "${kiosk.kiosk_identifier}" closed!`
-                              );
-                              await refresh();
-                            } catch (err: any) {
-                              toast.error(err.message || "Failed to update kiosk status.");
-                            }
-                          }}
-                          className={cn(
-                            "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
-                            kiosk.status === "active"
-                              ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
-                              : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
-                          )}
-                          title={kiosk.status === "active" ? "Close kiosk terminal" : "Reopen kiosk terminal"}
-                        >
-                          {kiosk.status === "active" ? (
-                            <>
-                              <PowerOff className="h-3.5 w-3.5" />
-                              <span>Close Kiosk</span>
-                            </>
-                          ) : (
-                            <>
-                              <Power className="h-3.5 w-3.5" />
-                              <span>Open Kiosk</span>
-                            </>
-                          )}
-                        </Button>
-
                         {/* Delete Kiosk */}
                         <Button
                           size="sm"
@@ -3482,8 +3449,140 @@ export function BranchDesksServicesManager({
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
+
+                        {/* Expand / Collapse Details Toggle */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setExpandedKiosks(prev => ({ ...prev, [kiosk.id]: !prev[kiosk.id] }))}
+                          className={cn(
+                            "h-8 w-8 p-0 text-muted-foreground hover:text-foreground transition-all duration-200 border-border/70",
+                            isKioskExpanded && "bg-[#5B50EB]/10 text-[#5B50EB] border-[#5B50EB]/30 dark:bg-[#5B50EB]/20 dark:text-indigo-400"
+                          )}
+                          title={isKioskExpanded ? "Collapse kiosk details" : "Expand kiosk details"}
+                          aria-label={isKioskExpanded ? "Collapse kiosk details" : "Expand kiosk details"}
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition-transform duration-200",
+                              isKioskExpanded && "rotate-180"
+                            )}
+                          />
+                        </Button>
                       </div>
                     </div>
+
+                    {/* Collapsible Kiosk Detailed Panel */}
+                    {isKioskExpanded && (
+                      <div className="pt-2 space-y-4 animate-in fade-in-50 duration-200">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {/* 1. Touch Tablet QR Code Card */}
+                          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 flex items-center gap-4">
+                            <div className="p-2 bg-white rounded-xl shadow-xs border border-border/60 shrink-0">
+                              <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
+                                  `${typeof window !== "undefined" ? window.location.origin : ""}${singleKioskUrl}`
+                                )}`}
+                                alt={`QR Code for ${kiosk.kiosk_identifier}`}
+                                className="h-16 w-16 object-contain"
+                              />
+                            </div>
+                            <div className="space-y-1 min-w-0">
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                                Scan On Tablet
+                              </span>
+                              <p className="text-xs text-foreground font-bold leading-snug">
+                                Instant Touch Setup
+                              </p>
+                              <p className="text-[11px] text-muted-foreground leading-tight">
+                                Scan with iPad or Android tablet to open kiosk.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* 2. Hardware & Deployment Specs */}
+                          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 space-y-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                              Terminal Profile
+                            </span>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Mode:</span>
+                                <span className="font-semibold text-foreground">Self-Registration</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Location:</span>
+                                <span className="font-semibold text-foreground">Reception / Entrance</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Security:</span>
+                                <span className="font-mono font-semibold text-foreground">PIN Protected ({kiosk.pin})</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. Terminal Power & Status Toggle */}
+                          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 flex flex-col justify-between">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                              Terminal Power & Status
+                            </span>
+                            <div className="flex items-center justify-between mt-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "h-2 w-2 rounded-full",
+                                    kiosk.status === "active" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
+                                  )}
+                                />
+                                <span className="text-xs font-bold text-foreground">
+                                  {kiosk.status === "active" ? "Terminal Active" : "Terminal Closed"}
+                                </span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  const nextStatus = kiosk.status === "active" ? "inactive" : "active";
+                                  try {
+                                    await apiFetch(`/api/kot/kiosks/${kiosk.id}/`, {
+                                      method: "PATCH",
+                                      body: JSON.stringify({ status: nextStatus }),
+                                    });
+                                    toast.success(
+                                      nextStatus === "active"
+                                        ? `Kiosk "${kiosk.kiosk_identifier}" activated!`
+                                        : `Kiosk "${kiosk.kiosk_identifier}" closed!`
+                                    );
+                                    await refresh();
+                                  } catch (err: any) {
+                                    toast.error(err.message || "Failed to update kiosk status.");
+                                  }
+                                }}
+                                className={cn(
+                                  "h-7 px-2.5 text-xs font-semibold gap-1.5",
+                                  kiosk.status === "active"
+                                    ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200"
+                                    : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200"
+                                )}
+                                title={kiosk.status === "active" ? "Close kiosk terminal" : "Activate kiosk terminal"}
+                              >
+                                {kiosk.status === "active" ? (
+                                  <>
+                                    <PowerOff className="h-3 w-3" />
+                                    <span>Close Kiosk</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Power className="h-3 w-3" />
+                                    <span>Activate Kiosk</span>
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -7099,13 +7198,20 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
             const terminalKotUrl = companySlug && branchSlug
               ? `/${companySlug}/branches/${branchSlug}/kot?terminal=${encodeURIComponent(terminalSlug)}`
               : `/kot/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
+            const isKotExpanded = !!expandedKot[terminal.id];
 
             return (
               <div
                 key={terminal.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 space-y-4 shadow-xs hover:border-emerald-500/40 transition-all duration-200"
+                className={cn(
+                  "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xs hover:border-emerald-500/40 transition-all duration-200",
+                  isKotExpanded ? "space-y-4" : "space-y-0"
+                )}
               >
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/40 pb-5">
+                <div className={cn(
+                  "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
+                  isKotExpanded && "border-b border-border/40 pb-5"
+                )}>
                   {/* Left: Device Avatar & Metadata */}
                   <div className="flex items-start sm:items-center gap-4">
                     <div className="relative">
@@ -7263,48 +7369,6 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                       <RotateCw className="h-3.5 w-3.5" />
                     </Button>
 
-                    {/* Close / Open KOT Toggle */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        const nextStatus = isKotActive ? "inactive" : "active";
-                        try {
-                          await apiFetch(`/api/kot/terminals/${terminal.id}/`, {
-                            method: "PATCH",
-                            body: JSON.stringify({ status: nextStatus }),
-                          });
-                          toast.success(
-                            nextStatus === "active"
-                              ? `KOT Terminal "${terminal.terminal_identifier}" opened and activated!`
-                              : `KOT Terminal "${terminal.terminal_identifier}" closed!`
-                          );
-                          fetchKotTerminals();
-                        } catch (err: any) {
-                          toast.error(err.message || "Failed to update terminal status.");
-                        }
-                      }}
-                      className={cn(
-                        "h-8 px-2.5 text-xs font-semibold border-border/70 gap-1",
-                        isKotActive
-                          ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200 dark:border-amber-900/50"
-                          : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/50"
-                      )}
-                      title={isKotActive ? "Close KOT terminal" : "Reopen KOT terminal"}
-                    >
-                      {isKotActive ? (
-                        <>
-                          <PowerOff className="h-3.5 w-3.5" />
-                          <span>Close KOT</span>
-                        </>
-                      ) : (
-                        <>
-                          <Power className="h-3.5 w-3.5" />
-                          <span>Open KOT</span>
-                        </>
-                      )}
-                    </Button>
-
                     {/* Delete KOT Terminal */}
                     <Button
                       size="sm"
@@ -7325,8 +7389,140 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
+
+                    {/* Expand / Collapse Details Toggle */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setExpandedKot(prev => ({ ...prev, [terminal.id]: !prev[terminal.id] }))}
+                      className={cn(
+                        "h-8 w-8 p-0 text-muted-foreground hover:text-foreground transition-all duration-200 border-border/70",
+                        isKotExpanded && "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-400"
+                      )}
+                      title={isKotExpanded ? "Collapse KOT details" : "Expand KOT details"}
+                      aria-label={isKotExpanded ? "Collapse KOT details" : "Expand KOT details"}
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-200",
+                          isKotExpanded && "rotate-180"
+                        )}
+                      />
+                    </Button>
                   </div>
                 </div>
+
+                {/* Collapsible KOT Detailed Panel */}
+                {isKotExpanded && (
+                  <div className="pt-2 space-y-4 animate-in fade-in-50 duration-200">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* 1. Customer Check-In QR Code Card */}
+                      <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 flex items-center gap-4">
+                        <div className="p-2 bg-white rounded-xl shadow-xs border border-border/60 shrink-0">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
+                              `${typeof window !== "undefined" ? window.location.origin : ""}${terminalKotUrl}`
+                            )}`}
+                            alt={`QR Code for ${terminal.terminal_identifier}`}
+                            className="h-16 w-16 object-contain"
+                          />
+                        </div>
+                        <div className="space-y-1 min-w-0">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                            Customer QR Standee
+                          </span>
+                          <p className="text-xs text-foreground font-bold leading-snug">
+                            Mobile Check-In
+                          </p>
+                          <p className="text-[11px] text-muted-foreground leading-tight">
+                            Print on poster/standee for touchless queue tokens.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 2. Delivery & Profile Specs */}
+                      <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 space-y-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                          Delivery Channels
+                        </span>
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex justify-between items-center">
+                            <span className="text-muted-foreground">Channels:</span>
+                            <span className="font-semibold text-foreground">SMS & WhatsApp Alerts</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-muted-foreground">Type:</span>
+                            <span className="font-semibold text-foreground">Remote Digital Token</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-muted-foreground">Security:</span>
+                            <span className="font-mono font-semibold text-foreground">PIN Protected ({terminal.pin})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3. Terminal Power & Status Toggle */}
+                      <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-border/60 flex flex-col justify-between">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground block">
+                          Terminal Power & Status
+                        </span>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                isKotActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
+                              )}
+                            />
+                            <span className="text-xs font-bold text-foreground">
+                              {isKotActive ? "Terminal Active" : "Terminal Closed"}
+                            </span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              const nextStatus = isKotActive ? "inactive" : "active";
+                              try {
+                                await apiFetch(`/api/kot/terminals/${terminal.id}/`, {
+                                  method: "PATCH",
+                                  body: JSON.stringify({ status: nextStatus }),
+                                });
+                                toast.success(
+                                  nextStatus === "active"
+                                    ? `KOT Terminal "${terminal.terminal_identifier}" activated!`
+                                    : `KOT Terminal "${terminal.terminal_identifier}" closed!`
+                                );
+                                fetchKotTerminals();
+                              } catch (err: any) {
+                                toast.error(err.message || "Failed to update terminal status.");
+                              }
+                            }}
+                            className={cn(
+                              "h-7 px-2.5 text-xs font-semibold gap-1.5",
+                              isKotActive
+                                ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-amber-200"
+                                : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-200"
+                            )}
+                            title={isKotActive ? "Close KOT terminal" : "Activate KOT terminal"}
+                          >
+                            {isKotActive ? (
+                              <>
+                                <PowerOff className="h-3 w-3" />
+                                <span>Close KOT</span>
+                              </>
+                            ) : (
+                              <>
+                                <Power className="h-3 w-3" />
+                                <span>Activate KOT</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
