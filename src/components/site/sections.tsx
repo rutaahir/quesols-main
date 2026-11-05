@@ -2168,12 +2168,12 @@ export function AlertIntelligence() {
         </svg>
       </div>
 
-      <div className="relative mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-8 xl:px-10">
+      <div className="relative mx-auto w-full max-w-[1728px] w-[98%] px-4 sm:px-6 lg:px-8 xl:px-12">
         
         {/* ============================================================== */}
         {/* 1. TOP HERO SECTION: Left (Heading & Info) + Right (Bell & Cards) */}
         {/* ============================================================== */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 xl:gap-16 items-center">
           
           {/* LEFT COLUMN: Badge, Headline & Subtitle */}
           <div className="lg:col-span-7 flex flex-col justify-center">
