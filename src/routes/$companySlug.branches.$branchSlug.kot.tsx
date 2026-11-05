@@ -165,22 +165,7 @@ function KotScreen() {
           localStorage.setItem(`kot_selected_id_${branch.id}`, finalTerminalId);
         }
 
-        // Clean URL sync without exposing database IDs
-        if (typeof window !== "undefined") {
-          const targetTerm = data.find((t: any) => String(t.id) === String(finalTerminalId)) || data[0];
-          if (targetTerm) {
-            const terminalSlug = targetTerm.terminal_identifier.toLowerCase().replace(/\s+/g, "-");
-            const currentSearch = new URLSearchParams(window.location.search);
-            if (currentSearch.get("terminal") !== terminalSlug) {
-              currentSearch.delete("kot_id");
-              currentSearch.delete("id");
-              currentSearch.delete("kot");
-              currentSearch.set("terminal", terminalSlug);
-              const newUrl = window.location.pathname + "?" + currentSearch.toString();
-              window.history.replaceState(null, "", newUrl);
-            }
-          }
-        }
+        // Keep common URL without injecting dynamic ?terminal= query param
       }
     };
 

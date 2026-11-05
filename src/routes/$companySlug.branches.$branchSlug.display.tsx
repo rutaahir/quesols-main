@@ -256,15 +256,7 @@ function DisplayBoardScreen() {
     setPasscode("");
     setPasscodeError(null);
 
-    // Keep human-readable ?terminal= in URL
-    const matched = terminalsList.find((t) => String(t.id) === String(termId));
-    if (matched && typeof window !== "undefined") {
-      const slug = matched.username || matched.terminal_identifier.toLowerCase().replace(/\s+/g, "-");
-      const currentSearch = new URLSearchParams(window.location.search);
-      currentSearch.set("terminal", slug);
-      const newUrl = window.location.pathname + `?${currentSearch.toString()}`;
-      window.history.replaceState(null, "", newUrl);
-    }
+    // Keep common URL without injecting dynamic ?terminal= query param
     if (branchId) {
       localStorage.setItem(`display_selected_id_${branchId}`, termId);
       const savedToken = localStorage.getItem(`display_session_token_${branchId}_${termId}`);

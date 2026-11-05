@@ -193,20 +193,7 @@ function Kiosk() {
             });
           }
 
-          // Keep human-readable terminal parameter (e.g. ?terminal=kiosk-1 or ?terminal=kiosk-2) in browser URL bar
-          if (typeof window !== "undefined" && matchedKiosk) {
-            const terminalSlug = matchedKiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, "-");
-            const currentSearch = new URLSearchParams(window.location.search);
-            if (currentSearch.get("terminal") !== terminalSlug) {
-              currentSearch.delete("kiosk_id");
-              currentSearch.delete("id");
-              currentSearch.delete("kiosk");
-              currentSearch.set("terminal", terminalSlug);
-              const newSearch = currentSearch.toString();
-              const cleanUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
-              window.history.replaceState(null, "", cleanUrl);
-            }
-          }
+          // Keep common URL without injecting dynamic ?terminal= query param
         }
       })
       .catch((err: any) => console.error("Failed to load kiosks:", err));

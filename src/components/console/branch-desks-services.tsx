@@ -3246,9 +3246,6 @@ export function BranchDesksServicesManager({
                 const isPinVisible = !!visiblePins[kiosk.id];
                 const isKioskOpen = Boolean(kiosk.is_logged_in && kiosk.status === "active");
                 const terminalSlug = kiosk.username || (kiosk.kiosk_identifier ? kiosk.kiosk_identifier.toLowerCase().replace(/\s+/g, '-') : kiosk.id);
-                const singleKioskUrl = companySlug && branchSlug
-                  ? `/${companySlug}/branches/${branchSlug}/kiosk?terminal=${encodeURIComponent(terminalSlug)}`
-                  : `/kiosk/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
                 const isKioskExpanded = !!expandedKiosks[kiosk.id];
 
                 return (
@@ -3364,11 +3361,11 @@ export function BranchDesksServicesManager({
 
                         {/* Launch Direct Kiosk Button */}
                         <a
-                          href={singleKioskUrl}
+                          href={kioskUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="h-8 px-3 rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all shadow-[#5B50EB]/20 cursor-pointer"
-                          title="Open dedicated Kiosk touch screen"
+                          title="Open common Kiosk touch screen"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                           <span>Open Kiosk</span>
@@ -3379,12 +3376,12 @@ export function BranchDesksServicesManager({
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            const url = `${window.location.origin}${singleKioskUrl}`;
+                            const url = `${window.location.origin}${kioskUrl}`;
                             navigator.clipboard.writeText(url);
-                            toast.success(`Copied direct URL for ${kiosk.kiosk_identifier}!`);
+                            toast.success("Copied common Kiosk URL!");
                           }}
                           className="h-8 px-2.5 text-xs font-semibold border-border/70"
-                          title="Copy direct kiosk link"
+                          title="Copy common kiosk link"
                         >
                           <Copy className="h-3.5 w-3.5" />
                           <span className="hidden sm:inline">Copy Link</span>
@@ -3480,9 +3477,9 @@ export function BranchDesksServicesManager({
                             <div className="p-2 bg-white rounded-xl shadow-xs border border-border/60 shrink-0">
                               <img
                                 src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
-                                  `${typeof window !== "undefined" ? window.location.origin : ""}${singleKioskUrl}`
+                                  `${typeof window !== "undefined" ? window.location.origin : ""}${kioskUrl}`
                                 )}`}
-                                alt={`QR Code for ${kiosk.kiosk_identifier}`}
+                                alt="QR Code for Common Kiosk"
                                 className="h-16 w-16 object-contain"
                               />
                             </div>
@@ -7196,9 +7193,6 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
             const isKotActive = terminal.status === "active";
             const isKotOnline = Boolean(terminal.is_logged_in && isKotActive);
             const terminalSlug = terminal.username || (terminal.terminal_identifier ? terminal.terminal_identifier.toLowerCase().replace(/\s+/g, '-') : terminal.id);
-            const terminalKotUrl = companySlug && branchSlug
-              ? `/${companySlug}/branches/${branchSlug}/kot?terminal=${encodeURIComponent(terminalSlug)}`
-              : `/kot/${branch?.id || branchId}?terminal=${encodeURIComponent(terminalSlug)}`;
             const isKotExpanded = !!expandedKot[terminal.id];
 
             return (
@@ -7314,11 +7308,11 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
 
                     {/* Launch Direct KOT Button */}
                     <a
-                      href={terminalKotUrl}
+                      href={kotUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all shadow-emerald-600/20 cursor-pointer"
-                      title="Open dedicated KOT Check-In screen"
+                      title="Open common KOT Check-In screen"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                       <span>Open KOT</span>
@@ -7329,12 +7323,12 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const url = `${window.location.origin}${terminalKotUrl}`;
+                        const url = `${window.location.origin}${kotUrl}`;
                         navigator.clipboard.writeText(url);
-                        toast.success(`Copied direct URL for ${terminal.terminal_identifier}!`);
+                        toast.success("Copied common KOT URL!");
                       }}
                       className="h-8 px-2.5 text-xs font-semibold border-border/70"
-                      title="Copy direct KOT link"
+                      title="Copy common KOT link"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">Copy Link</span>
@@ -7422,9 +7416,9 @@ export function KotSettingsPanel({ branch, company, setView }: KotSettingsPanelP
                         <div className="p-2 bg-white rounded-xl shadow-xs border border-border/60 shrink-0">
                           <img
                             src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(
-                              `${typeof window !== "undefined" ? window.location.origin : ""}${terminalKotUrl}`
+                              `${typeof window !== "undefined" ? window.location.origin : ""}${kotUrl}`
                             )}`}
-                            alt={`QR Code for ${terminal.terminal_identifier}`}
+                            alt="QR Code for Common KOT Check-In"
                             className="h-16 w-16 object-contain"
                           />
                         </div>

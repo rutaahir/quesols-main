@@ -882,10 +882,7 @@ export function DisplayTerminalsManager({
                 ? term.terminal_identifier.toLowerCase().replace(/\s+/g, "-")
                 : term.id);
 
-            const singleDisplayUrl =
-              companySlug && branchSlug
-                ? `/${companySlug}/branches/${branchSlug}/display?terminal=${encodeURIComponent(terminalSlug)}`
-                : `/display?terminal=${encodeURIComponent(terminalSlug)}`;
+            const commonDisplayUrl = displayBaseUrl;
 
             const totalCycleSeconds = termSlots.length * timing.rotation_seconds;
             const isExpanded = !!expandedTerminals[term.id];
@@ -1005,11 +1002,11 @@ export function DisplayTerminalsManager({
 
                     {/* Launch Direct Screen Button */}
                     <a
-                      href={singleDisplayUrl}
+                      href={commonDisplayUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="h-8 px-3 rounded-xl bg-[#5B50EB] hover:bg-[#4d42db] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors"
-                      title="Open dedicated TV screen view"
+                      title="Open common Live Display Board"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                       <span>Open Screen</span>
@@ -1020,12 +1017,12 @@ export function DisplayTerminalsManager({
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        const url = `${window.location.origin}${singleDisplayUrl}`;
+                        const url = `${window.location.origin}${commonDisplayUrl}`;
                         navigator.clipboard.writeText(url);
-                        toast.success(`Copied direct URL for ${term.terminal_identifier}!`);
+                        toast.success("Copied common Live Display URL!");
                       }}
                       className="h-8 px-2.5 text-xs font-semibold border-border/70"
-                      title="Copy direct display link"
+                      title="Copy common display link"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">Copy Link</span>
