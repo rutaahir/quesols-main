@@ -45,6 +45,7 @@ function SegmentedPin({ length = 4, value, onChange, error }: { length?: number;
     <div className="flex gap-3 justify-center">
       {digits.map((d, idx) => (
         <input key={idx} id={`kot-pin-${idx}`} type="password" inputMode="numeric" maxLength={1} value={d}
+          autoComplete="one-time-code" data-lpignore="true" data-1p-ignore="true"
           onClick={() => focus(idx)} onKeyDown={(e) => handleKeyDown(e, idx)} onChange={() => {}}
           className={cn(
             "w-14 h-14 rounded-2xl border-2 text-center text-2xl font-black transition-all outline-none bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm",
@@ -102,6 +103,7 @@ function KotScreen() {
 
   const [screen, setScreen] = useState<ScreenState>("locked");
   const [kotUsername, setKotUsername] = useState("");
+  const [isUsernameReadOnly, setIsUsernameReadOnly] = useState(true);
   const [pin, setPin] = useState(""); const [pinError, setPinError] = useState<string | null>(null); const [isUnlocking, setIsUnlocking] = useState(false);
   const [isStaffOpen, setIsStaffOpen] = useState(false); const [exitPin, setExitPin] = useState(""); const [exitPinError, setExitPinError] = useState<string | null>(null);
   const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [email, setEmail] = useState(""); const [note, setNote] = useState("");
@@ -181,6 +183,10 @@ function KotScreen() {
   // Never autofill KOT terminal username on locked screen
   useEffect(() => {
     setKotUsername("");
+    const timer = setTimeout(() => {
+      setKotUsername("");
+    }, 150);
+    return () => clearTimeout(timer);
   }, [selectedKotTerminalId]);
 
   useEffect(() => { if (hasSms) setChannel("sms"); else if (hasWhatsapp) setChannel("whatsapp"); }, [hasSms, hasWhatsapp]);
@@ -330,29 +336,39 @@ function KotScreen() {
     }
     setIsUnlocking(true);
     try {
-      if (selectedKotTerminalId) {
-        try {
-          const res = await apiFetch(`/api/public/kot-terminals/login/`, {
-            method: "POST",
-            body: JSON.stringify({
-              terminal_id: selectedKotTerminalId,
-              username: kotUsername.trim(),
-              pin: pin.trim(),
-              branch_id: branch.id,
-            })
-          });
-          if (res.session_token) {
-            setScreen("form");
-            setPin("");
-            toast.success(`Unlocked ${res.terminal_identifier || "KOT Screen"}!`);
-            return;
+      const uNorm = kotUsername.trim().toLowerCase();
+      const matchedTerm = kotTerminalsList.find(
+        (t: any) =>
+          (t.username && t.username.toLowerCase() === uNorm) ||
+          (t.terminal_identifier && t.terminal_identifier.toLowerCase().replace(/\s+/g, "-") === uNorm) ||
+          (t.terminal_identifier && t.terminal_identifier.toLowerCase() === uNorm)
+      );
+      const terminalIdToUse = matchedTerm ? String(matchedTerm.id) : (selectedKotTerminalId || (kotTerminalsList[0] ? String(kotTerminalsList[0].id) : undefined));
+
+      try {
+        const res = await apiFetch(`/api/public/kot-terminals/login/`, {
+          method: "POST",
+          body: JSON.stringify({
+            terminal_id: terminalIdToUse,
+            username: kotUsername.trim(),
+            pin: pin.trim(),
+            branch_id: branch.id,
+          })
+        });
+        if (res.session_token) {
+          if (res.terminal_id || terminalIdToUse) {
+            setSelectedKotTerminalId(String(res.terminal_id || terminalIdToUse));
           }
-        } catch (loginErr: any) {
-          console.warn("KOT terminal login failed:", loginErr);
-          setPinError(loginErr.message || "Invalid Username or PIN.");
+          setScreen("form");
           setPin("");
+          toast.success(`Unlocked ${res.terminal_identifier || "KOT Screen"}!`);
           return;
         }
+      } catch (loginErr: any) {
+        console.warn("KOT terminal login failed:", loginErr);
+        setPinError(loginErr.message || "Invalid Username or PIN.");
+        setPin("");
+        return;
       }
       const res = await apiFetch(`/api/branches/${branch.id}/verify-kiosk-password/`, { method: "POST", body: JSON.stringify({ password: pin }) });
       if (res.verified) { setScreen("form"); setPin(""); toast.success("KOT screen unlocked!"); }
@@ -543,7 +559,12 @@ function KotScreen() {
                   <p className="text-sm text-muted-foreground leading-relaxed">Enter Username & PIN to unlock <strong className="text-foreground">SMS / WhatsApp</strong> digital token check-in for <strong className="text-foreground">{branch.name}</strong>.</p>
                 </div>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} className="space-y-4">
+              <form onSubmit={(e) => { e.preventDefault(); handleUnlock(); }} autoComplete="off" className="space-y-4">
+                {/* Anti-autofill decoy inputs */}
+                <div style={{ position: "absolute", opacity: 0, height: 0, width: 0, zIndex: -1, overflow: "hidden" }}>
+                  <input type="text" name="kot_decoy_user" tabIndex={-1} autoComplete="off" />
+                  <input type="password" name="kot_decoy_pwd" tabIndex={-1} autoComplete="off" />
+                </div>
                 {(() => {
                   const activeKotTerminal = kotTerminalsList.find((t) => String(t.id) === String(selectedKotTerminalId)) || (kotTerminalsList.length > 0 ? kotTerminalsList[0] : null);
                   return activeKotTerminal ? (
@@ -564,12 +585,19 @@ function KotScreen() {
                 <div className="space-y-1.5 text-left">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Terminal Username</Label>
                   <Input
-                    type="text"
-                    autoComplete="off"
+                    type="search"
+                    readOnly={isUsernameReadOnly}
+                    onFocus={() => setIsUsernameReadOnly(false)}
+                    onClick={() => setIsUsernameReadOnly(false)}
+                    onTouchStart={() => setIsUsernameReadOnly(false)}
+                    name="kot_terminal_auth_search"
+                    id="kot_terminal_auth_search"
+                    autoComplete="one-time-code"
                     autoCorrect="off"
                     autoCapitalize="none"
                     spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
                     data-form-type="other"
                     value={kotUsername}
                     onChange={(e) => {
@@ -578,7 +606,7 @@ function KotScreen() {
                     }}
                     placeholder="e.g. kot-1"
                     required
-                    className="h-11 rounded-xl text-xs font-mono font-bold bg-white/80 dark:bg-slate-900/80 border-border/60"
+                    className="h-11 rounded-xl text-xs font-mono font-bold bg-white/80 dark:bg-slate-900/80 border-border/60 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                   />
                 </div>
 

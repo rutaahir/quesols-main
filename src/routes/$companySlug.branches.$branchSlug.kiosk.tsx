@@ -717,21 +717,34 @@ function Kiosk() {
                     setInitPinError("Please enter your 4-digit PIN.");
                     return;
                   }
+                  const uNorm = initUsername.trim().toLowerCase();
+                  const matchedKiosk = kiosksList.find(
+                    (k: any) =>
+                      (k.username && k.username.toLowerCase() === uNorm) ||
+                      (k.kiosk_identifier && k.kiosk_identifier.toLowerCase().replace(/\s+/g, "-") === uNorm) ||
+                      (k.kiosk_identifier && k.kiosk_identifier.toLowerCase() === uNorm)
+                  );
+                  const kioskIdToUse = matchedKiosk ? String(matchedKiosk.id) : (selectedKioskId || undefined);
+
                   try {
                     const res = await apiFetch("/api/public/kiosks/login/", {
                       method: "POST",
                       body: JSON.stringify({
-                        kiosk_id: selectedKioskId,
+                        kiosk_id: kioskIdToUse,
                         username: initUsername.trim(),
                         pin: initPin.trim(),
                         branch_id: branch.id,
                       })
                     });
+                    const finalId = String(res.kiosk_id || kioskIdToUse || "");
+                    if (finalId) {
+                      setSelectedKioskId(finalId);
+                    }
                     setSessionToken(res.session_token);
                     setIsDeviceUnlocked(true);
                     setIsEvicted(false);
                     setInitPin("");
-                    toast.success(`${res.kiosk_identifier} unlocked successfully!`);
+                    toast.success(`${res.kiosk_identifier || "Kiosk"} unlocked successfully!`);
                   } catch (err: any) {
                     setInitPinError(err.message || "Invalid Username or PIN.");
                     setInitPin("");
@@ -1166,17 +1179,12 @@ function KioskLockScreen({
             Session evicted: this kiosk was opened on another screen or its PIN was regenerated.
           </div>
         )}
-        {kiosksList.length > 0 ? (
-          <div className="space-y-1.5">
-            <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Kiosk Terminal</Label>
-            <div className="w-full h-11 px-4 flex items-center justify-between rounded-xl border border-border/50 bg-background dark:bg-slate-900/60 font-semibold text-sm">
-              <span className="truncate">{selectedKiosk?.kiosk_identifier || "None"}</span>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400 shrink-0">
-                KSK
-              </span>
-            </div>
-          </div>
-        ) : (
+        {/* Anti-autofill decoy inputs */}
+        <div style={{ position: "absolute", opacity: 0, height: 0, width: 0, zIndex: -1, overflow: "hidden" }}>
+          <input type="text" name="kiosk_decoy_user" tabIndex={-1} autoComplete="off" />
+          <input type="password" name="kiosk_decoy_pwd" tabIndex={-1} autoComplete="off" />
+        </div>
+        {kiosksList.length === 0 && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 font-semibold text-center">
             No kiosks provisioned for this branch. Allocate kiosk screens in your subscription config.
           </div>

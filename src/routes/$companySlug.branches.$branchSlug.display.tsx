@@ -292,10 +292,6 @@ function DisplayBoardScreen() {
   // Passcode Authentication Submission (Unlock)
   const handleUnlockSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!selectedTerminalId) {
-      setPasscodeError("Please select a display terminal.");
-      return;
-    }
     if (!displayUsername.trim()) {
       setPasscodeError("Terminal username is required.");
       return;
@@ -305,6 +301,15 @@ function DisplayBoardScreen() {
       return;
     }
 
+    const uNorm = displayUsername.trim().toLowerCase();
+    const matchedTerm = terminalsList.find(
+      (t) =>
+        (t.username && t.username.toLowerCase() === uNorm) ||
+        (t.terminal_identifier && t.terminal_identifier.toLowerCase().replace(/\s+/g, "-") === uNorm) ||
+        (t.terminal_identifier && t.terminal_identifier.toLowerCase() === uNorm)
+    );
+    const terminalIdToUse = matchedTerm ? String(matchedTerm.id) : (selectedTerminalId || (terminalsList[0] ? String(terminalsList[0].id) : ""));
+
     setIsSubmittingPasscode(true);
     setPasscodeError(null);
 
@@ -313,7 +318,7 @@ function DisplayBoardScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          terminal_id: selectedTerminalId,
+          terminal_id: terminalIdToUse || undefined,
           username: displayUsername.trim(),
           passcode: passcode.trim(),
           branch_id: branchId,
@@ -326,15 +331,20 @@ function DisplayBoardScreen() {
         return;
       }
 
+      const finalTermId = String(data.terminal_id || terminalIdToUse || selectedTerminalId);
+      if (finalTermId) {
+        setSelectedTerminalId(finalTermId);
+      }
       const newToken = data.session_token;
       setSessionToken(newToken);
       setIsUnlocked(true);
       setEvictionReason(null);
 
       // Save terminal-scoped unlock & token
-      if (branchId && selectedTerminalId) {
-        localStorage.setItem(`display_unlocked_${branchId}_${selectedTerminalId}`, "true");
-        localStorage.setItem(`display_session_token_${branchId}_${selectedTerminalId}`, newToken);
+      if (branchId && finalTermId) {
+        localStorage.setItem(`display_selected_id_${branchId}`, finalTermId);
+        localStorage.setItem(`display_unlocked_${branchId}_${finalTermId}`, "true");
+        localStorage.setItem(`display_session_token_${branchId}_${finalTermId}`, newToken);
       }
     } catch (err: any) {
       setPasscodeError("Failed to connect to authentication server.");
@@ -650,7 +660,7 @@ function DisplayBoardScreen() {
             </div>
             <h1 className="text-xl font-extrabold tracking-tight">Display Terminal Locked</h1>
             <p className="text-xs text-white/50">
-              Select a display terminal and enter its 4-digit passcode to unlock.
+              Enter the terminal username and 4-digit passcode to unlock.
             </p>
           </div>
 
@@ -670,24 +680,11 @@ function DisplayBoardScreen() {
               }
             }}
           >
-            {terminalsList.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
-                  Select Display Terminal
-                </label>
-                <select
-                  value={selectedTerminalId}
-                  onChange={(e) => handleSelectTerminal(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-slate-800 border border-white/10 px-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  {terminalsList.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.terminal_identifier} ({t.status})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+          {/* Anti-autofill decoy inputs */}
+          <div style={{ position: "absolute", opacity: 0, height: 0, width: 0, zIndex: -1, overflow: "hidden" }}>
+            <input type="text" name="display_decoy_user" tabIndex={-1} autoComplete="off" />
+            <input type="password" name="display_decoy_pwd" tabIndex={-1} autoComplete="off" />
+          </div>
 
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-white/50">
